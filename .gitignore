@@ -1,1 +1,7 @@
 /target
+/logs/
+/tmp/
+
+# 論文・資料などローカル参照用（README のみリポジトリに残す）
+/doc/knowledge/*
+!/doc/knowledge/README.md

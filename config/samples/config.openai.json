@@ -1,0 +1,19 @@
+{
+  "llm": {
+    "provider": "openai",
+    "api_key": null,
+    "base_url": "https://api.openai.com/v1",
+    "model": "gpt-4o-mini",
+    "timeout_secs": 120,
+    "json_mode": true
+  },
+  "react": {
+    "max_steps": 16,
+    "verbose": false,
+    "show_context_metrics": true,
+    "session_max_turns": 8
+  },
+  "log": {
+    "context_metrics": "logs/context.jsonl"
+  }
+}

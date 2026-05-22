@@ -1,6 +1,14 @@
 [package]
-name = "myharness"
+name = "harness-seed"
 version = "0.1.0"
 edition = "2024"
+description = "Embeddable ReAct harness — context, tools, and pluggable LLM brains (not another chat UI)"
+autobins = true
+autoexamples = false
+autotests = true
+autobenches = true
 
 [dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

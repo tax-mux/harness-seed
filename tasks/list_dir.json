@@ -1,0 +1,16 @@
+{
+  "id": "list_dir",
+  "summary": "ワークスペース内のディレクトリ一覧を取得する",
+  "default_params": {
+    "path": "."
+  },
+  "done_when": "list_dir の結果が observation にある",
+  "steps": [
+    {
+      "order": 1,
+      "method": "list_dir",
+      "args": { "path": "{path}" },
+      "required": true
+    }
+  ]
+}

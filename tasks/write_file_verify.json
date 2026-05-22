@@ -1,0 +1,23 @@
+{
+  "id": "write_file_verify",
+  "summary": "ファイルを書き込み、read_file で内容を確認する",
+  "default_params": {
+    "path": "tmp/out.txt",
+    "content": ""
+  },
+  "done_when": "write と read の両方が observation にある",
+  "steps": [
+    {
+      "order": 1,
+      "method": "write_file",
+      "args": { "path": "{path}", "content": "{content}" },
+      "required": true
+    },
+    {
+      "order": 2,
+      "method": "read_file",
+      "args": { "path": "{path}" },
+      "required": true
+    }
+  ]
+}

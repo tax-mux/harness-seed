@@ -1,0 +1,19 @@
+{
+  "llm": {
+    "provider": "gemini",
+    "api_key": null,
+    "base_url": "https://generativelanguage.googleapis.com/v1beta",
+    "model": "gemini-2.5-flash",
+    "timeout_secs": 120,
+    "json_mode": false
+  },
+  "react": {
+    "max_steps": 16,
+    "verbose": false,
+    "show_context_metrics": true,
+    "session_max_turns": 8
+  },
+  "log": {
+    "context_metrics": "logs/context.jsonl"
+  }
+}
