@@ -36,6 +36,8 @@ harness-seed/
 |----------|------|
 | [doc/agent-minimum-action-unit.md](doc/agent-minimum-action-unit.md) | AIエージェントの最少行動単位（図解） |
 | [doc/react-implementation.md](doc/react-implementation.md) | 現行 ReAct 実装の構成・フロー・制限 |
+| [doc/scout-phase.md](doc/scout-phase.md) | 計画前スカウト（調査・充足評価） |
+| [doc/advance-loop.md](doc/advance-loop.md) | 外側推進ループ（ロングコンテキスト分割） |
 | [doc/wire-protocol.md](doc/wire-protocol.md) | JSON Lines ワイヤプロトコル（`--json`） |
 | [doc/builtin_tools/README.md](doc/builtin_tools/README.md) | 組み込みツール仕様（1 ツール 1 ファイル） |
 | [doc/context-memory-mapping.md](doc/context-memory-mapping.md) | コンテキストの用途別マッピング（図解） |

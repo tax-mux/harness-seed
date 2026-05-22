@@ -15,14 +15,32 @@
     "show_tool_output": true,
     "session_max_turns": 8,
     "two_phase": true,
-    "max_steps_plan": 4
+    "max_steps_plan": 4,
+    "scout": {
+      "enabled": true,
+      "max_steps": 6,
+      "skip_trivial": true,
+      "max_note_chars": 2000,
+      "show_scout": true
+    },
+    "advance": {
+      "enabled": true,
+      "max_phases": 8,
+      "clear_session_each_phase": true,
+      "max_note_chars": 1500,
+      "show_phases": true
+    }
   },
   "log": {
     "context_metrics": "logs/context.jsonl"
   },
   "tools": {
+    "packs": {
+      "basic": true,
+      "coding": true
+    },
     "brave_search": {
-      "api_key": "BSAyKx-g3rTSPtPC_tgjSpvko8HrM6P",
+      "api_key": null,
       "max_results": 5,
       "fetch_content": false,
       "max_content_chars": 2048

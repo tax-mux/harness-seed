@@ -43,11 +43,13 @@ fn main() -> ExitCode {
     }
     eprintln!("brain: {}", brains.label());
     eprintln!(
-        "react: max_steps={} max_steps_plan={} session_max_turns={} two_phase={} show_tool_output={}",
+        "react: max_steps={} max_steps_plan={} session_max_turns={} two_phase={} scout={} advance={} show_tool_output={}",
         react_config.max_steps,
         react_config.max_steps_plan,
         react_config.session_max_turns,
         react_config.two_phase,
+        react_config.scout.enabled,
+        react_config.advance.enabled,
         react_config.show_tool_output
     );
     if let Some(path) = &react_config.context_log_path {
@@ -66,6 +68,15 @@ fn main() -> ExitCode {
     }
 
     let brave_search = app.resolved_brave_search();
+    let tool_packs = app.resolved_tool_packs();
+    eprintln!(
+        "tools: packs={}",
+        tool_packs
+            .iter()
+            .map(|p| p.id())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
     if brave_search.is_some() {
         eprintln!("tools: web_search (Brave Search API)");
     }
@@ -76,6 +87,7 @@ fn main() -> ExitCode {
         blocks,
         harness_seed::TaskRegistry::load_default(),
         brave_search,
+        &tool_packs,
     );
     eprintln!("runtime: {}", react.blocks.runtime.summary_line());
 
@@ -137,6 +149,7 @@ Options:
   react.max_steps         1ターンの最大ステップ
   react.session_max_turns REPL 短期記憶（Previous turns）の保持数
   react.two_phase         計画層 → 実行層の直列（既定: false）
+  react.advance.enabled   推進ループ（既定: false、true で two_phase より優先）
   react.max_steps_plan    計画層 ReAct の最大ステップ（既定: 4）
   react.verbose           詳細ログ
   react.show_prompt       各ステップのプロンプト全文（stderr）

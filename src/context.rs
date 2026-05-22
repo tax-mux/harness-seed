@@ -9,9 +9,7 @@ use crate::action::TurnTrace;
 use crate::context_metrics::format_messages_body;
 use crate::llm::ChatMessage;
 use crate::session::SessionMemory;
-use crate::tool::tools_catalog;
-
-/// ReAct ループ用の固定 system 指示（ツール一覧は [`format_tool_catalog`] で付与）。
+/// ReAct ループ用の固定 system 指示（ツール一覧は [`PromptBlocks::tool_catalog`] で付与）。
 pub const REACT_SYSTEM_CORE: &str = r#"You are an agent in a ReAct loop. Reply with ONE JSON object only (no markdown).
 
 Schema:
@@ -51,6 +49,8 @@ pub struct PromptBlocks {
     pub runtime: crate::runtime::RuntimeEnvironment,
     /// `tools.brave_search` が有効なとき true — [`REACT_WEB_SEARCH_GUIDANCE`] を system に載せる。
     pub web_search_enabled: bool,
+    /// 登録済みツールの `Tool catalog` ブロック（[`ToolRuntime::catalog`] から設定）。
+    pub tool_catalog: String,
 }
 
 impl Default for PromptBlocks {
@@ -61,6 +61,9 @@ impl Default for PromptBlocks {
             system_extra: String::new(),
             runtime: crate::runtime::RuntimeEnvironment::detect(),
             web_search_enabled: false,
+            tool_catalog: crate::tool::format_tool_catalog(&crate::tool::full_builtin_registry(
+                false,
+            )),
         }
     }
 }
@@ -173,7 +176,12 @@ impl<'a> TurnPromptContext<'a> {
     fn system_content(&self) -> String {
         let mut out = String::from(REACT_SYSTEM_CORE);
         out.push('\n');
-        out.push_str(&format_tool_catalog());
+        if !self.blocks.tool_catalog.is_empty() {
+            out.push_str(&self.blocks.tool_catalog);
+            if !self.blocks.tool_catalog.ends_with('\n') {
+                out.push('\n');
+            }
+        }
         if self.blocks.web_search_enabled {
             out.push_str(REACT_WEB_SEARCH_GUIDANCE);
         }
@@ -211,14 +219,6 @@ impl<'a> TurnPromptContext<'a> {
             self.user_input
         )
     }
-}
-
-pub fn format_tool_catalog() -> String {
-    let mut catalog = String::from("Tool catalog:\n");
-    for (name, spec) in tools_catalog() {
-        catalog.push_str(&format!("- {name}: {spec}\n"));
-    }
-    catalog
 }
 
 /// ループ 1 ステップ分のプロンプト本文を stderr に出す（`react.show_prompt`）。
