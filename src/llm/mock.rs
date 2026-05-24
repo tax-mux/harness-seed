@@ -30,8 +30,8 @@ impl LlmConnector for MockLlmConnector {
             } else {
                 r#"{"step":"thought","content":"mock plan thought"}"#
             }
-        } else if last_user.contains("Current subtask:") {
-            let id = if last_user.contains("Current subtask: 2") {
+        } else if last_user.contains("## Subtask") {
+            let id = if last_user.contains("\nid: 2\n") || last_user.contains("id: 2\n") {
                 "2"
             } else {
                 "1"

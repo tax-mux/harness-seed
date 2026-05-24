@@ -58,8 +58,21 @@ impl ToolRegistry {
 
     /// LLM system に載せる `Tool catalog` ブロック全文。
     pub fn format_catalog(&self) -> String {
+        self.format_catalog_filtered(None)
+    }
+
+    /// `policy` があれば allow のみ載せる（`None` は全ツール）。
+    pub fn format_catalog_filtered(
+        &self,
+        policy: Option<&crate::tasks::SubtaskToolPolicy>,
+    ) -> String {
         let mut out = String::from("Tool catalog:\n");
         for name in self.names() {
+            if let Some(p) = policy {
+                if !p.is_allowed(&name) {
+                    continue;
+                }
+            }
             if let Some(tool) = self.tools.get(&name) {
                 out.push_str(&format!("- {}: {}\n", tool.name(), tool.spec()));
             }

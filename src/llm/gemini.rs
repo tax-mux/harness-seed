@@ -18,6 +18,35 @@ pub fn normalize_gemini_base_url(host: &str) -> String {
     }
 }
 
+/// Gemini 向けに解決する base URL（LM Studio / Ollama 用 URL の誤設定を無視）。
+pub fn resolve_gemini_base_url(configured: Option<&str>, env_gemini_base: Option<String>) -> String {
+    if let Some(u) = env_gemini_base.filter(|s| !s.trim().is_empty()) {
+        return normalize_gemini_base_url(&u);
+    }
+    if let Some(u) = configured.filter(|s| !s.trim().is_empty()) {
+        if is_plausible_gemini_base_url(u) {
+            return normalize_gemini_base_url(u);
+        }
+    }
+    normalize_gemini_base_url("")
+}
+
+fn is_plausible_gemini_base_url(url: &str) -> bool {
+    let lower = url.to_lowercase();
+    if lower.contains("generativelanguage.googleapis.com") || lower.contains("googleapis.com") {
+        return true;
+    }
+    // LM Studio / Ollama / ローカル OpenAI 互換は Gemini では使わない
+    if lower.contains("127.0.0.1")
+        || lower.contains("localhost")
+        || lower.contains(":1234")
+        || lower.contains(":11434")
+    {
+        return false;
+    }
+    !lower.contains("/v1/chat")
+}
+
 /// Gemini API コネクタ（`v1beta/models/{model}:generateContent`）。
 #[derive(Debug)]
 pub struct GeminiConnector {
@@ -162,6 +191,15 @@ impl LlmConnector for GeminiConnector {
             });
         }
 
+        if let Ok(err) = serde_json::from_str::<serde_json::Value>(&text) {
+            if let Some(msg) = err.get("error").and_then(|e| e.as_str()).or_else(|| {
+                err.pointer("/error/message")
+                    .and_then(|m| m.as_str())
+            }) {
+                return Err(ConnectorError::InvalidResponse(msg.to_string()));
+            }
+        }
+
         let parsed: GenerateContentResponse = serde_json::from_str(&text)
             .map_err(|e| ConnectorError::InvalidResponse(format!("{e}; body={text}")))?;
 
@@ -194,6 +232,24 @@ mod tests {
             normalize_gemini_base_url(""),
             DEFAULT_GEMINI_BASE
         );
+    }
+
+    #[test]
+    fn resolve_ignores_lmstudio_base_url() {
+        let url = resolve_gemini_base_url(
+            Some("http://127.0.0.1:1234"),
+            None,
+        );
+        assert_eq!(url, DEFAULT_GEMINI_BASE);
+    }
+
+    #[test]
+    fn resolve_honors_gemini_env_base() {
+        let url = resolve_gemini_base_url(
+            Some("http://127.0.0.1:1234"),
+            Some("https://generativelanguage.googleapis.com/v1beta".into()),
+        );
+        assert_eq!(url, "https://generativelanguage.googleapis.com/v1beta");
     }
 
     #[test]

@@ -25,6 +25,7 @@ PlanArtifact schema (inside answer content):
 }
 
 Rules:
+- Prefer emitting `answer` with the PlanArtifact JSON when the plan is clear; use `thought` only for brief decomposition if needed.
 - Do NOT emit action / tools in the plan layer.
 - Prefer registered task ids from the task catalog (with params).
 - Use skip_execution: true only for trivial chat/help with no tool work.

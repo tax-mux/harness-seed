@@ -24,6 +24,10 @@ use crate::session::SessionMemory;
 use crate::tasks::TaskRegistry;
 use crate::brave_search::BraveSearchConfig;
 use crate::tool::{ToolPack, ToolRuntime};
+use crate::turn_observer::{emit_plan_artifact, TurnObserver};
+
+/// サブタスク監査失敗時の再実行上限（契約ありタスクのみ）。
+const SUBTASK_AUDIT_MAX_ATTEMPTS: usize = 2;
 
 /// ReAct ループの設定。
 #[derive(Debug, Clone)]
@@ -135,6 +139,8 @@ pub struct ReActLoop<E: AgentBrain> {
     pub blocks: PromptBlocks,
     /// 機能塊タスク定義（`tasks/*.json`）。
     pub task_registry: TaskRegistry,
+    /// 各 LLM ステップ・ツール観測の通知（GUI 向け）。
+    pub turn_observer: Option<TurnObserver>,
 }
 
 impl<E: AgentBrain> ReActLoop<E> {
@@ -183,6 +189,7 @@ impl<E: AgentBrain> ReActLoop<E> {
             session,
             blocks,
             task_registry,
+            turn_observer: None,
         }
     }
 
@@ -195,8 +202,24 @@ impl<E: AgentBrain> ReActLoop<E> {
         self.config.verbose = verbose;
     }
 
+    /// ホストアプリから in-process ツールを追加し、プロンプト用カタログを更新する。
+    pub fn register_plugin(&mut self, tool: Box<dyn crate::tool::Tool>) {
+        self.tools.register_plugin(tool);
+        self.refresh_tool_catalog();
+    }
+
+    pub fn refresh_tool_catalog(&mut self) {
+        self.blocks.tool_catalog = self.tools.catalog();
+        self.blocks.web_search_enabled = self.tools.has_tool("web_search");
+    }
+
+    fn notify_plan_artifact(&self, plan: &PlanArtifact) {
+        let display = format_plan_for_display(plan, &self.task_registry);
+        emit_plan_artifact(self.turn_observer.as_ref(), "plan", plan, &display);
+    }
+
     pub fn run_turn(&mut self, user_input: &str) -> Result<TurnResult, ReActError> {
-        let (scout, scout_steps) = self.maybe_run_scout(user_input)?;
+        let (scout, scout_trace, scout_steps) = self.maybe_run_scout(user_input)?;
         let mut result = if self.config.advance.enabled {
             self.run_turn_advance(user_input)?
         } else if self.config.two_phase {
@@ -206,22 +229,22 @@ impl<E: AgentBrain> ReActLoop<E> {
         };
         result.scout = scout;
         result.steps_used += scout_steps;
-        Ok(result)
+        Ok(self.finalize_turn_result(result, scout_trace))
     }
 
     /// 計画前スカウト。`recalled` に調査メモを載せる（ホスト注入分は保持）。
     fn maybe_run_scout(
         &mut self,
         user_input: &str,
-    ) -> Result<(Option<ResearchArtifact>, usize), ReActError> {
+    ) -> Result<(Option<ResearchArtifact>, Option<TurnTrace>, usize), ReActError> {
         if !self.config.scout.enabled {
-            return Ok((None, 0));
+            return Ok((None, None, 0));
         }
         if self.config.scout.skip_trivial && is_trivial_scout_skip(user_input) {
             if self.config.verbose {
                 eprintln!("[scout] skipped (trivial input)");
             }
-            return Ok((None, 0));
+            return Ok((None, None, 0));
         }
 
         let base_recalled = self.blocks.recalled.clone();
@@ -229,7 +252,7 @@ impl<E: AgentBrain> ReActLoop<E> {
             eprintln!("[scout] gathering context before plan");
         }
 
-        let (artifact, steps) = run_scout_phase(
+        let (artifact, trace, steps) = run_scout_phase(
             &mut self.exec_brain,
             &mut self.tools,
             &mut self.blocks,
@@ -239,6 +262,7 @@ impl<E: AgentBrain> ReActLoop<E> {
             self.config.verbose,
             self.config.show_prompt,
             self.config.show_tool_output,
+            self.turn_observer.as_ref(),
         )?;
 
         apply_scout_recalled(
@@ -272,7 +296,17 @@ impl<E: AgentBrain> ReActLoop<E> {
             );
         }
 
-        Ok((Some(artifact), steps))
+        Ok((Some(artifact), Some(trace), steps))
+    }
+
+    fn finalize_turn_result(&self, mut result: TurnResult, scout_trace: Option<TurnTrace>) -> TurnResult {
+        if let Some(scout) = scout_trace {
+            let mut merged = scout;
+            append_trace(&mut merged, &result.trace);
+            result.trace = merged;
+        }
+        result.context = TurnContextSummary::from_usages(&result.trace.context_usages);
+        result
     }
 
     /// 計画層 → フェーズ逐次実行。各フェーズ前に `recalled` へ進捗を載せ、必要なら session をクリア。
@@ -283,7 +317,7 @@ impl<E: AgentBrain> ReActLoop<E> {
         if self.config.verbose {
             eprintln!("[advance] planning for: {user_input}");
         }
-        let (mut plan, plan_steps) = run_plan_layer(
+        let (mut plan, plan_trace, plan_steps) = run_plan_layer(
             &mut self.plan_brain,
             &mut self.tools,
             &self.blocks,
@@ -293,8 +327,10 @@ impl<E: AgentBrain> ReActLoop<E> {
             self.config.verbose,
             self.config.show_prompt,
             self.config.show_tool_output,
+            self.turn_observer.as_ref(),
         )?;
-        self.task_registry.resolve_plan(&mut plan);
+        self.task_registry.resolve_plan(&mut plan, user_input);
+        self.notify_plan_artifact(&plan);
         if self.config.show_plan {
             println!("{}", format_plan_for_display(&plan, &self.task_registry));
         }
@@ -303,6 +339,9 @@ impl<E: AgentBrain> ReActLoop<E> {
             restore_base_recalled(&mut self.blocks, &base_recalled);
             let mut result =
                 self.run_turn_single(user_input, true, Some(plan), vec![])?;
+            append_trace(&mut result.trace, &plan_trace);
+            result.context = TurnContextSummary::from_usages(&result.trace.context_usages);
+            result.steps_used += plan_steps;
             result.advance_phases.clear();
             return Ok(result);
         }
@@ -312,7 +351,7 @@ impl<E: AgentBrain> ReActLoop<E> {
         let mut plan_progress = PlanProgress::default();
         let mut subtask_results = Vec::new();
         let mut advance_phases = Vec::new();
-        let mut combined_trace = TurnTrace::default();
+        let mut combined_trace = plan_trace;
         let mut total_steps = plan_steps;
         let mut final_answer = String::new();
 
@@ -346,7 +385,7 @@ impl<E: AgentBrain> ReActLoop<E> {
             }
 
             let (exec, used_driver) =
-                self.run_subtask_exec(user_input, &plan, subtask, &plan_progress)?;
+                self.run_subtask_exec_audited(user_input, &plan, subtask, &plan_progress)?;
 
             if self.config.show_task_execution {
                 let mode = if used_driver { "step-driver" } else { "ReAct" };
@@ -396,7 +435,7 @@ impl<E: AgentBrain> ReActLoop<E> {
         if self.config.verbose {
             eprintln!("[plan] layer loop for: {user_input}");
         }
-        let (mut plan, plan_steps) = run_plan_layer(
+        let (mut plan, plan_trace, plan_steps) = run_plan_layer(
             &mut self.plan_brain,
             &mut self.tools,
             &self.blocks,
@@ -406,8 +445,10 @@ impl<E: AgentBrain> ReActLoop<E> {
             self.config.verbose,
             self.config.show_prompt,
             self.config.show_tool_output,
+            self.turn_observer.as_ref(),
         )?;
-        self.task_registry.resolve_plan(&mut plan);
+        self.task_registry.resolve_plan(&mut plan, user_input);
+        self.notify_plan_artifact(&plan);
         if self.config.show_plan {
             println!("{}", format_plan_for_display(&plan, &self.task_registry));
         }
@@ -423,6 +464,9 @@ impl<E: AgentBrain> ReActLoop<E> {
         if !plan.needs_execution() {
             let mut result =
                 self.run_turn_single(user_input, true, Some(plan.clone()), vec![])?;
+            append_trace(&mut result.trace, &plan_trace);
+            result.context = TurnContextSummary::from_usages(&result.trace.context_usages);
+            result.steps_used += plan_steps;
             result.advance_phases.clear();
             return Ok(result);
         }
@@ -431,7 +475,7 @@ impl<E: AgentBrain> ReActLoop<E> {
         let mut subtask_results = Vec::new();
         let mut total_steps = plan_steps;
         let mut final_answer = String::new();
-        let mut combined_trace = TurnTrace::default();
+        let mut combined_trace = plan_trace;
 
         for subtask in &plan.subtasks {
             if self.config.show_task_execution {
@@ -445,7 +489,8 @@ impl<E: AgentBrain> ReActLoop<E> {
             if self.config.verbose {
                 eprintln!("[exec] subtask {}: {}", subtask.id, subtask.goal);
             }
-            let (exec, used_driver) = self.run_subtask_exec(user_input, &plan, subtask, &progress)?;
+            let (exec, used_driver) =
+                self.run_subtask_exec_audited(user_input, &plan, subtask, &progress)?;
             if self.config.show_task_execution {
                 let mode = if used_driver { "step-driver" } else { "ReAct" };
                 println!(
@@ -463,14 +508,6 @@ impl<E: AgentBrain> ReActLoop<E> {
             });
             final_answer = exec.answer;
             append_trace(&mut combined_trace, &exec.trace);
-            if self.config.verbose {
-                if let Some(audit) = self.task_registry.audit_subtask(subtask, &exec.trace) {
-                    eprintln!(
-                        "[tasks] subtask {} audit: complete={} — {}",
-                        subtask.id, audit.complete, audit.message
-                    );
-                }
-            }
         }
 
         let result = TurnResult {
@@ -485,6 +522,55 @@ impl<E: AgentBrain> ReActLoop<E> {
         };
         self.finish_turn(user_input, &result);
         Ok(result)
+    }
+
+    /// サブタスク 1 件を実行し、タスク契約の監査で完了を検証する（未達なら同一サブタスクを再実行）。
+    fn run_subtask_exec_audited(
+        &mut self,
+        user_input: &str,
+        plan: &PlanArtifact,
+        subtask: &Subtask,
+        progress: &PlanProgress,
+    ) -> Result<(TurnResult, bool), ReActError> {
+        let mut last: Option<(TurnResult, bool)> = None;
+        let mut audit_msg = String::new();
+
+        for attempt in 1..=SUBTASK_AUDIT_MAX_ATTEMPTS {
+            let (exec, used_driver) = if audit_msg.is_empty() {
+                self.run_subtask_exec(user_input, plan, subtask, progress)?
+            } else {
+                let base =
+                    format_mission(&self.task_registry, user_input, plan, subtask, progress);
+                let mission = format!(
+                    "{base}\n\n## Subtask audit (retry {attempt})\n\
+                     The previous run did NOT satisfy the task execution contract.\n\
+                     {audit_msg}\n\
+                     Call every required tool in order before emitting answer.\n"
+                );
+                let exec = self.run_turn_single(&mission, false, None, vec![])?;
+                (exec, false)
+            };
+
+            let audit = self.task_registry.audit_subtask(subtask, &exec.trace);
+            let complete = audit.as_ref().map(|a| a.complete).unwrap_or(true);
+            if self.config.verbose {
+                if let Some(a) = &audit {
+                    eprintln!(
+                        "[tasks] subtask {} audit (attempt {attempt}): complete={} — {}",
+                        subtask.id, a.complete, a.message
+                    );
+                }
+            }
+            if complete {
+                return Ok((exec, used_driver));
+            }
+            audit_msg = audit
+                .map(|a| a.message)
+                .unwrap_or_else(|| "contract not satisfied".into());
+            last = Some((exec, used_driver));
+        }
+
+        Ok(last.expect("subtask exec attempts"))
     }
 
     /// サブタスク 1 件: 契約ありならステップドライバ、それ以外は実行層 ReAct。
@@ -537,7 +623,18 @@ impl<E: AgentBrain> ReActLoop<E> {
             }
         }
         let mission = format_mission(&self.task_registry, user_input, plan, subtask, progress);
-        let exec = self.run_turn_single(&mission, false, None, vec![])?;
+        let saved_catalog = self.blocks.tool_catalog.clone();
+        let policy = self.task_registry.tool_policy_for_subtask(subtask);
+        if let Some(ref p) = policy {
+            self.blocks.tool_catalog = self.tools.format_catalog_filtered(Some(p));
+            self.tools.set_exec_policy(Some(p.clone()));
+        } else {
+            self.tools.set_exec_policy(None);
+        }
+        let exec_result = self.run_turn_single(&mission, false, None, vec![]);
+        self.blocks.tool_catalog = saved_catalog;
+        self.tools.set_exec_policy(None);
+        let exec = exec_result?;
         Ok((exec, false))
     }
 
@@ -560,6 +657,7 @@ impl<E: AgentBrain> ReActLoop<E> {
             self.config.show_tool_output,
             plan,
             subtask_results,
+            self.turn_observer.as_ref(),
         )?;
         if record_session {
             self.finish_turn(user_input, &result);
@@ -716,7 +814,8 @@ mod tests {
         config.two_phase = true;
         let mut react = ReActLoop::new(SimpleRuleBrain::new(), PlanBrainMode::rule(), config);
         let result = react.run_turn("help").unwrap();
-        assert_eq!(result.steps_used, 1);
+        // 計画層 1 + 実行層 1（ルール頭脳は context_usages なし）
+        assert_eq!(result.steps_used, 2);
         assert!(result.plan.as_ref().unwrap().skip_execution);
         assert!(result.answer.contains("echo"));
     }

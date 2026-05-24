@@ -36,6 +36,27 @@ impl TaskExecutionAudit {
 ///
 /// スケルトン: **ツール名の順序のみ**一致すればよい（引数の完全一致は未実装）。
 pub fn audit_trace(def: &TaskDefinition, _params: &Value, trace: &TurnTrace) -> TaskExecutionAudit {
+    let policy = def.resolved_tool_policy();
+
+    let mut forbidden = Vec::new();
+    for action in &trace.actions {
+        let ok = trace
+            .observations
+            .iter()
+            .find(|o| o.invoke_id == action.invoke_id)
+            .is_some_and(|o| o.ok);
+        if ok && !policy.is_allowed(&action.tool) {
+            forbidden.push(action.tool.clone());
+        }
+    }
+    if !forbidden.is_empty() {
+        return TaskExecutionAudit {
+            complete: false,
+            steps: vec![],
+            message: format!("forbidden tools called: {}", forbidden.join(", ")),
+        };
+    }
+
     let required = def.ordered_required_steps();
     if required.is_empty() {
         return TaskExecutionAudit::ok();
@@ -59,16 +80,15 @@ pub fn audit_trace(def: &TaskDefinition, _params: &Value, trace: &TurnTrace) -> 
 
     for step in required {
         let expected = step.method.as_str();
-        let satisfied = if let Some(next) = tool_iter.peek() {
+        let mut satisfied = false;
+        while let Some(next) = tool_iter.peek() {
             if *next == expected {
                 tool_iter.next();
-                true
-            } else {
-                false
+                satisfied = true;
+                break;
             }
-        } else {
-            false
-        };
+            tool_iter.next();
+        }
         if !satisfied {
             all_ok = false;
         }
@@ -130,6 +150,47 @@ mod tests {
         trace.push_observation(Observation::success(1, "ok"));
         let audit = audit_trace(&def, &json!({}), &trace);
         assert!(audit.complete);
+    }
+
+    #[test]
+    fn audit_fails_on_forbidden_tool() {
+        let def: TaskDefinition = serde_json::from_str(
+            r#"{
+            "id": "ctx",
+            "summary": "ctx",
+            "steps": [{"order": 1, "method": "get_compose_form", "args": {}}],
+            "tool_policy": { "deny": ["set_compose_form"] }
+        }"#,
+        )
+        .unwrap();
+        let mut trace = TurnTrace::default();
+        trace.push_action(Action::new(1, "get_compose_form", json!({})));
+        trace.push_observation(Observation::success(1, "ok"));
+        trace.push_action(Action::new(2, "set_compose_form", json!({"body": "x"})));
+        trace.push_observation(Observation::success(2, "ok"));
+        let audit = audit_trace(&def, &json!({}), &trace);
+        assert!(!audit.complete);
+        assert!(audit.message.contains("forbidden"));
+    }
+
+    #[test]
+    fn audit_passes_when_extra_tools_precede_required() {
+        let def: TaskDefinition = serde_json::from_str(
+            r#"{
+            "id": "compose_write",
+            "summary": "write",
+            "steps": [{"order": 1, "method": "set_compose_form", "args": {}}],
+            "tool_policy": { "allow": ["get_compose_form", "set_compose_form"] }
+        }"#,
+        )
+        .unwrap();
+        let mut trace = TurnTrace::default();
+        trace.push_action(Action::new(1, "get_compose_form", json!({})));
+        trace.push_observation(Observation::success(1, "ok"));
+        trace.push_action(Action::new(2, "set_compose_form", json!({"body": "x"})));
+        trace.push_observation(Observation::success(2, "ok"));
+        let audit = audit_trace(&def, &json!({}), &trace);
+        assert!(audit.complete, "{}", audit.message);
     }
 
     #[test]

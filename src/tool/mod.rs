@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 use crate::action::{Action, Observation};
 use crate::brave_search::BraveSearchConfig;
 use crate::runtime::RuntimeEnvironment;
+use crate::tasks::SubtaskToolPolicy;
 
 pub const HELP_TEXT: &str = "\
 利用可能なコマンド:
@@ -33,6 +34,8 @@ pub struct ToolRuntime {
     next_invoke_id: u64,
     registry: ToolRegistry,
     ctx: ToolContext,
+    /// サブタスク実行中のみ: allow / deny による実行拒否。
+    exec_policy: Option<SubtaskToolPolicy>,
 }
 
 impl Default for ToolRuntime {
@@ -77,6 +80,7 @@ impl ToolRuntime {
             next_invoke_id: 0,
             registry,
             ctx: ToolContext::new(env, brave_search),
+            exec_policy: None,
         }
     }
 
@@ -89,7 +93,20 @@ impl ToolRuntime {
             next_invoke_id: 0,
             registry,
             ctx: ToolContext::new(env, brave_search),
+            exec_policy: None,
         }
+    }
+
+    pub fn set_exec_policy(&mut self, policy: Option<SubtaskToolPolicy>) {
+        self.exec_policy = policy;
+    }
+
+    pub fn exec_policy(&self) -> Option<&SubtaskToolPolicy> {
+        self.exec_policy.as_ref()
+    }
+
+    pub fn format_catalog_filtered(&self, policy: Option<&SubtaskToolPolicy>) -> String {
+        self.registry.format_catalog_filtered(policy)
     }
 
     pub fn set_brave_search(&mut self, brave_search: Option<BraveSearchConfig>) {
@@ -120,13 +137,29 @@ impl ToolRuntime {
         self.registry.register(tool);
     }
 
-    fn next_id(&mut self) -> u64 {
+    /// ループガード等、レジストリを経由しない trace 用の invoke_id を採番する。
+    pub fn allocate_invoke_id(&mut self) -> u64 {
         self.next_invoke_id += 1;
         self.next_invoke_id
     }
 
+    fn next_id(&mut self) -> u64 {
+        self.allocate_invoke_id()
+    }
+
     pub fn execute(&mut self, tool: &str, args: &Value) -> (u64, Observation) {
         let invoke_id = self.next_id();
+        if let Some(policy) = &self.exec_policy {
+            if !policy.is_allowed(tool) {
+                return (
+                    invoke_id,
+                    Observation::failure(
+                        invoke_id,
+                        format!("tool '{tool}' is not allowed in this subtask"),
+                    ),
+                );
+            }
+        }
         let observation = self.registry.execute(tool, invoke_id, args, &self.ctx);
         (invoke_id, observation)
     }

@@ -449,11 +449,10 @@ impl AppConfig {
                     .resolved_gemini_api_key()
                     .ok_or(crate::llm::ConnectorError::MissingApiKey)?;
 
-                let base_url = env_string("GEMINI_BASE_URL")
-                    .or_else(|| env_base_url())
-                    .or(self.llm.base_url.clone())
-                    .map(|u| crate::llm::normalize_gemini_base_url(&u))
-                    .unwrap_or_else(|| crate::llm::normalize_gemini_base_url(""));
+                let base_url = crate::llm::resolve_gemini_base_url(
+                    self.llm.base_url.as_deref(),
+                    env_string("GEMINI_BASE_URL"),
+                );
 
                 let model = env_string("GEMINI_MODEL")
                     .or_else(|| env_model())
