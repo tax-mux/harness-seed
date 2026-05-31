@@ -1,9 +1,13 @@
 //! 計画層（ReAct 派生ループ・ツールなし）→ 実行層（ReAct + ツール）の直列オーケストレーション。
 
 mod brain;
+mod contract;
+mod display;
 mod parse;
 mod parse_step;
+mod prompt;
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::context::PromptBlocks;
@@ -13,25 +17,39 @@ use crate::tasks::TaskRegistry;
 pub use brain::{
     artifact_from_plan_turn, PlanBrainMode, PlanLlmBrain, RulePlanBrain, PLAN_REACT_SYSTEM_CORE,
 };
+pub use contract::{PlanDataContract, PlanReadSource, PlanWriteTarget};
 pub use parse::{parse_plan, PlanParseError};
-pub use parse_step::{parse_plan_agent_step, plan_artifact_from_answer, PlanStepParseError};
+pub use parse_step::{
+    harness_state_from_plan_answer as harness_state_from_plan_turn, parse_plan_agent_step,
+    plan_artifact_from_answer, PlanStepParseError,
+};
+pub use prompt::{
+    build_plan_layer_messages, build_plan_layer_messages_with_catalog, format_plan_fixed_zone_system,
+    format_plan_layer_prompt,
+};
+pub use display::{
+    format_plan_zone_after_preview, format_plan_zone_prompt_preview,
+    format_planner_fixed_zone_html,
+};
 
 /// 計画フェーズ用 system 指示（ツールカタログなし）。
 pub const PLAN_SYSTEM_CORE: &str = r#"You are a planning agent. Reply with ONE JSON object only (no markdown).
 
 Schema:
 {
-  "summary": "<one-line summary of the user request>",
-  "skip_execution": <true if trivial chat/help with no tools needed>,
-  "subtasks": [
+  "input": ["<fixed INPUT contract lines copied from prompt>"],
+  "steps": [
     {"id": 1, "task": "<registered task id>", "params": {}, "goal": "", "done_when": ""},
     {"id": 2, "goal": "<freeform if no task id>", "done_when": "<criterion>"}
-  ]
+  ],
+  "output": "<fixed OUTPUT contract line copied from prompt>",
+  "skip_execution": <true if trivial chat/help with no tools needed>,
 }
 
 Rules:
 - Prefer registered task ids from the task catalog (with params). Each task declares required tool methods and execution order (`steps`).
 - Break non-trivial work into ordered subtasks (1–5 items).
+- Keep `input` and `output` equal to the fixed contract in prompt; only design `steps`.
 - For external / current-events / web-only questions, use task `web_research` with params `{"query":"<search string>"}` when it appears in the catalog.
 - For repo-only coding work, use tasks like `list_dir`, `write_file_verify`, or freeform goals with grep/read_file/write_file/run_cmd.
 - Use skip_execution: true only for pure Q&A, greetings, or help with no filesystem/shell/web work.
@@ -39,7 +57,7 @@ Rules:
 "#;
 
 /// 1 サブタスク（登録タスク参照 or 自由記述）。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Subtask {
     pub id: u32,
     /// `tasks/*.json` の id。`None` のときは `goal` / `done_when` をそのまま使う。
@@ -50,7 +68,7 @@ pub struct Subtask {
 }
 
 /// 計画フェーズの成果物。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlanArtifact {
     pub summary: String,
     pub skip_execution: bool,
@@ -216,7 +234,7 @@ impl<'a> PlanPromptContext<'a> {
             format!("{previous}\n")
         };
         format!(
-            "{previous_block}Plan request:\n{}\n\nOutput plan JSON:",
+            "{previous_block}ゴール:\n{}\n\nOutput plan JSON:",
             self.user_input
         )
     }
@@ -273,42 +291,4 @@ fn format_mission_freeform(
         "\nComplete ONLY this subtask. Do not replan or work ahead to other subtasks.",
     );
     mission
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn format_plan_for_display_lists_subtasks() {
-        let plan = PlanArtifact {
-            summary: "do work".into(),
-            skip_execution: false,
-            subtasks: vec![Subtask {
-                id: 1,
-                task: Some("list_dir".into()),
-                params: json!({ "path": "src" }),
-                goal: String::new(),
-                done_when: "listed".into(),
-            }],
-        };
-        let reg = TaskRegistry::builtin();
-        let text = format_plan_for_display(&plan, &reg);
-        assert!(text.contains("--- Plan ---"));
-        assert!(text.contains("task:list_dir"));
-        assert!(text.contains("done_when: listed"));
-        assert!(text.contains("list_dir("));
-    }
-
-    #[test]
-    fn format_mission_includes_subtask_id() {
-        let plan = PlanArtifact::single_subtask("list files");
-        let st = plan.subtasks[0].clone();
-        let reg = TaskRegistry::builtin();
-        let m = format_mission(&reg, "list files", &plan, &st, &PlanProgress::default());
-        assert!(m.contains("## Subtask"));
-        assert!(m.contains("id: 1"));
-        assert!(!m.contains("All subtasks"));
-        assert!(!m.contains("Plan summary"));
-    }
 }

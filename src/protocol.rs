@@ -259,6 +259,11 @@ fn turn_response_err(session_turns: usize, err: &ReActError) -> WireResponse {
             "max_steps_exceeded",
             format!("ReAct loop exceeded max steps ({limit})"),
         ),
+        ReActError::Cancelled => ("cancelled", "ReAct loop cancelled".to_string()),
+        ReActError::PlanParseFailed { message } => (
+            "plan_parse_failed",
+            format!("Plan parse failed: {message}"),
+        ),
     };
     WireResponse::Turn {
         version: WIRE_VERSION,

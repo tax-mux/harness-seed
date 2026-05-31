@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Planner監視ビュー</title>
+<style>
+:root{color-scheme:light dark;}
+body{font-family:"Segoe UI","Hiragino Kaku Gothic ProN",Meiryo,sans-serif;margin:24px;line-height:1.5;}
+main{max-width:1100px;margin:0 auto;}
+h1{font-size:1.4rem;margin:0 0 8px;}
+.subtitle{margin:0 0 16px;color:#777;font-size:0.92rem;}
+details{margin:0 0 14px;border:1px solid #9996;border-radius:10px;padding:10px 12px;}
+summary{cursor:pointer;font-weight:600;font-size:1rem;}
+details[open]{background:rgba(120,120,120,0.06);}
+details.raw{background:transparent;}
+details.subtask-zone{margin:10px 0 12px;padding:8px 10px;}
+details.subtask-zone > summary{font-size:0.96rem;}
+.mode-line{margin:0 0 10px;font-size:0.92rem;}
+.mode-pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid transparent;font-weight:700;}
+.mode-driver{color:#1f6feb;background:#1f6feb22;border-color:#1f6feb66;}
+.mode-react{color:#2ea043;background:#2ea04322;border-color:#2ea04366;}
+.mode-unknown{color:#9e6a03;background:#9e6a0322;border-color:#9e6a0366;}
+section{margin:0 0 20px;}
+h2{font-size:1rem;margin:0 0 8px;padding-bottom:6px;border-bottom:1px solid #9996;}
+h3{font-size:0.96rem;margin:0 0 8px;}
+pre{margin:0;padding:12px;border:1px solid #9996;border-radius:8px;overflow:auto;white-space:pre-wrap;word-break:break-word;}
+.timeline{margin:0;padding:0;list-style:none;display:grid;gap:10px;}
+.event{border:1px solid #9996;border-radius:8px;padding:10px;background:rgba(120,120,120,0.04);}
+.event-head{display:flex;gap:8px;align-items:center;margin:0 0 6px;}
+.event-no{font-weight:700;color:#888;min-width:32px;}
+.tag{display:inline-block;border:1px solid #9996;border-radius:999px;padding:1px 8px;font-size:0.78rem;}
+.tag-p1{background:#ef9f271f;color:#9e6a03;}
+.tag-p2{background:#f0997b1f;color:#9c4221;}
+.tag-p3{background:#5dcaa51f;color:#0d664f;}
+.event-title{font-weight:600;}
+.event-body{margin:0;font-size:0.92rem;white-space:pre-wrap;word-break:break-word;}
+</style>
+</head>
+<body>
+<main>
+<h1>Planner監視ビュー</h1>
+<p class="subtitle">Phase 1→2→3 を時系列で追えるように並べ替えた表示です。上から読むだけで流れを追跡できます。</p>
+<section>
+<h2>今回の入力と内部状態</h2>
+<pre>最新ユーザープロンプト:
+おお、読めるじゃん
+
+内部状態サマリ（Context）:
+llm_calls=1 prompt: 4731 chars / 1675 tok (api) | completion: 123 chars / 162 tok (api) | total_tokens=1837
+
+今回の動き（Trace）:
+thoughts=0 / actions=0 / observations=0
+
+
+Harness内部状態:
+（なし）</pre>
+</section>
+<details open>
+<summary>時系列トレース（Phase 1 → 2 → 3）</summary>
+<div>
+<section>
+<h2>トレースイベント</h2>
+<ol class="timeline">
+<li class="event">
+<div class="event-head">
+<span class="event-no">#1</span>
+<span class="tag tag-p1">Phase 1</span>
+<span class="event-title">ユーザー指示を受領</span>
+</div>
+<p class="event-body">おお、読めるじゃん</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#2</span>
+<span class="tag tag-p1">Phase 1</span>
+<span class="event-title">Plannerが作業指示書を生成</span>
+</div>
+<p class="event-body">（なし）</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#3</span>
+<span class="tag tag-p2">Phase 2</span>
+<span class="event-title">ミニPlanner</span>
+</div>
+<p class="event-body">Harness内部状態がないためスキップ</p>
+</li>
+</ol>
+</section>
+</div>
+</details>
+<details class="raw">
+<summary>Phase 1 詳細ログ</summary>
+<div>
+<section>
+<h2>Planner指令（システム）</h2>
+<pre>You are a planning agent in a ReAct-style loop. Reply with ONE JSON object only (no markdown).
+
+Schema:
+- {&quot;step&quot;:&quot;thought&quot;,&quot;content&quot;:&quot;&lt;reasoning&gt;&quot;}
+- {&quot;step&quot;:&quot;answer&quot;,&quot;content&quot;:&quot;&lt;作業指示書 — structured plan JSON or numbered text steps&gt;&quot;}
+
+The harness parses your answer into internal JSON (HarnessState). Prefer ONE of:
+- Structured JSON (input / steps / output) as below, OR
+- Numbered work-instruction lines (e.g. &quot;1. ...&quot; / &quot;ステップ1: ...&quot;).
+
+Planning schema (inside answer content when using JSON):
+{
+  &quot;input&quot;: [&quot;&lt;fixed INPUT contract lines copied from prompt&gt;&quot;],
+  &quot;steps&quot;: [
+    {&quot;id&quot;: 1, &quot;task&quot;: &quot;&lt;registered task id&gt;&quot;, &quot;params&quot;: {}, &quot;goal&quot;: &quot;&quot;, &quot;done_when&quot;: &quot;&quot;}
+  ],
+  &quot;output&quot;: &quot;&lt;fixed OUTPUT contract line copied from prompt&gt;&quot;,
+  &quot;skip_execution&quot;: &lt;bool&gt;,
+}
+
+Rules:
+- INPUT and OUTPUT boundaries are fixed before you run. Do NOT change read/write sources or storage targets.
+- Instruction contract: &quot;Take data ONLY from INPUT. Write result ONLY to OUTPUT. Think ONLY about the in-between procedure.&quot;
+- Your job is the PROCEDURE in between: emit ordered `steps` that transform INPUT into OUTPUT.
+- Prefer emitting `answer` with the work instructions (JSON plan or numbered steps) when clear; use `thought` only for brief decomposition if needed.
+- Do NOT emit action / tools in the plan layer.
+- Use only task ids from the task catalog that match the data contract.
+- Use skip_execution: true only when the contract says so (trivial chat).
+- When ready, use step answer with the full work instructions (JSON or text) in content.
+
+
+実行環境:
+OS: windows (x86_64) | Shell: PowerShell (pwsh) | Program: pwsh
+Use PowerShell syntax for run_cmd (e.g. Get-ChildItem, not Unix-only commands unless available in PATH).</pre>
+</section>
+<section>
+<h2>ツール定義</h2>
+<pre>Tool catalog:
+- echo: args: { &quot;message&quot;: &quot;&lt;string&gt;&quot; }
+- grep: args: { &quot;pattern&quot;: &quot;&lt;string&gt;&quot;, &quot;path&quot;: &quot;&lt;optional dir/file, default .&gt;&quot;, &quot;ignore_case&quot;: &lt;bool&gt;, &quot;glob&quot;: &quot;&lt;optional e.g. *.rs&gt;&quot;, &quot;max_results&quot;: &lt;number&gt; }
+- list_dir: args: { &quot;path&quot;: &quot;&lt;optional directory, default .&gt;&quot; }
+- read_file: args: { &quot;path&quot;: &quot;&lt;file path under project&gt;&quot; }
+- run_cmd: args: { &quot;command&quot;: &quot;&lt;shell command&gt;&quot;, &quot;cwd&quot;: &quot;&lt;optional dir&gt;&quot; }
+- time: args: {}
+- write_file: args: { &quot;path&quot;: &quot;&lt;file path&gt;&quot;, &quot;content&quot;: &quot;&lt;full file text&gt;&quot; }</pre>
+</section>
+<section>
+<h2>スキル一覧</h2>
+<pre>Registered tasks for this session (use only task ids listed here):
+- generic: 固定の実行順なし（ReAct がツールを選択） — (free execution — pick tools from catalog above)
+- list_dir: ワークスペース内のディレクトリ一覧を取得する — required: list_dir
+- write_file_verify: ファイルを書き込み、read_file で内容を確認する — required: write_file → read_file</pre>
+</section>
+<section>
+<h2>参照情報</h2>
+<pre>（なし）</pre>
+</section>
+<section>
+<h2>圧縮ゾーン</h2>
+<pre>（なし）</pre>
+</section>
+<section>
+<h2>直近ゾーン</h2>
+<pre>Previous turns:
+[turn 1]
+User: d:\develop\smart-products\harness-seed\doc\full_agent_architecture_v2.svg　を解説して
+Assistant: I have repeatedly attempted to read the SVG file located at `d:\develop\smart-products\harness-seed\doc\full_agent_architecture_v2.svg` using the available tools. However, every attempt failed with the error: &#39;err: absolute path not allowed&#39;.
+
+This confirms that the provided absolute Windows path is outside the scope of files accessible by the current execution environment&#39;s file reading tool.
+
+To successfully complete this task and explain the architecture, you must provide a relative path to the SVG file (i.e., a path starting from within the project workspace directory). Without a valid, accessible file path, I cannot retrieve the content needed for analysis.
+[turn 2]
+User: doc\full_agent_architecture_v2.svg　を解説して
+Assistant: このSVGファイルは、「エージェント全体アーキテクチャ v2」という、高度なAIエージェントの動作フローを視覚化した図です。特に、従来のReActループに「Planner」と「Harness（ハーン）」という内部状態管理レイヤーが追加された点が特徴的です。
+
+以下に、各フェーズと主要コンポーネントについて解説します。
+
+### 💡 全体的な流れの概要
+このアーキテクチャは、**Planner (計画)** が全体のゴールを設定し、その計画に基づき **Harness (実行管理層)** がステップバイステップで処理を制御し、実際のタスク実行（ReActループ）を行う構造です。
+
+### 🧩 主要なコンポーネントと役割
+
+1.  **Planner 固定ゾーン (Planning Zone):**
+    *   **役割:** エージェントの「頭脳」にあたる部分で、ユーザーからのゴールやタスクを受け取り、実行計画を立てる責任を持ちます。
+    *   **機能:** ゴール設定、使用可能なツール定義（スキーマ）、および全体的な思考プロセスを管理します。この部分は固定され、常に最初に参照されます。
+2.  **Harness パース (Execution Management Layer):**
+    *   **役割:** PlannerとReActループの「管理者」です。Plannerが立てた計画に基づき、どのツールを、どのような順序で、どれだけ利用するかを制御し、内部状態（JSON形式）として管理します。
+    *   **機能:** 実行ステップの進捗管理 (`current_step / total_steps`) や、使用可能なツールのセット決定を行います。
+3.  **ReActループ (Reasoning and Acting Loop):**
+    *   **役割:** 実際のタスクを実行する心臓部です。
+    *   **フロー:** **思考 (Thought)** → **行動 (Action)** → **観察 (Observation)** のサイクルを繰り返します。このサイクルを通じて、環境からのフィードバック（Observation）を受け取りながら、次の最適なアクションを決定していきます。
+4.  **内部状態 (Internal State):**
+    *   **役割:** Harnessが保持する、エージェントの「記憶」や「現在の状況」です。これはJSON形式で構造化され、PlannerやReActループに渡される重要な情報源となります。
+    *   **内容:** 現在何ステップ目か、どのツールセットを使用しているかなど、実行に必要なメタデータが含まれます。
+
+### 🔄 フェーズごとの動作フロー（矢印の流れ）
+
+1.  **Phase 1: 計画フェーズ (Planning Phase):**
+    *   ユーザーのゴールが入力され、Plannerが初期の計画を立てます。この段階で、必要なツールセットや実行ステップ数が決定されます。
+2.  **Phase 2: ミニPlannerオプション (Mini-Planner Option):**
+    *   これはオプション的な機能ですが、Harness内部の状態（`current_step`, `tools`など）を参照し、より細かく次のアクションを計画する役割を果たします。これにより、単なる線形なReActループ以上の柔軟性が生まれます。
+3.  **Phase 3: 実行フェーズ (Execution Phase / ReAct Loop):**
+    *   Plannerが決定した計画に基づき、Harnessが制御し、ReActサイクル（思考→行動→観察）が繰り返されます。このプロセスを通じて、最終的なゴール達成を目指します。
+
+### ✨ このアーキテクチャの最大の特徴
+
+従来のAIエージェントは「プロンプト」や「コンテキストウィンドウ」に依存して状態を管理しがちでしたが、本モデルでは以下の仕組みにより、**実行の状態（State）と計画（Plan）を明確に分離・構造化**しています。
+
+*   **Planner:** 高レベルな戦略決定を担当。
+*   **Harness:** 実行のガバナンス（統治）を担当し、状態管理を一元化。
+*   **ReAct Loop:** 低レベルの実装とフィードバック処理を担当。
+
+この分離により、エージェントはより大規模で複雑なタスクに対しても、一貫性と再現性を保ちながら計画的に行動することが可能になっています。
+[turn 3]
+User: おお、読めるじゃん
+Assistant: お役に立てて良かったです！このアーキテクチャは非常に洗練されており、AIエージェントの動作原理を理解する上で重要なモデルだと思います。また何かご質問があれば、いつでもお声がけください。</pre>
+</section>
+<section>
+<h2>Planner出力（作業指示書）</h2>
+<pre>（なし）</pre>
+</section>
+</div>
+</details>
+<details class="raw">
+<summary>Phase 2 詳細ログ</summary>
+<div>
+<section>
+<h2>Harness内部状態（JSON）</h2>
+<pre>（なし）</pre>
+</section>
+<section>
+<h2>Harness内部状態（ミニPlanner適用後）</h2>
+<pre>（なし）</pre>
+</section>
+</div>
+</details>
+<details class="raw">
+<summary>Phase 3 詳細ログ</summary>
+<div>
+<section>
+<h2>タスク実行プラン</h2>
+（なし）
+</section>
+</div>
+</details>
+</main>
+</body>
+</html>

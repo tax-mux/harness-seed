@@ -13,7 +13,16 @@ use super::traits::{Tool, ToolContext};
 
 // --- workspace helpers (crate-private) ---
 
+/// ファイル系ツールのルート。`HARNESS_WORKSPACE` または `TRIAGE_ROOT` で上書き可能。
 pub fn workspace_root() -> PathBuf {
+    for name in ["HARNESS_WORKSPACE", "TRIAGE_ROOT"] {
+        if let Ok(root) = std::env::var(name) {
+            let root = root.trim();
+            if !root.is_empty() {
+                return PathBuf::from(root);
+            }
+        }
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 

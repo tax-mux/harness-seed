@@ -126,6 +126,30 @@
       "env": {
         "RUST_BACKTRACE": "1"
       }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Tests: brain-plan",
+      "cwd": "${workspaceFolder}",
+      "cargo": {
+        "args": ["test", "--no-run", "--test=brain-plan", "--package=harness-seed"],
+        "filter": { "name": "brain-plan", "kind": "test" }
+      },
+      "args": ["--nocapture"],
+      "env": { "RUST_BACKTRACE": "1" }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Tests: brain-plan (parse_pipeline)",
+      "cwd": "${workspaceFolder}",
+      "cargo": {
+        "args": ["test", "--no-run", "--test=brain-plan", "--package=harness-seed"],
+        "filter": { "name": "brain-plan", "kind": "test" }
+      },
+      "args": ["parse_pipeline", "--nocapture"],
+      "env": { "RUST_BACKTRACE": "1" }
     }
   ]
 }

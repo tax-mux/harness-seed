@@ -43,6 +43,18 @@ struct PlanJson {
     subtasks: Vec<SubtaskJson>,
 }
 
+#[derive(Debug, Deserialize)]
+struct PlanFlowJson {
+    #[serde(default)]
+    input: Vec<String>,
+    #[serde(default)]
+    steps: Vec<SubtaskJson>,
+    #[serde(default)]
+    output: String,
+    #[serde(default)]
+    skip_execution: bool,
+}
+
 /// LLM の生テキストから [`PlanArtifact`] を復元する。
 pub fn parse_plan(raw: &str) -> Result<PlanArtifact, PlanParseError> {
     let trimmed = strip_code_fence(raw.trim());
@@ -50,11 +62,33 @@ pub fn parse_plan(raw: &str) -> Result<PlanArtifact, PlanParseError> {
         return Err(PlanParseError::Empty);
     }
 
-    let plan: PlanJson = serde_json::from_str(trimmed)
-        .map_err(|e| PlanParseError::InvalidJson(e.to_string()))?;
+    let value: Value =
+        serde_json::from_str(trimmed).map_err(|e| PlanParseError::InvalidJson(e.to_string()))?;
 
-    let subtasks: Vec<Subtask> = plan
-        .subtasks
+    let (summary, skip_execution, raw_subtasks): (String, bool, Vec<SubtaskJson>) =
+        if value.get("steps").is_some() || value.get("input").is_some() || value.get("output").is_some() {
+            let flow: PlanFlowJson = serde_json::from_value(value)
+                .map_err(|e| PlanParseError::InvalidJson(e.to_string()))?;
+            let summary = if !flow.output.trim().is_empty() {
+                flow.output
+            } else if flow.input.is_empty() {
+                "planned task".into()
+            } else {
+                format!("from input: {}", flow.input.join(" | "))
+            };
+            (summary, flow.skip_execution, flow.steps)
+        } else {
+            let plan: PlanJson = serde_json::from_value(value)
+                .map_err(|e| PlanParseError::InvalidJson(e.to_string()))?;
+            let summary = if plan.summary.is_empty() {
+                "planned task".into()
+            } else {
+                plan.summary
+            };
+            (summary, plan.skip_execution, plan.subtasks)
+        };
+
+    let subtasks: Vec<Subtask> = raw_subtasks
         .into_iter()
         .map(|s| Subtask {
             id: s.id,
@@ -69,19 +103,13 @@ pub fn parse_plan(raw: &str) -> Result<PlanArtifact, PlanParseError> {
         })
         .collect();
 
-    let summary = if plan.summary.is_empty() {
-        "planned task".into()
-    } else {
-        plan.summary
-    };
-
-    if !plan.skip_execution && subtasks.is_empty() {
+    if !skip_execution && subtasks.is_empty() {
         return Err(PlanParseError::NoSubtasks);
     }
 
     Ok(PlanArtifact {
         summary,
-        skip_execution: plan.skip_execution,
+        skip_execution,
         subtasks,
     })
 }
@@ -93,43 +121,4 @@ fn strip_code_fence(s: &str) -> &str {
         .unwrap_or(s);
     let s = s.strip_suffix("```").unwrap_or(s);
     s.trim()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_plan_with_subtasks() {
-        let raw = r#"{
-            "summary": "list and summarize",
-            "skip_execution": false,
-            "subtasks": [
-                {"id": 1, "goal": "list dir", "done_when": "have listing"},
-                {"id": 2, "goal": "summarize", "done_when": "answer ready"}
-            ]
-        }"#;
-        let plan = parse_plan(raw).unwrap();
-        assert_eq!(plan.subtasks.len(), 2);
-        assert!(!plan.skip_execution);
-    }
-
-    #[test]
-    fn parses_skip_execution() {
-        let raw = r#"{"summary":"hi","skip_execution":true,"subtasks":[]}"#;
-        let plan = parse_plan(raw).unwrap();
-        assert!(plan.skip_execution);
-        assert!(plan.subtasks.is_empty());
-    }
-
-    #[test]
-    fn parses_subtask_with_task_id() {
-        let raw = r#"{
-            "summary": "list",
-            "skip_execution": false,
-            "subtasks": [{"id": 1, "task": "list_dir", "params": {"path": "."}}]
-        }"#;
-        let plan = parse_plan(raw).unwrap();
-        assert_eq!(plan.subtasks[0].task.as_deref(), Some("list_dir"));
-    }
 }

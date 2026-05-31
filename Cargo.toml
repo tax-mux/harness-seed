@@ -12,3 +12,7 @@ autobenches = true
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[[test]]
+name = "brain-plan"
+path = "tests/brain-plan/main.rs"

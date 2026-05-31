@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::action::TurnTrace;
+use crate::config::LogRotationConfig;
 use crate::context_metrics::{ContextUsage, TokenSource, TurnContextSummary};
 use crate::react::TurnResult;
 
@@ -103,14 +104,63 @@ fn step_from_usage(step: usize, u: &ContextUsage) -> ContextLogStep {
     }
 }
 
+fn backup_path(path: &Path, index: u32) -> PathBuf {
+    PathBuf::from(format!("{}.{}", path.to_string_lossy(), index))
+}
+
+/// サイズ超過時に `path` → `path.1` → … と世代をずらす。
+pub fn rotate_log_file(path: &Path, config: LogRotationConfig) -> io::Result<()> {
+    if !config.enabled() {
+        return Ok(());
+    }
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    if meta.len() < config.max_bytes {
+        return Ok(());
+    }
+
+    let backup_slots = config.max_files.saturating_sub(1);
+    if backup_slots == 0 {
+        return Ok(());
+    }
+
+    let oldest = backup_path(path, backup_slots);
+    if oldest.exists() {
+        fs::remove_file(&oldest)?;
+    }
+    for i in (1..backup_slots).rev() {
+        let from = backup_path(path, i);
+        if from.exists() {
+            let to = backup_path(path, i + 1);
+            fs::rename(&from, &to)?;
+        }
+    }
+    if path.exists() {
+        fs::rename(path, backup_path(path, 1))?;
+    }
+    Ok(())
+}
+
 /// コンテキスト計測を JSON Lines ファイルへ追記する。
 pub struct ContextLogWriter {
     path: PathBuf,
+    rotation: LogRotationConfig,
 }
 
 impl ContextLogWriter {
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self {
+            path: path.into(),
+            rotation: LogRotationConfig::disabled(),
+        }
+    }
+
+    pub fn with_rotation(mut self, rotation: LogRotationConfig) -> Self {
+        self.rotation = rotation;
+        self
     }
 
     pub fn path(&self) -> &Path {
@@ -121,6 +171,8 @@ impl ContextLogWriter {
         if result.context.is_empty() {
             return Ok(());
         }
+
+        rotate_log_file(&self.path, self.rotation)?;
 
         if let Some(parent) = self.path.parent() {
             if !parent.as_os_str().is_empty() {
@@ -164,7 +216,27 @@ fn chrono_lite_timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::LogRotationConfig;
     use crate::{LlmBrain, MockLlmConnector, ReActLoop};
+
+    #[test]
+    fn rotates_when_over_max_bytes() {
+        let dir = std::env::temp_dir().join(format!("harness_seed_rot_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("context.jsonl");
+        fs::write(&path, vec![b'x'; 64]).unwrap();
+
+        let cfg = LogRotationConfig {
+            max_bytes: 32,
+            max_files: 3,
+        };
+        rotate_log_file(&path, cfg).unwrap();
+        assert!(!path.exists());
+        assert!(backup_path(&path, 1).exists());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn appends_json_line_to_file() {

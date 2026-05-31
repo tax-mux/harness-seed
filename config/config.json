@@ -16,13 +16,6 @@
     "session_max_turns": 8,
     "two_phase": true,
     "max_steps_plan": 4,
-    "scout": {
-      "enabled": true,
-      "max_steps": 6,
-      "skip_trivial": true,
-      "max_note_chars": 2000,
-      "show_scout": true
-    },
     "advance": {
       "enabled": true,
       "max_phases": 8,
@@ -32,7 +25,11 @@
     }
   },
   "log": {
-    "context_metrics": "logs/context.jsonl"
+    "context_metrics": "logs/context.jsonl",
+    "rotation": {
+      "max_bytes": 10485760,
+      "max_files": 5
+    }
   },
   "tools": {
     "packs": {
