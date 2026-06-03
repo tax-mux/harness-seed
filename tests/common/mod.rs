@@ -1,4 +1,5 @@
 //! 統合テスト共通（`config/config.json` ベース。切替は `config/samples/` を上書きコピー）。
+#![allow(dead_code)]
 
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;

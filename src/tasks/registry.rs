@@ -338,7 +338,14 @@ impl TaskRegistry {
             };
             let Some(def) = self.get(&task_id) else {
                 // triage-mail の compose 系は `.triage-mail/tasks` 未読込でも task id を維持する
-                if matches!(task_id.as_str(), "compose_context" | "compose_context_no_ref" | "compose_write" | "mail_read") {
+                if matches!(
+                    task_id.as_str(),
+                    "compose_context"
+                        | "compose_context_no_ref"
+                        | "compose_write"
+                        | "mail_read"
+                        | "pending_outgoing_save"
+                ) {
                     if matches!(task_id.as_str(), "compose_context" | "mail_read") {
                         inject_reference_uid_params(st, ref_uid);
                     }
@@ -558,7 +565,7 @@ fn subtask_fetches_reference_mail(st: &Subtask) -> bool {
     )
 }
 
-/// 送信待ち改訂（sent メニュー）: 計画を generic 1 件に正規化する。
+/// 送信待ち改訂（sent メニュー）: 計画を pending_outgoing_save 1 件に正規化する。
 fn normalize_plan_for_outgoing_pending_draft(plan: &mut PlanArtifact) {
     if plan.skip_execution {
         return;
@@ -572,16 +579,16 @@ fn normalize_plan_for_outgoing_pending_draft(plan: &mut PlanArtifact) {
         .filter(|g| !g.trim().is_empty())
         .collect();
     let goal = if goals.is_empty() {
-        "【改訂コンテキスト】を基準に文案を改訂し、最終回答で件名と本文を返す".into()
+        "【改訂コンテキスト】を基準に改訂し、save_pending_outgoing_mail で送信待ちキューへ保存する".into()
     } else {
         goals.join(" → ")
     };
     plan.subtasks = vec![Subtask {
         id: 1,
-        task: None,
+        task: Some("pending_outgoing_save".into()),
         params: serde_json::json!({}),
         goal,
-        done_when: "最終回答に件名と本文を含めた".into(),
+        done_when: "save_pending_outgoing_mail 成功".into(),
     }];
 }
 
