@@ -2,6 +2,7 @@
 name = "harness-seed"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 description = "Embeddable ReAct harness — context, tools, and pluggable LLM brains (not another chat UI)"
 autobins = true
 autoexamples = false
