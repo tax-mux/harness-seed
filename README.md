@@ -22,6 +22,8 @@ harness-seed/
 │   ├── samples/          # Connector templates (config.*.json)
 │   └── README.md
 ├── doc/             # Documentation (current specs + ideas/)
+│   ├── architecture/    # Two-layer model (planning / execution) — JA
+│   ├── architecture-en/ # Same — EN
 │   └── ideas/       # Unimplemented design notes
 ├── src/
 │   ├── main.rs      # CLI entry point
@@ -34,6 +36,8 @@ harness-seed/
 
 | File | Content |
 |------|------|
+| [doc/architecture/README.md](doc/architecture/README.md) | **Architecture index (JA)** — planning layer, execution layer, tool selection |
+| [doc/architecture-en/README.md](doc/architecture-en/README.md) | **Architecture index (EN)** |
 | [doc/agent-minimum-action-unit.md](doc/agent-minimum-action-unit.md) | Minimum action unit of the AI agent (diagram) |
 | [doc/react-implementation.md](doc/react-implementation.md) | Current ReAct implementation structure, flow, and limitations |
 | [doc/advance-loop.md](doc/advance-loop.md) | Outer advance loop (long context chunking) |

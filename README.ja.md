@@ -22,6 +22,8 @@ harness-seed/
 │   ├── samples/          # コネクタ別ひな形（config.*.json）
 │   └── README.md
 ├── doc/             # ドキュメント（現行仕様 + ideas/）
+│   ├── architecture/    # 二層モデル（計画層・実行層）— 日本語
+│   ├── architecture-en/ # 同上 — 英語
 │   └── ideas/       # 未実装の設計メモ
 ├── src/
 │   ├── main.rs      # CLI エントリポイント
@@ -34,6 +36,8 @@ harness-seed/
 
 | ファイル | 内容 |
 |----------|------|
+| [doc/architecture/README.md](doc/architecture/README.md) | **アーキテクチャ索引（日本語）** — 計画層・実行層・ツール選択 |
+| [doc/architecture-en/README.md](doc/architecture-en/README.md) | **Architecture index (English)** |
 | [doc/agent-minimum-action-unit.md](doc/agent-minimum-action-unit.md) | AIエージェントの最少行動単位（図解） |
 | [doc/react-implementation.md](doc/react-implementation.md) | 現行 ReAct 実装の構成・フロー・制限 |
 | [doc/advance-loop.md](doc/advance-loop.md) | 外側推進ループ（ロングコンテキスト分割） |
