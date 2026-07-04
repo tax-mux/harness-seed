@@ -1,0 +1,13 @@
+---
+description: Prefer general solutions over case-only logic when changing harness-seed
+alwaysApply: true
+---
+
+# Development principles
+
+Follow `doc/development-principles.md`.
+
+- Always design **general** mechanisms (layer contracts, gates, schemas).
+- **Do not** add logic that only fixes one user utterance or one product domain (e.g. hardcoding `README.md` / `list_dir` as the only recovery path for “explain this project”).
+- Reproduction logs are **validation scenarios**, not feature specs to embed in code.
+- Prefer domain-agnostic wording in prompts and defaults (“gather evidence with available tools”), not product-specific recipes.

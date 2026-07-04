@@ -36,6 +36,8 @@ harness-seed/
 
 | ファイル | 内容 |
 |----------|------|
+| [doc/development-principles.md](doc/development-principles.md) | **開発方針** — 汎用解を優先、個別事例だけのロジックは価値が低い |
+| [doc/memory.md](doc/memory.md) | **記憶層** — Memory RAG、MemoryBridge、diary / search（local + mempalace） |
 | [doc/architecture/README.md](doc/architecture/README.md) | **アーキテクチャ索引（日本語）** — 計画層・実行層・ツール選択 |
 | [doc/architecture-en/README.md](doc/architecture-en/README.md) | **Architecture index (English)** |
 | [doc/agent-minimum-action-unit.md](doc/agent-minimum-action-unit.md) | AIエージェントの最少行動単位（図解） |
@@ -44,7 +46,7 @@ harness-seed/
 | [doc/wire-protocol.md](doc/wire-protocol.md) | JSON Lines ワイヤプロトコル（`--json`） |
 | [doc/builtin_tools/README.md](doc/builtin_tools/README.md) | 組み込みツール仕様（1 ツール 1 ファイル） |
 | [doc/context-memory-mapping.md](doc/context-memory-mapping.md) | コンテキストの用途別マッピング（図解） |
-| [doc/ideas/README.md](doc/ideas/README.md) | 未実装の設計メモ一覧（具体案は ideas 内のみ） |
+| [doc/ideas/README.md](doc/ideas/README.md) | 設計メモ一覧（実装済みは正本へ誘導、未実装は ideas 内） |
 
 ## 使い方
 

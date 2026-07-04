@@ -33,6 +33,7 @@ fn enforce_outgoing_collapses_to_pending_outgoing_save() {
             goal: "スペイン語に翻訳".into(),
             done_when: "done".into(),
         }],
+        knowledge_sufficient: None,
     };
     c.enforce_plan(&mut plan);
     assert_eq!(plan.subtasks.len(), 1);
@@ -61,6 +62,7 @@ fn enforce_mail_sync_collapses_to_mail_sync_task() {
             goal: "read".into(),
             done_when: "done".into(),
         }],
+        knowledge_sufficient: None,
     };
     c.enforce_plan(&mut plan);
     assert_eq!(plan.subtasks[0].task.as_deref(), Some("mail_sync"));
@@ -79,6 +81,7 @@ fn trivial_chat_skips_execution() {
             goal: "sync".into(),
             done_when: "done".into(),
         }],
+        knowledge_sufficient: None,
     };
     c.enforce_plan(&mut plan);
     assert!(plan.skip_execution);

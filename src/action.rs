@@ -22,6 +22,9 @@ impl Action {
     }
 }
 
+/// Observation をプロンプトに載せるときの文字上限（巨大ファイル読みで文脈を壊さない）。
+pub const MAX_OBSERVATION_CHARS: usize = 24_000;
+
 /// ツール実行の結果（Observation）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Observation {
@@ -35,7 +38,7 @@ impl Observation {
         Self {
             invoke_id,
             ok: true,
-            output: output.into(),
+            output: truncate_observation(output.into()),
         }
     }
 
@@ -43,9 +46,19 @@ impl Observation {
         Self {
             invoke_id,
             ok: false,
-            output: output.into(),
+            output: truncate_observation(output.into()),
         }
     }
+}
+
+fn truncate_observation(s: String) -> String {
+    let count = s.chars().count();
+    if count <= MAX_OBSERVATION_CHARS {
+        return s;
+    }
+    let keep = MAX_OBSERVATION_CHARS.saturating_sub(96);
+    let head: String = s.chars().take(keep).collect();
+    format!("{head}\n\n…[truncated: {count} chars total, showing first {keep}]")
 }
 
 /// エージェントが1ステップで返す判断。
@@ -102,5 +115,25 @@ impl fmt::Display for TurnTrace {
             writeln!(f, "[observation {}] {status}: {}", obs.invoke_id, obs.output)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn observation_truncates_huge_output() {
+        let huge = "あ".repeat(MAX_OBSERVATION_CHARS + 500);
+        let obs = Observation::success(1, huge);
+        assert!(obs.ok);
+        assert!(obs.output.contains("truncated:"));
+        assert!(obs.output.chars().count() <= MAX_OBSERVATION_CHARS + 40);
+    }
+
+    #[test]
+    fn observation_keeps_small_output() {
+        let obs = Observation::success(1, "hello");
+        assert_eq!(obs.output, "hello");
     }
 }

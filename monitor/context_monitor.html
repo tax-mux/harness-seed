@@ -44,17 +44,18 @@ pre{margin:0;padding:12px;border:1px solid #9996;border-radius:8px;overflow:auto
 <section>
 <h2>今回の入力と内部状態</h2>
 <pre>最新ユーザープロンプト:
-ファルモってなんじゃ
+ドキュメント類を読み込んで要約して
 
 内部状態サマリ（Context）:
-llm_calls=1 prompt: 8255 chars / 2733 tok (api) | completion: 369 chars / 235 tok (api) | total_tokens=2968
+llm_calls=10 prompt: 113358 chars / 38817 tok (api) | completion: 6974 chars / 3897 tok (api) | total_tokens=42714
 
 今回の動き（Trace）:
-thoughts=0 / actions=0 / observations=0
-
+thoughts=0 / actions=7 / observations=7
+last_action: read_file {&quot;path&quot;:&quot;doc/development-principles.md&quot;}
+last_observation: err tool &#39;read_file&#39; is not allowed in this subtask
 
 Harness内部状態:
-status=Completed / current_step=0 / total_steps=0 / tool_set=(none)</pre>
+status=Completed / current_step=4 / total_steps=4 / tool_set=(none)</pre>
 </section>
 <details open>
 <summary>時系列トレース（Phase 1 → 2 → 3）</summary>
@@ -68,7 +69,7 @@ status=Completed / current_step=0 / total_steps=0 / tool_set=(none)</pre>
 <span class="tag tag-p1">Phase 1</span>
 <span class="event-title">ユーザー指示を受領</span>
 </div>
-<p class="event-body">ファルモってなんじゃ</p>
+<p class="event-body">ドキュメント類を読み込んで要約して</p>
 </li>
 <li class="event">
 <div class="event-head">
@@ -76,7 +77,7 @@ status=Completed / current_step=0 / total_steps=0 / tool_set=(none)</pre>
 <span class="tag tag-p1">Phase 1</span>
 <span class="event-title">Plannerが作業指示書を生成</span>
 </div>
-<p class="event-body">{&quot;summary&quot;:&quot;ファルモの質問への回答&quot;,&quot;skip_execution&quot;:true,&quot;subtasks&quot;:[],&quot;output&quot;:&quot;『ファルモ』は、一般的に以下の2つの意味で使われます：\n\n1. **ファルモ（Falmo）** - 日本発のAIチャットボットプラットフォーム。企業向けカスタマーサポートや社内ヘルプなど、LLMを活用した対話型システムを提供しています。\n\n2. **ファルモ（Farmo/Farmer&#39;s）** - 農業関連のツールやサービス名として使われる場合があります。\n\n文脈...</p>
+<p class="event-body">{&quot;input&quot;:[&quot;Take data ONLY from INPUT. Write result ONLY to OUTPUT. Think ONLY about the in-between procedure.&quot;],&quot;steps&quot;:[{&quot;id&quot;:1,&quot;task&quot;:&quot;list_dir&quot;,&quot;params&quot;:{&quot;path&quot;:&quot;doc&quot;},&quot;goal&quot;:&quot;ドキュメント配下のディレクトリ構造を確認&quot;,&quot;done_when&quot;:&quot;doc/ 内のファイル一覧が取得される&quot;},{&quot;id&quot;:2,&quot;task&quot;:&quot;read_fil...</p>
 </li>
 <li class="event">
 <div class="event-head">
@@ -84,7 +85,7 @@ status=Completed / current_step=0 / total_steps=0 / tool_set=(none)</pre>
 <span class="tag tag-p1">Phase 1</span>
 <span class="event-title">Harnessパース完了</span>
 </div>
-<p class="event-body">Harnessがテキストを内部JSON化: skip_execution=true / subtasks=0 / status=Completed</p>
+<p class="event-body">Harnessがテキストを内部JSON化: skip_execution=false / subtasks=4 / status=Completed</p>
 </li>
 <li class="event">
 <div class="event-head">
@@ -92,15 +93,159 @@ status=Completed / current_step=0 / total_steps=0 / tool_set=(none)</pre>
 <span class="tag tag-p2">Phase 2</span>
 <span class="event-title">ミニPlanner入力（Harness内部状態）</span>
 </div>
-<p class="event-body">current_step=0 (no active subtask)</p>
+<p class="event-body">current_step=4 / task=(freeform) / goal=Execute with ReAct tools (not a registered task id): replan. doc/ 内の他の重要なドキュメント（ideas/, development-principles など）も確認して要約を補完</p>
 </li>
 <li class="event">
 <div class="event-head">
 <span class="event-no">#5</span>
-<span class="tag tag-p3">Phase 3</span>
-<span class="event-title">実行フェーズ</span>
+<span class="tag tag-p2">Phase 2</span>
+<span class="event-title">ミニPlanner出力（許可ツール）</span>
 </div>
-<p class="event-body">subtask がないため実行なし</p>
+<p class="event-body">allow tools: replan</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#6</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">subtask 1 を実行</span>
+</div>
+<p class="event-body">mode=step-driver / task=list_dir / goal=ドキュメント配下のディレクトリ構造を確認</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#7</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">subtask 2 を実行</span>
+</div>
+<p class="event-body">mode=ReAct / task=(freeform) / goal=Execute with ReAct tools (not a registered task id): read_file. アーキテクチャ概要を読み込む</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#8</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">subtask 3 を実行</span>
+</div>
+<p class="event-body">mode=ReAct / task=(freeform) / goal=Execute with ReAct tools (not a registered task id): read_file. プロジェクト全体の README を読み込む</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#9</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">subtask 4 を実行</span>
+</div>
+<p class="event-body">mode=ReAct / task=(freeform) / goal=Execute with ReAct tools (not a registered task id): replan. doc/ 内の他の重要なドキュメント（ideas/, development-principles など）も確認して要約を補完</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#10</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">tool action #0</span>
+</div>
+<p class="event-body">tool=list_dir args={&quot;path&quot;:&quot;doc&quot;}</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#11</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">observation #0</span>
+</div>
+<p class="event-body">status=ok output=advance-loop.md agent-minimum-action-unit.md architecture-en/ architecture/ builtin_tools/ context-memory-mapping.md development-principles.md full_agent_architecture_v2.svg ideas/ knowledge/ memory.md react-implementati...</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#12</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">tool action #21</span>
+</div>
+<p class="event-body">tool=read_file args={&quot;path&quot;:&quot;doc/architecture/README.md&quot;}</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#13</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">observation #21</span>
+</div>
+<p class="event-body">status=ok output=# アーキテクチャ（日本語）  HarnessSeed の二層モデル（計画層・実行層）とツール選定の解説。  開発時の方針（汎用解の優先）: [development-principles.md](../development-principles.md)  | # | ドキュメント | 内容 | |---|--------------|------| | 00 | [harness-seed の構造](00_harne...</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#14</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">tool action #22</span>
+</div>
+<p class="event-body">tool=read_file args={&quot;path&quot;:&quot;doc/architecture/README.md&quot;}</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#15</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">observation #22</span>
+</div>
+<p class="event-body">status=ok output=# アーキテクチャ（日本語）  HarnessSeed の二層モデル（計画層・実行層）とツール選定の解説。  開発時の方針（汎用解の優先）: [development-principles.md](../development-principles.md)  | # | ドキュメント | 内容 | |---|--------------|------| | 00 | [harness-seed の構造](00_harne...</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#16</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">tool action #23</span>
+</div>
+<p class="event-body">tool=read_file args={&quot;path&quot;:&quot;doc/architecture/00_harness-seedの構造.md&quot;}</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#17</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">observation #23</span>
+</div>
+<p class="event-body">status=ok output=# harness-seed の構造（計画層・実行層）  HarnessSeed は **「プロンプト受取 → 計画層 → 実行層 → 終了」** という直列構成を中核とする ReAct ハーネスである。計画層と実行層はいずれも同じ ReAct ループ部品（`run_layer_loop`）を共有するが、**ツールの有無**と**出力の型**が異なる。  開発方針（汎用解を常に優先する）: [development-princi...</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#18</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">tool action #25</span>
+</div>
+<p class="event-body">tool=read_file args={&quot;path&quot;:&quot;README.md&quot;}</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#19</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">observation #25</span>
+</div>
+<p class="event-body">status=ok output=# HarnessSeed  Embedded ReAct harness (Rust crate `harness-seed`). It is a &quot;seed&quot; for the agent layer to be embedded in existing applications, **not a chat UI**. It provides both a library and a CLI (`harness-seed`) in...</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#20</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">tool action #27</span>
+</div>
+<p class="event-body">tool=list_dir args={&quot;path&quot;:&quot;doc/ideas&quot;}</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#21</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">observation #27</span>
+</div>
+<p class="event-body">status=err output=tool &#39;list_dir&#39; is not allowed in this subtask</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#22</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">tool action #28</span>
+</div>
+<p class="event-body">tool=read_file args={&quot;path&quot;:&quot;doc/development-principles.md&quot;}</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#23</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">observation #28</span>
+</div>
+<p class="event-body">status=err output=tool &#39;read_file&#39; is not allowed in this subtask</p>
 </li>
 </ol>
 </section>
@@ -130,6 +275,7 @@ Planning schema (inside answer content when using JSON):
   ],
   &quot;output&quot;: &quot;&lt;fixed OUTPUT contract line copied from prompt&gt;&quot;,
   &quot;skip_execution&quot;: &lt;bool&gt;,
+  &quot;knowledge_sufficient&quot;: &lt;bool&gt;
 }
 
 Rules:
@@ -137,13 +283,16 @@ Rules:
 - Instruction contract: &quot;Take data ONLY from INPUT. Write result ONLY to OUTPUT. Think ONLY about the in-between procedure.&quot;
 - Your job is the PROCEDURE in between: emit ordered `steps` that transform INPUT into OUTPUT.
 - Prefer emitting `answer` with the work instructions (JSON plan or numbered steps) when clear; use `thought` only for brief decomposition if needed.
-- If Recalled context is insufficient and you need prior project knowledge, emit `recall` with a short query (read-only; limited rounds). Then plan with the new hits.
+- The plan loop is short. Do NOT explore for many steps here (no tools except optional `recall`). If evidence is missing, answer quickly with knowledge_sufficient:false and steps that send the exec layer to investigate.
+- Decide knowledge_sufficient first: true only if Recalled and/or general knowledge fully answer the user without tools (greetings, chit-chat, self-contained facts). false if you need workspace files, tools, or more evidence than Recalled provides (project overview, code, configs). Thin or off-topic Recalled is NOT sufficient.
+- skip_execution may be true ONLY when knowledge_sufficient is true. The harness rejects skip otherwise and runs a freeform execution step (tools chosen by the exec layer).
+- If Recalled is insufficient and you need prior project knowledge from memory, emit `recall` with a short query (read-only; limited rounds). Then plan with the new hits.
 - Do NOT emit action / tools in the plan layer.
 - Use only task ids from the task catalog that match the data contract.
 - Greetings, chit-chat, and Q&amp;A that need no tools: one answer step with STRING plan JSON:
-  {&quot;step&quot;:&quot;answer&quot;,&quot;content&quot;:&quot;{\&quot;summary\&quot;:\&quot;short label\&quot;,\&quot;skip_execution\&quot;:true,\&quot;subtasks\&quot;:[],\&quot;output\&quot;:\&quot;&lt;final reply to the user&gt;\&quot;}&quot;}
+  {&quot;step&quot;:&quot;answer&quot;,&quot;content&quot;:&quot;{\&quot;summary\&quot;:\&quot;short label\&quot;,\&quot;skip_execution\&quot;:true,\&quot;knowledge_sufficient\&quot;:true,\&quot;subtasks\&quot;:[],\&quot;output\&quot;:\&quot;&lt;final reply to the user&gt;\&quot;}&quot;}
   Put the user-facing reply in `output` (required when skip_execution is true). Do NOT invent subtasks from bullet lists.
-- Recalled context: if relevant to the question, ground the plan/output on it (do not overwrite with conflicting generalities). If Recalled is irrelevant, general knowledge is fine — do not claim it came from memory. For project-specific gaps, use `recall` or leave for tools.
+- Recalled context: if relevant to the question, ground the plan/output on it (do not overwrite with conflicting generalities). If Recalled is irrelevant, general knowledge is fine — do not claim it came from memory. For project-specific gaps, set knowledge_sufficient false and plan tool steps (or recall first).
 - content MUST be a JSON string (escaped quotes), never a nested object.
 - When a later step depends on results not yet known, emit a step with task `replan` and a goal describing what to decide after prior steps finish.
 - When ready, use step answer with the full work instructions (JSON or text) in content.
@@ -175,450 +324,262 @@ Use PowerShell syntax for run_cmd (e.g. Get-ChildItem, not Unix-only commands un
 <section>
 <h2>参照情報</h2>
 <pre>[recalled 1]
-[recent work]
-- (1) このプロジェクトについて説明して (ref: diary#1)
-User: このプロジェクトについて説明して
-Summary: planned task
-- Phase 1: ワークスペースのファイル一覧を取得
-  [step-driver] task &#39;list_dir&#39; complete (1 step(s)).
-.git/
-.gitignore
-.vscode/
-Cargo.lock
-Cargo.toml
-LICENSE
-README.ja.md
-README.md
-adapters/
-benches/
-config/
-doc/
-harness-seed.code-workspace
-ideas/
-logs/
-monitor/
-src/
-target/
-target_test_tmp/
-tasks/
-tests/
-tmp/
-tools/
-- (2) このプロジェクトについて説明して (ref: diary#2)
-User: このプロジェクトについて説明して
-Summary: &lt;このプロジェクトの説明&gt;
-- Phase 1: 取得したファイル一覧を元に、主要モジュールの構造を確認する
-  [step-driver] task &#39;list_dir&#39; complete (1 step(s)).
-action.rs
-advance.rs
-agent_assets/
-brain.rs
-brave_search.rs
-cli_agent.rs
-config.rs
-context.rs
-context_log.rs
-context_manifest.rs
-context_map.rs
-context_metrics.rs
-grep.rs
-harness/
-layer.rs
-lib.rs
-llm/
-main.rs
-memory/
-plan.rs…
-
-[recalled 2]
 [search hit]
-- (1) このプロジェクトについて説明して (ref: diary#2)
-User: このプロジェクトについて説明して
-Summary: &lt;このプロジェクトの説明&gt;
-- Phase 1: 取得したファイル一覧を元に、主要モジュールの構造を確認する
-  [step-driver] task &#39;list_dir&#39; complete (1 step(s)).
-action.rs
-advance.rs
-agent_assets/
-brain.rs
-brave_search.rs
-cli_agent.rs
-config.rs
-context.rs
-context_log.rs
-context_manifest.rs
-context_map.rs
-context_metrics.rs
-grep.rs
-harness/
-layer.rs
-lib.rs
-llm/
-main.rs
-memory/
-plan.rs
-plan/
-protocol.rs
-react.rs
-runtime.rs
-session.rs
-tasks/
-tool/
-tool_display.rs
-turn_observer.rs
-- Phase 2: Execute with ReAct tools (not a registered task id): read_file. プロジェクトの説明文を取得する
-  # HarnessSeed
+- (1) 他にどんなプロジェクトを記憶しているの？ (ref: diary#6)
+User: 他にどんなプロジェクトを記憶しているの？
+Summary: 申し訳ありませんが、私は現在利用可能なツール（ファイル操作、シェルコマンドなど）を通じて、他のプロジェクトを記憶しているかどうかを確認する権限がありません。
 
-Embedded ReAct harness (Rust crate `harness-seed`). It is a &quot;seed&quot; for the agent layer to be embedded in existing applications, **not a chat UI**. It provides both a library and a CLI (`harness-seed`) in the same crate.
+私の現在の環境では：
+- ファイルシステムへのアクセスは可能ですが、特定の「記憶」や「データベース」に直接接続されていません
+- 過去の対話履歴や外部の知識ベースにはアクセスできません
 
-## 主要機能
+もし特定のプロジェクトについて知りたい場合は、そのプロジェクトのファイル（README.md や config など）を指定していただければ、それを読み込んで説明できます。
 
-- **ReAct ループ**: Thought → Action → Observation のサイクルを実装
-- **LLM ブレイン**: OpenAI、Gemini、Anthropic Claude、Ollama、LM Studio に対応
-- **コンテキスト管理**: メモリ、プランニング、実行レイヤーの2層構造
-- **ツールシステム**: 内蔵ツールと外部ツールの両方に対応
-- **JSON Lines プロトコル**: `--json` フラグで出力可能
+または、harness-seed プロジェクト自体に関する質問であれば、doc/ 配下のドキュメントや README を確認できます。
+- Phase 1: 申し訳ありませんが、私は現在利用可能なツール（ファイル操作、シェルコマンドなど）を通じて、他のプロジェクトを記憶しているかどうかを確認する権限がありません。
 
-## 使用方法
+私の現在の環境では：
+- ファイルシステムへのアクセスは可能ですが、特定の「記憶」や「データベース」に直接接続されていません
+- 過去の対話履歴や外部の知識ベースにはアクセスできません
 
-### ビルド
+もし特定のプロジェクトについて知りたい場合は、そのプロジェクトのファイル（README.md や config など）を指定していただければ、それを読み込んで説明できます。
+
+または、harness-seed プロジェクト自体に関する質問であれば、doc/ 配下のドキュメントや README を確認できます。. Recalled context alone is insufficient — use available tools as needed, then fully answer the user.
+  申し訳ありませんが、私は現在利用可能なツール（ファイル操作、シェルコマンドなど）を通じて、他のプロジェクトを記憶しているかどうかを確認する権限がありません。
+
+私の現在の環境では：
+- ファイルシステムへのアクセスは可能ですが、特定の「記憶」や「データベース」に直接接続されていません
+- 過去の対話履歴や外部の知識ベースにはアクセスできません
+
+もし特定のプロジェクトについて知りたい場合は、そのプロジェクトのファイル（README.md や config など）を指定していただければ、それを読み込んで説明できます。
+
+または、harness-seed プロジェクト自体に関する質問であれば、doc/ 配下のドキュメントや README を確認できます。
+- (2) 詳しく報告して (ref: diary#4)
+User: 詳しく報告して
+Summary: プロジェクト詳細レポート
+- Phase 1: Execute with ReAct tools (not a registered task id): read_file. プロジェクトの概要と構造を確認
+  ## harness-seed プロジェクト詳細レポート
+
+### 概要
+`harness-seed` は、Rust で書かれた **Embedded ReAct harness** です。AI エージェント層を既存アプリケーションに埋め込むための「シード」であり、チャット UI ではありません。
+
+### 主要機能
+- **ReAct Loop**: Thought → Action → Observation のサイクルを実装
+- **LLM Brain**: OpenAI, Ollama, LM Studio, Gemini, Anthropic クロドなど複数プロバイダ対応
+- **ツールプラグイン**: ファイル操作、シェルコマンド、Web 検索（Brave Search）など
+- **メモリ RAG**: コンテキスト管理と長期記憶の統合
+- **計画層・実行層**: 2 レイヤーアーキテクチャ（planning / execution）
+
+### プロジェクト構造
+```
+harness-seed/
+├── Cargo.toml              # Rust プロジェクト設定
+├── config/                  # 設定ファイル
+│   ├── config.json.sample   # デフォルトテンプレート
+│   └── samples/             # プロバイダ別設定テンプレート
+├── src/
+│   ├── main.rs              # CLI エントリーポイント
+│   └── lib.rs               # ライブラリコア
+├── doc/                     # ドキュメント
+│   ├── architecture/        # アーキテクチャ説明（JA）
+│   ├── architecture-en/     # アーキテクチャ説明（EN）
+│   └── ideas/               # 未実装設計メモ
+├── tests/                   # インテグレーションテスト
+├── benches/                 # ベンチマーク
+└── adapters/                # メモリアダプタ（mempalace など）
+```
+
+### 使用方法
 ```bash
+# ビルド
 cargo build
-```
 
-### インタラクティブ実行
-```bash
+# 実行
 cargo run
-# help / echo hello / time / any text
-```
 
-### 設定切り替え
-```bash
+# プロバイダ切替
 cp config/samples/config.ollama.json config/config.json
 cargo run
 ```
 
-## プロジェクト構造
+### 特徴
+- **MIT ライセンス**
+- **Rust 2024 エディション**
+- **CLI + ライブラリ両対応**
+- **コンテキスト計測機能**（トークン数、文字数など）
+- **JSON Lines プロトコル**（`--json` フラグ）
 
-- `src/lib.rs` - ライブラリコアと公開API
-- `src/main.rs` - CLIエントリーポイント
-- `config/` - 設定ファイル（サンプルとアクティブ設定）
-- `doc/` - ドキュメント（アーキテクチャ、実装詳細など）
-- `tests/` - インテグレーションテスト
-- `benches/` - ベンチマーク
+### 開発原則
+- **一般解を優先**：ケース固有のロジックは低価値とみなす
+- **ReAct パターン**: Thought → Action → Observation の明確な分離
 
-## ライセンス
-MIT License
-- Phase 3: Execute with ReAct tools (not a registered task id): read_file. 依存関係とプロジェクトタイプを確認する
-  # HarnessSeed プロジェクト説明
+詳細は [README.md](README.md) または [doc/architecture/README.md](doc/architecture/README.md) を参照してください。&quot;,&quot;step&quot;:&quot;answer
+- Phase 2: Execute with ReAct tools (not a registered task id): read_file. エージェント関連情報を確認
+  ## Phase 2 完了：エージェント関連情報の確認
 
-**HarnessSeed** は、Rust で書かれた `harness-seed` という名前のパッケージです。
+### AGENTS.md の内容
 
-## プロジェクトの目的
-「Embeddable ReAct harness」 — 既存アプリケーションに埋め込むためのエージェントレイヤー（チャットUIではない）
+`AGENTS.md` は **HarnessSeed プロジェクトのエージェント開発ガイドライン** です。
 
-## 主要機能
-- **ReAct ループ**: Thought → Action → Observation のサイクルを実装
-- **LLM ブレイン**: OpenAI、Gemini、Anthropic Claude、Ollama、LM Studio に対応
-- **コンテキスト管理**: メモリ、プランニング、実行レイヤーの2層構造
-- **ツールシステム**: 内蔵ツールと外部ツールの両方に対応
-- **JSON Lines プロトコル**: `--json` フラグで出力可能
-
-## 技術スタック
-- Rust edition 2024
-- MIT ライセンス
-- 主要依存: reqwest (HTTP), serde/serde_json (データ処理), base64
-- HTTP アダプタ機能（mempalace）
-
-## プロジェクト構造
-- `src/lib.rs` - ライブラリコアと公開API
-- `src/main.rs` - CLIエントリーポイント
-- `config/` - 設定ファイル（サンプルとアクティブ設定）
-- `doc/` - ドキュメント（アーキテクチャ、実装詳細など）
-- `tests/` - インテグレーションテスト
-- `benches/` - ベンチマーク
-- `adapters/` - 外部アダプタ（mempalace など）
-
-## 使用方法
-### ビルド
-```bash
-cargo build
-```
-
-### インタラクティブ実行
-```bash
-cargo run
-# help / echo hello / time / any text
-```
-
-### 設定切り替え
-```bash
-cp config/samples/config.ollama.json config/config.json
-cargo run
-```
-
-## ライセンス
-MIT License</pre>
+#### 主要なルール
+- **開発原則**: `doc/development-principles.md` を厳守
+- **コアルール**: **一般解を優先**；ケース固有のロジックは低価値とみなす
+- **テスト用発言**: 再現用の発話（utterances）…</pre>
 </section>
 <section>
 <h2>圧縮ゾーン</h2>
 <pre>[recalled 1]
-[recent work]
-- (1) このプロジェクトについて説明して (ref: diary#1)
-User: このプロジェクトについて説明して
-Summary: planned task
-- Phase 1: ワークスペースのファイル一覧を取得
-  [step-driver] task &#39;list_dir&#39; complete (1 step(s)).
-.git/
-.gitignore
-.vscode/
-Cargo.lock
-Cargo.toml
-LICENSE
-README.ja.md
-README.md
-adapters/
-benches/
-config/
-doc/
-harness-seed.code-workspace
-ideas/
-logs/
-monitor/
-src/
-target/
-target_test_tmp/
-tasks/
-tests/
-tmp/
-tools/
-- (2) このプロジェクトについて説明して (ref: diary#2)
-User: このプロジェクトについて説明して
-Summary: &lt;このプロジェクトの説明&gt;
-- Phase 1: 取得したファイル一覧を元に、主要モジュールの構造を確認する
-  [step-driver] task &#39;list_dir&#39; complete (1 step(s)).
-action.rs
-advance.rs
-agent_assets/
-brain.rs
-brave_search.rs
-cli_agent.rs
-config.rs
-context.rs
-context_log.rs
-context_manifest.rs
-context_map.rs
-context_metrics.rs
-grep.rs
-harness/
-layer.rs
-lib.rs
-llm/
-main.rs
-memory/
-plan.rs…
-
-[recalled 2]
 [search hit]
-- (1) このプロジェクトについて説明して (ref: diary#2)
-User: このプロジェクトについて説明して
-Summary: &lt;このプロジェクトの説明&gt;
-- Phase 1: 取得したファイル一覧を元に、主要モジュールの構造を確認する
-  [step-driver] task &#39;list_dir&#39; complete (1 step(s)).
-action.rs
-advance.rs
-agent_assets/
-brain.rs
-brave_search.rs
-cli_agent.rs
-config.rs
-context.rs
-context_log.rs
-context_manifest.rs
-context_map.rs
-context_metrics.rs
-grep.rs
-harness/
-layer.rs
-lib.rs
-llm/
-main.rs
-memory/
-plan.rs
-plan/
-protocol.rs
-react.rs
-runtime.rs
-session.rs
-tasks/
-tool/
-tool_display.rs
-turn_observer.rs
-- Phase 2: Execute with ReAct tools (not a registered task id): read_file. プロジェクトの説明文を取得する
-  # HarnessSeed
+- (1) 他にどんなプロジェクトを記憶しているの？ (ref: diary#6)
+User: 他にどんなプロジェクトを記憶しているの？
+Summary: 申し訳ありませんが、私は現在利用可能なツール（ファイル操作、シェルコマンドなど）を通じて、他のプロジェクトを記憶しているかどうかを確認する権限がありません。
 
-Embedded ReAct harness (Rust crate `harness-seed`). It is a &quot;seed&quot; for the agent layer to be embedded in existing applications, **not a chat UI**. It provides both a library and a CLI (`harness-seed`) in the same crate.
+私の現在の環境では：
+- ファイルシステムへのアクセスは可能ですが、特定の「記憶」や「データベース」に直接接続されていません
+- 過去の対話履歴や外部の知識ベースにはアクセスできません
 
-## 主要機能
+もし特定のプロジェクトについて知りたい場合は、そのプロジェクトのファイル（README.md や config など）を指定していただければ、それを読み込んで説明できます。
 
-- **ReAct ループ**: Thought → Action → Observation のサイクルを実装
-- **LLM ブレイン**: OpenAI、Gemini、Anthropic Claude、Ollama、LM Studio に対応
-- **コンテキスト管理**: メモリ、プランニング、実行レイヤーの2層構造
-- **ツールシステム**: 内蔵ツールと外部ツールの両方に対応
-- **JSON Lines プロトコル**: `--json` フラグで出力可能
+または、harness-seed プロジェクト自体に関する質問であれば、doc/ 配下のドキュメントや README を確認できます。
+- Phase 1: 申し訳ありませんが、私は現在利用可能なツール（ファイル操作、シェルコマンドなど）を通じて、他のプロジェクトを記憶しているかどうかを確認する権限がありません。
 
-## 使用方法
+私の現在の環境では：
+- ファイルシステムへのアクセスは可能ですが、特定の「記憶」や「データベース」に直接接続されていません
+- 過去の対話履歴や外部の知識ベースにはアクセスできません
 
-### ビルド
+もし特定のプロジェクトについて知りたい場合は、そのプロジェクトのファイル（README.md や config など）を指定していただければ、それを読み込んで説明できます。
+
+または、harness-seed プロジェクト自体に関する質問であれば、doc/ 配下のドキュメントや README を確認できます。. Recalled context alone is insufficient — use available tools as needed, then fully answer the user.
+  申し訳ありませんが、私は現在利用可能なツール（ファイル操作、シェルコマンドなど）を通じて、他のプロジェクトを記憶しているかどうかを確認する権限がありません。
+
+私の現在の環境では：
+- ファイルシステムへのアクセスは可能ですが、特定の「記憶」や「データベース」に直接接続されていません
+- 過去の対話履歴や外部の知識ベースにはアクセスできません
+
+もし特定のプロジェクトについて知りたい場合は、そのプロジェクトのファイル（README.md や config など）を指定していただければ、それを読み込んで説明できます。
+
+または、harness-seed プロジェクト自体に関する質問であれば、doc/ 配下のドキュメントや README を確認できます。
+- (2) 詳しく報告して (ref: diary#4)
+User: 詳しく報告して
+Summary: プロジェクト詳細レポート
+- Phase 1: Execute with ReAct tools (not a registered task id): read_file. プロジェクトの概要と構造を確認
+  ## harness-seed プロジェクト詳細レポート
+
+### 概要
+`harness-seed` は、Rust で書かれた **Embedded ReAct harness** です。AI エージェント層を既存アプリケーションに埋め込むための「シード」であり、チャット UI ではありません。
+
+### 主要機能
+- **ReAct Loop**: Thought → Action → Observation のサイクルを実装
+- **LLM Brain**: OpenAI, Ollama, LM Studio, Gemini, Anthropic クロドなど複数プロバイダ対応
+- **ツールプラグイン**: ファイル操作、シェルコマンド、Web 検索（Brave Search）など
+- **メモリ RAG**: コンテキスト管理と長期記憶の統合
+- **計画層・実行層**: 2 レイヤーアーキテクチャ（planning / execution）
+
+### プロジェクト構造
+```
+harness-seed/
+├── Cargo.toml              # Rust プロジェクト設定
+├── config/                  # 設定ファイル
+│   ├── config.json.sample   # デフォルトテンプレート
+│   └── samples/             # プロバイダ別設定テンプレート
+├── src/
+│   ├── main.rs              # CLI エントリーポイント
+│   └── lib.rs               # ライブラリコア
+├── doc/                     # ドキュメント
+│   ├── architecture/        # アーキテクチャ説明（JA）
+│   ├── architecture-en/     # アーキテクチャ説明（EN）
+│   └── ideas/               # 未実装設計メモ
+├── tests/                   # インテグレーションテスト
+├── benches/                 # ベンチマーク
+└── adapters/                # メモリアダプタ（mempalace など）
+```
+
+### 使用方法
 ```bash
+# ビルド
 cargo build
-```
 
-### インタラクティブ実行
-```bash
+# 実行
 cargo run
-# help / echo hello / time / any text
-```
 
-### 設定切り替え
-```bash
+# プロバイダ切替
 cp config/samples/config.ollama.json config/config.json
 cargo run
 ```
 
-## プロジェクト構造
+### 特徴
+- **MIT ライセンス**
+- **Rust 2024 エディション**
+- **CLI + ライブラリ両対応**
+- **コンテキスト計測機能**（トークン数、文字数など）
+- **JSON Lines プロトコル**（`--json` フラグ）
 
-- `src/lib.rs` - ライブラリコアと公開API
-- `src/main.rs` - CLIエントリーポイント
-- `config/` - 設定ファイル（サンプルとアクティブ設定）
-- `doc/` - ドキュメント（アーキテクチャ、実装詳細など）
-- `tests/` - インテグレーションテスト
-- `benches/` - ベンチマーク
+### 開発原則
+- **一般解を優先**：ケース固有のロジックは低価値とみなす
+- **ReAct パターン**: Thought → Action → Observation の明確な分離
 
-## ライセンス
-MIT License
-- Phase 3: Execute with ReAct tools (not a registered task id): read_file. 依存関係とプロジェクトタイプを確認する
-  # HarnessSeed プロジェクト説明
+詳細は [README.md](README.md) または [doc/architecture/README.md](doc/architecture/README.md) を参照してください。&quot;,&quot;step&quot;:&quot;answer
+- Phase 2: Execute with ReAct tools (not a registered task id): read_file. エージェント関連情報を確認
+  ## Phase 2 完了：エージェント関連情報の確認
 
-**HarnessSeed** は、Rust で書かれた `harness-seed` という名前のパッケージです。
+### AGENTS.md の内容
 
-## プロジェクトの目的
-「Embeddable ReAct harness」 — 既存アプリケーションに埋め込むためのエージェントレイヤー（チャットUIではない）
+`AGENTS.md` は **HarnessSeed プロジェクトのエージェント開発ガイドライン** です。
 
-## 主要機能
-- **ReAct ループ**: Thought → Action → Observation のサイクルを実装
-- **LLM ブレイン**: OpenAI、Gemini、Anthropic Claude、Ollama、LM Studio に対応
-- **コンテキスト管理**: メモリ、プランニング、実行レイヤーの2層構造
-- **ツールシステム**: 内蔵ツールと外部ツールの両方に対応
-- **JSON Lines プロトコル**: `--json` フラグで出力可能
-
-## 技術スタック
-- Rust edition 2024
-- MIT ライセンス
-- 主要依存: reqwest (HTTP), serde/serde_json (データ処理), base64
-- HTTP アダプタ機能（mempalace）
-
-## プロジェクト構造
-- `src/lib.rs` - ライブラリコアと公開API
-- `src/main.rs` - CLIエントリーポイント
-- `config/` - 設定ファイル（サンプルとアクティブ設定）
-- `doc/` - ドキュメント（アーキテクチャ、実装詳細など）
-- `tests/` - インテグレーションテスト
-- `benches/` - ベンチマーク
-- `adapters/` - 外部アダプタ（mempalace など）
-
-## 使用方法
-### ビルド
-```bash
-cargo build
-```
-
-### インタラクティブ実行
-```bash
-cargo run
-# help / echo hello / time / any text
-```
-
-### 設定切り替え
-```bash
-cp config/samples/config.ollama.json config/config.json
-cargo run
-```
-
-## ライセンス
-MIT License</pre>
+#### 主要なルール
+- **開発原則**: `doc/development-principles.md` を厳守
+- **コアルール**: **一般解を優先**；ケース固有のロジックは低価値とみなす
+- **テスト用発言**: 再現用の発話（utterances）…</pre>
 </section>
 <section>
 <h2>直近ゾーン</h2>
-<pre>Previous turns:
-[turn 1]
-User: このプロジェクトについて説明して
-Assistant: # HarnessSeed プロジェクト説明
-
-**HarnessSeed** は、Rust で書かれた `harness-seed` という名前のパッケージです。
-
-## プロジェクトの目的
-「Embeddable ReAct harness」 — 既存アプリケーションに埋め込むためのエージェントレイヤー（チャットUIではない）
-
-## 主要機能
-- **ReAct ループ**: Thought → Action → Observation のサイクルを実装
-- **LLM ブレイン**: OpenAI、Gemini、Anthropic Claude、Ollama、LM Studio に対応
-- **コンテキスト管理**: メモリ、プランニング、実行レイヤーの2層構造
-- **ツールシステム**: 内蔵ツールと外部ツールの両方に対応
-- **JSON Lines プロトコル**: `--json` フラグで出力可能
-
-## 技術スタック
-- Rust edition 2024
-- MIT ライセンス
-- 主要依存: reqwest (HTTP), serde/serde_json (データ処理), base64
-- HTTP アダプタ機能（mempalace）
-
-## プロジェクト構造
-- `src/lib.rs` - ライブラリコアと公開API
-- `src/main.rs` - CLIエントリーポイント
-- `config/` - 設定ファイル（サンプルとアクティブ設定）
-- `doc/` - ドキュメント（アーキテクチャ、実装詳細など）
-- `tests/` - インテグレーションテスト
-- `benches/` - ベンチマーク
-- `adapters/` - 外部アダプタ（mempalace など）
-
-## 使用方法
-### ビルド
-```bash
-cargo build
-```
-
-### インタラクティブ実行
-```bash
-cargo run
-# help / echo hello / time / any text
-```
-
-### 設定切り替え
-```bash
-cp config/samples/config.ollama.json config/config.json
-cargo run
-```
-
-## ライセンス
-MIT License
-[turn 2]
-User: ファルモってなんじゃ
-Assistant: 『ファルモ』は、一般的に以下の2つの意味で使われます：
-
-1. **ファルモ（Falmo）** - 日本発のAIチャットボットプラットフォーム。企業向けカスタマーサポートや社内ヘルプなど、LLMを活用した対話型システムを提供しています。
-
-2. **ファルモ（Farmo/Farmer&#39;s）** - 農業関連のツールやサービス名として使われる場合があります。
-
-文脈によって意味が異なります。もし特定のプロジェクトや製品について知りたい場合は、もう少し詳細を教えていただけますか？</pre>
+<pre>（なし）</pre>
 </section>
 <section>
 <h2>Planner出力（作業指示書）</h2>
 <pre>{
-  &quot;output&quot;: &quot;『ファルモ』は、一般的に以下の2つの意味で使われます：\n\n1. **ファルモ（Falmo）** - 日本発のAIチャットボットプラットフォーム。企業向けカスタマーサポートや社内ヘルプなど、LLMを活用した対話型システムを提供しています。\n\n2. **ファルモ（Farmo/Farmer&#39;s）** - 農業関連のツールやサービス名として使われる場合があります。\n\n文脈によって意味が異なります。もし特定のプロジェクトや製品について知りたい場合は、もう少し詳細を教えていただけますか？&quot;,
-  &quot;skip_execution&quot;: true,
-  &quot;subtasks&quot;: [],
-  &quot;summary&quot;: &quot;ファルモの質問への回答&quot;
+  &quot;input&quot;: [
+    &quot;Take data ONLY from INPUT. Write result ONLY to OUTPUT. Think ONLY about the in-between procedure.&quot;
+  ],
+  &quot;knowledge_sufficient&quot;: false,
+  &quot;output&quot;: &quot;&lt;各ドキュメントの要約と全体概要&gt;&quot;,
+  &quot;skip_execution&quot;: false,
+  &quot;steps&quot;: [
+    {
+      &quot;done_when&quot;: &quot;doc/ 内のファイル一覧が取得される&quot;,
+      &quot;goal&quot;: &quot;ドキュメント配下のディレクトリ構造を確認&quot;,
+      &quot;id&quot;: 1,
+      &quot;params&quot;: {
+        &quot;path&quot;: &quot;doc&quot;
+      },
+      &quot;task&quot;: &quot;list_dir&quot;
+    },
+    {
+      &quot;done_when&quot;: &quot;アーキテクチャドキュメントの内容を取得&quot;,
+      &quot;goal&quot;: &quot;アーキテクチャ概要を読み込む&quot;,
+      &quot;id&quot;: 2,
+      &quot;params&quot;: {
+        &quot;path&quot;: &quot;doc/architecture/README.md&quot;
+      },
+      &quot;task&quot;: &quot;read_file&quot;
+    },
+    {
+      &quot;done_when&quot;: &quot;トップレベル README の内容を取得&quot;,
+      &quot;goal&quot;: &quot;プロジェクト全体の README を読み込む&quot;,
+      &quot;id&quot;: 3,
+      &quot;params&quot;: {
+        &quot;path&quot;: &quot;README.md&quot;
+      },
+      &quot;task&quot;: &quot;read_file&quot;
+    },
+    {
+      &quot;done_when&quot;: &quot;すべての主要ドキュメントが読み込まれ、統合された要約が生成される&quot;,
+      &quot;goal&quot;: &quot;doc/ 内の他の重要なドキュメント（ideas/, development-principles など）も確認して要約を補完&quot;,
+      &quot;id&quot;: 4,
+      &quot;params&quot;: {},
+      &quot;task&quot;: &quot;replan&quot;
+    }
+  ]
 }</pre>
 </section>
 </div>
@@ -629,14 +590,46 @@ Assistant: 『ファルモ』は、一般的に以下の2つの意味で使わ�
 <section>
 <h2>Harness内部状態（JSON）</h2>
 <pre>{
-  &quot;work_instructions&quot;: &quot;{\&quot;summary\&quot;:\&quot;ファルモの質問への回答\&quot;,\&quot;skip_execution\&quot;:true,\&quot;subtasks\&quot;:[],\&quot;output\&quot;:\&quot;『ファルモ』は、一般的に以下の2つの意味で使われます：\\n\\n1. **ファルモ（Falmo）** - 日本発のAIチャットボットプラットフォーム。企業向けカスタマーサポートや社内ヘルプなど、LLMを活用した対話型システムを提供しています。\\n\\n2. **ファルモ（Farmo/Farmer&#39;s）** - 農業関連のツールやサービス名として使われる場合があります。\\n\\n文脈によって意味が異なります。もし特定のプロジェクトや製品について知りたい場合は、もう少し詳細を教えていただけますか？\&quot;}&quot;,
+  &quot;work_instructions&quot;: &quot;{\&quot;input\&quot;:[\&quot;Take data ONLY from INPUT. Write result ONLY to OUTPUT. Think ONLY about the in-between procedure.\&quot;],\&quot;steps\&quot;:[{\&quot;id\&quot;:1,\&quot;task\&quot;:\&quot;list_dir\&quot;,\&quot;params\&quot;:{\&quot;path\&quot;:\&quot;doc\&quot;},\&quot;goal\&quot;:\&quot;ドキュメント配下のディレクトリ構造を確認\&quot;,\&quot;done_when\&quot;:\&quot;doc/ 内のファイル一覧が取得される\&quot;},{\&quot;id\&quot;:2,\&quot;task\&quot;:\&quot;read_file\&quot;,\&quot;params\&quot;:{\&quot;path\&quot;:\&quot;doc/architecture/README.md\&quot;},\&quot;goal\&quot;:\&quot;アーキテクチャ概要を読み込む\&quot;,\&quot;done_when\&quot;:\&quot;アーキテクチャドキュメントの内容を取得\&quot;},{\&quot;id\&quot;:3,\&quot;task\&quot;:\&quot;read_file\&quot;,\&quot;params\&quot;:{\&quot;path\&quot;:\&quot;README.md\&quot;},\&quot;goal\&quot;:\&quot;プロジェクト全体の README を読み込む\&quot;,\&quot;done_when\&quot;:\&quot;トップレベル README の内容を取得\&quot;},{\&quot;id\&quot;:4,\&quot;task\&quot;:\&quot;replan\&quot;,\&quot;params\&quot;:{},\&quot;goal\&quot;:\&quot;doc/ 内の他の重要なドキュメント（ideas/, development-principles など）も確認して要約を補完\&quot;,\&quot;done_when\&quot;:\&quot;すべての主要ドキュメントが読み込まれ、統合された要約が生成される\&quot;}],\&quot;output\&quot;:\&quot;&lt;各ドキュメントの要約と全体概要&gt;\&quot;,\&quot;skip_execution\&quot;:false,\&quot;knowledge_sufficient\&quot;:false}&quot;,
   &quot;plan&quot;: {
-    &quot;summary&quot;: &quot;『ファルモ』は、一般的に以下の2つの意味で使われます：\n\n1. **ファルモ（Falmo）** - 日本発のAIチャットボットプラットフォーム。企業向けカスタマーサポートや社内ヘルプなど、LLMを活用した対話型システムを提供しています。\n\n2. **ファルモ（Farmo/Farmer&#39;s）** - 農業関連のツールやサービス名として使われる場合があります。\n\n文脈によって意味が異なります。もし特定のプロジェクトや製品について知りたい場合は、もう少し詳細を教えていただけますか？&quot;,
-    &quot;skip_execution&quot;: true,
-    &quot;subtasks&quot;: []
+    &quot;summary&quot;: &quot;&lt;各ドキュメントの要約と全体概要&gt;&quot;,
+    &quot;skip_execution&quot;: false,
+    &quot;subtasks&quot;: [
+      {
+        &quot;id&quot;: 1,
+        &quot;task&quot;: &quot;list_dir&quot;,
+        &quot;params&quot;: {
+          &quot;path&quot;: &quot;doc&quot;
+        },
+        &quot;goal&quot;: &quot;ドキュメント配下のディレクトリ構造を確認&quot;,
+        &quot;done_when&quot;: &quot;doc/ 内のファイル一覧が取得される&quot;
+      },
+      {
+        &quot;id&quot;: 2,
+        &quot;task&quot;: null,
+        &quot;params&quot;: {},
+        &quot;goal&quot;: &quot;Execute with ReAct tools (not a registered task id): read_file. アーキテクチャ概要を読み込む&quot;,
+        &quot;done_when&quot;: &quot;アーキテクチャドキュメントの内容を取得&quot;
+      },
+      {
+        &quot;id&quot;: 3,
+        &quot;task&quot;: null,
+        &quot;params&quot;: {},
+        &quot;goal&quot;: &quot;Execute with ReAct tools (not a registered task id): read_file. プロジェクト全体の README を読み込む&quot;,
+        &quot;done_when&quot;: &quot;トップレベル README の内容を取得&quot;
+      },
+      {
+        &quot;id&quot;: 4,
+        &quot;task&quot;: null,
+        &quot;params&quot;: {},
+        &quot;goal&quot;: &quot;Execute with ReAct tools (not a registered task id): replan. doc/ 内の他の重要なドキュメント（ideas/, development-principles など）も確認して要約を補完&quot;,
+        &quot;done_when&quot;: &quot;すべての主要ドキュメントが読み込まれ、統合された要約が生成される&quot;
+      }
+    ],
+    &quot;knowledge_sufficient&quot;: false
   },
-  &quot;current_step&quot;: 0,
-  &quot;total_steps&quot;: 0,
+  &quot;current_step&quot;: 4,
+  &quot;total_steps&quot;: 4,
   &quot;tool_set&quot;: [],
   &quot;references&quot;: [],
   &quot;status&quot;: &quot;completed&quot;
@@ -645,15 +638,49 @@ Assistant: 『ファルモ』は、一般的に以下の2つの意味で使わ�
 <section>
 <h2>Harness内部状態（ミニPlanner適用後）</h2>
 <pre>{
-  &quot;work_instructions&quot;: &quot;{\&quot;summary\&quot;:\&quot;ファルモの質問への回答\&quot;,\&quot;skip_execution\&quot;:true,\&quot;subtasks\&quot;:[],\&quot;output\&quot;:\&quot;『ファルモ』は、一般的に以下の2つの意味で使われます：\\n\\n1. **ファルモ（Falmo）** - 日本発のAIチャットボットプラットフォーム。企業向けカスタマーサポートや社内ヘルプなど、LLMを活用した対話型システムを提供しています。\\n\\n2. **ファルモ（Farmo/Farmer&#39;s）** - 農業関連のツールやサービス名として使われる場合があります。\\n\\n文脈によって意味が異なります。もし特定のプロジェクトや製品について知りたい場合は、もう少し詳細を教えていただけますか？\&quot;}&quot;,
+  &quot;work_instructions&quot;: &quot;{\&quot;input\&quot;:[\&quot;Take data ONLY from INPUT. Write result ONLY to OUTPUT. Think ONLY about the in-between procedure.\&quot;],\&quot;steps\&quot;:[{\&quot;id\&quot;:1,\&quot;task\&quot;:\&quot;list_dir\&quot;,\&quot;params\&quot;:{\&quot;path\&quot;:\&quot;doc\&quot;},\&quot;goal\&quot;:\&quot;ドキュメント配下のディレクトリ構造を確認\&quot;,\&quot;done_when\&quot;:\&quot;doc/ 内のファイル一覧が取得される\&quot;},{\&quot;id\&quot;:2,\&quot;task\&quot;:\&quot;read_file\&quot;,\&quot;params\&quot;:{\&quot;path\&quot;:\&quot;doc/architecture/README.md\&quot;},\&quot;goal\&quot;:\&quot;アーキテクチャ概要を読み込む\&quot;,\&quot;done_when\&quot;:\&quot;アーキテクチャドキュメントの内容を取得\&quot;},{\&quot;id\&quot;:3,\&quot;task\&quot;:\&quot;read_file\&quot;,\&quot;params\&quot;:{\&quot;path\&quot;:\&quot;README.md\&quot;},\&quot;goal\&quot;:\&quot;プロジェクト全体の README を読み込む\&quot;,\&quot;done_when\&quot;:\&quot;トップレベル README の内容を取得\&quot;},{\&quot;id\&quot;:4,\&quot;task\&quot;:\&quot;replan\&quot;,\&quot;params\&quot;:{},\&quot;goal\&quot;:\&quot;doc/ 内の他の重要なドキュメント（ideas/, development-principles など）も確認して要約を補完\&quot;,\&quot;done_when\&quot;:\&quot;すべての主要ドキュメントが読み込まれ、統合された要約が生成される\&quot;}],\&quot;output\&quot;:\&quot;&lt;各ドキュメントの要約と全体概要&gt;\&quot;,\&quot;skip_execution\&quot;:false,\&quot;knowledge_sufficient\&quot;:false}&quot;,
   &quot;plan&quot;: {
-    &quot;summary&quot;: &quot;『ファルモ』は、一般的に以下の2つの意味で使われます：\n\n1. **ファルモ（Falmo）** - 日本発のAIチャットボットプラットフォーム。企業向けカスタマーサポートや社内ヘルプなど、LLMを活用した対話型システムを提供しています。\n\n2. **ファルモ（Farmo/Farmer&#39;s）** - 農業関連のツールやサービス名として使われる場合があります。\n\n文脈によって意味が異なります。もし特定のプロジェクトや製品について知りたい場合は、もう少し詳細を教えていただけますか？&quot;,
-    &quot;skip_execution&quot;: true,
-    &quot;subtasks&quot;: []
+    &quot;summary&quot;: &quot;&lt;各ドキュメントの要約と全体概要&gt;&quot;,
+    &quot;skip_execution&quot;: false,
+    &quot;subtasks&quot;: [
+      {
+        &quot;id&quot;: 1,
+        &quot;task&quot;: &quot;list_dir&quot;,
+        &quot;params&quot;: {
+          &quot;path&quot;: &quot;doc&quot;
+        },
+        &quot;goal&quot;: &quot;ドキュメント配下のディレクトリ構造を確認&quot;,
+        &quot;done_when&quot;: &quot;doc/ 内のファイル一覧が取得される&quot;
+      },
+      {
+        &quot;id&quot;: 2,
+        &quot;task&quot;: null,
+        &quot;params&quot;: {},
+        &quot;goal&quot;: &quot;Execute with ReAct tools (not a registered task id): read_file. アーキテクチャ概要を読み込む&quot;,
+        &quot;done_when&quot;: &quot;アーキテクチャドキュメントの内容を取得&quot;
+      },
+      {
+        &quot;id&quot;: 3,
+        &quot;task&quot;: null,
+        &quot;params&quot;: {},
+        &quot;goal&quot;: &quot;Execute with ReAct tools (not a registered task id): read_file. プロジェクト全体の README を読み込む&quot;,
+        &quot;done_when&quot;: &quot;トップレベル README の内容を取得&quot;
+      },
+      {
+        &quot;id&quot;: 4,
+        &quot;task&quot;: null,
+        &quot;params&quot;: {},
+        &quot;goal&quot;: &quot;Execute with ReAct tools (not a registered task id): replan. doc/ 内の他の重要なドキュメント（ideas/, development-principles など）も確認して要約を補完&quot;,
+        &quot;done_when&quot;: &quot;すべての主要ドキュメントが読み込まれ、統合された要約が生成される&quot;
+      }
+    ],
+    &quot;knowledge_sufficient&quot;: false
   },
-  &quot;current_step&quot;: 0,
-  &quot;total_steps&quot;: 0,
-  &quot;tool_set&quot;: [],
+  &quot;current_step&quot;: 4,
+  &quot;total_steps&quot;: 4,
+  &quot;tool_set&quot;: [
+    &quot;replan&quot;
+  ],
   &quot;references&quot;: [],
   &quot;status&quot;: &quot;completed&quot;
 }</pre>
@@ -665,7 +692,114 @@ Assistant: 『ファルモ』は、一般的に以下の2つの意味で使わ�
 <div>
 <section>
 <h2>タスク実行プラン</h2>
-（なし）
+<details class="subtask-zone" open>
+<summary>subtask 1</summary>
+<p class="mode-line">実行モード: <span class="mode-pill mode-driver">step-driver</span></p>
+<section>
+<h2>作業指示書</h2>
+<pre>{&quot;input&quot;:[&quot;Take data ONLY from INPUT. Write result ONLY to OUTPUT. Think ONLY about the in-between procedure.&quot;],&quot;steps&quot;:[{&quot;id&quot;:1,&quot;task&quot;:&quot;list_dir&quot;,&quot;params&quot;:{&quot;path&quot;:&quot;doc&quot;},&quot;goal&quot;:&quot;ドキュメント配下のディレクトリ構造を確認&quot;,&quot;done_when&quot;:&quot;doc/ 内のファイル一覧が取得される&quot;},{&quot;id&quot;:2,&quot;task&quot;:&quot;read_file&quot;,&quot;params&quot;:{&quot;path&quot;:&quot;doc/architecture/README.md&quot;},&quot;goal&quot;:&quot;アーキテクチャ概要を読み込む&quot;,&quot;done_when&quot;:&quot;アーキテクチャドキュメントの内容を取得&quot;},{&quot;id&quot;:3,&quot;task&quot;:&quot;read_file&quot;,&quot;params&quot;:{&quot;path&quot;:&quot;README.md&quot;},&quot;goal&quot;:&quot;プロジェクト全体の README を読み込む&quot;,&quot;done_when&quot;:&quot;トップレベル README の内容を取得&quot;},{&quot;id&quot;:4,&quot;task&quot;:&quot;replan&quot;,&quot;params&quot;:{},&quot;goal&quot;:&quot;doc/ 内の他の重要なドキュメント（ideas/, development-principles など）も確認して要約を補完&quot;,&quot;done_when&quot;:&quot;すべての主要ドキュメントが読み込まれ、統合された要約が生成される&quot;}],&quot;output&quot;:&quot;&lt;各ドキュメントの要約と全体概要&gt;&quot;,&quot;skip_execution&quot;:false,&quot;knowledge_sufficient&quot;:false}</pre>
+</section>
+<section>
+<h2>今のステップ（Harnessがテキスト変換）</h2>
+<pre>Step 1/4 (id 1)
+task: list_dir
+goal: ドキュメント配下のディレクトリ構造を確認
+done_when: doc/ 内のファイル一覧が取得される
+params: {&quot;path&quot;:&quot;doc&quot;}
+execution contract:
+  task: list_dir — ワークスペース内のディレクトリ一覧を取得する
+  run: step-driver (fixed order)
+  Required execution order (complete methods in this order; do not skip):
+    1. list_dir({&quot;path&quot;:&quot;doc&quot;})
+  
+  Done when all above: list_dir の結果が observation にある
+allowed tools (this step): list_dir
+status: completed
+</pre>
+</section>
+<section>
+<h2>スキーマ・ツール定義（ステップ別）</h2>
+<pre>- list_dir: args: { &quot;path&quot;: &quot;&lt;optional directory, default .&gt;&quot; }</pre>
+</section>
+</details>
+<details class="subtask-zone" open>
+<summary>subtask 2</summary>
+<p class="mode-line">実行モード: <span class="mode-pill mode-react">ReAct</span></p>
+<section>
+<h2>作業指示書</h2>
+<pre>{&quot;input&quot;:[&quot;Take data ONLY from INPUT. Write result ONLY to OUTPUT. Think ONLY about the in-between procedure.&quot;],&quot;steps&quot;:[{&quot;id&quot;:1,&quot;task&quot;:&quot;list_dir&quot;,&quot;params&quot;:{&quot;path&quot;:&quot;doc&quot;},&quot;goal&quot;:&quot;ドキュメント配下のディレクトリ構造を確認&quot;,&quot;done_when&quot;:&quot;doc/ 内のファイル一覧が取得される&quot;},{&quot;id&quot;:2,&quot;task&quot;:&quot;read_file&quot;,&quot;params&quot;:{&quot;path&quot;:&quot;doc/architecture/README.md&quot;},&quot;goal&quot;:&quot;アーキテクチャ概要を読み込む&quot;,&quot;done_when&quot;:&quot;アーキテクチャドキュメントの内容を取得&quot;},{&quot;id&quot;:3,&quot;task&quot;:&quot;read_file&quot;,&quot;params&quot;:{&quot;path&quot;:&quot;README.md&quot;},&quot;goal&quot;:&quot;プロジェクト全体の README を読み込む&quot;,&quot;done_when&quot;:&quot;トップレベル README の内容を取得&quot;},{&quot;id&quot;:4,&quot;task&quot;:&quot;replan&quot;,&quot;params&quot;:{},&quot;goal&quot;:&quot;doc/ 内の他の重要なドキュメント（ideas/, development-principles など）も確認して要約を補完&quot;,&quot;done_when&quot;:&quot;すべての主要ドキュメントが読み込まれ、統合された要約が生成される&quot;}],&quot;output&quot;:&quot;&lt;各ドキュメントの要約と全体概要&gt;&quot;,&quot;skip_execution&quot;:false,&quot;knowledge_sufficient&quot;:false}</pre>
+</section>
+<section>
+<h2>今のステップ（Harnessがテキスト変換）</h2>
+<pre>Step 2/4 (id 2)
+goal: Execute with ReAct tools (not a registered task id): read_file. アーキテクチャ概要を読み込む
+done_when: アーキテクチャドキュメントの内容を取得
+execution contract:
+  run: ReAct loop (freeform)
+  goal: Execute with ReAct tools (not a registered task id): read_file. アーキテクチャ概要を読み込む
+  done_when: アーキテクチャドキュメントの内容を取得
+  tools: (chosen by LLM from catalog)
+allowed tools (this step): read_file
+status: completed
+</pre>
+</section>
+<section>
+<h2>スキーマ・ツール定義（ステップ別）</h2>
+<pre>- read_file: args: { &quot;path&quot;: &quot;&lt;file path under project&gt;&quot; }</pre>
+</section>
+</details>
+<details class="subtask-zone" open>
+<summary>subtask 3</summary>
+<p class="mode-line">実行モード: <span class="mode-pill mode-react">ReAct</span></p>
+<section>
+<h2>作業指示書</h2>
+<pre>{&quot;input&quot;:[&quot;Take data ONLY from INPUT. Write result ONLY to OUTPUT. Think ONLY about the in-between procedure.&quot;],&quot;steps&quot;:[{&quot;id&quot;:1,&quot;task&quot;:&quot;list_dir&quot;,&quot;params&quot;:{&quot;path&quot;:&quot;doc&quot;},&quot;goal&quot;:&quot;ドキュメント配下のディレクトリ構造を確認&quot;,&quot;done_when&quot;:&quot;doc/ 内のファイル一覧が取得される&quot;},{&quot;id&quot;:2,&quot;task&quot;:&quot;read_file&quot;,&quot;params&quot;:{&quot;path&quot;:&quot;doc/architecture/README.md&quot;},&quot;goal&quot;:&quot;アーキテクチャ概要を読み込む&quot;,&quot;done_when&quot;:&quot;アーキテクチャドキュメントの内容を取得&quot;},{&quot;id&quot;:3,&quot;task&quot;:&quot;read_file&quot;,&quot;params&quot;:{&quot;path&quot;:&quot;README.md&quot;},&quot;goal&quot;:&quot;プロジェクト全体の README を読み込む&quot;,&quot;done_when&quot;:&quot;トップレベル README の内容を取得&quot;},{&quot;id&quot;:4,&quot;task&quot;:&quot;replan&quot;,&quot;params&quot;:{},&quot;goal&quot;:&quot;doc/ 内の他の重要なドキュメント（ideas/, development-principles など）も確認して要約を補完&quot;,&quot;done_when&quot;:&quot;すべての主要ドキュメントが読み込まれ、統合された要約が生成される&quot;}],&quot;output&quot;:&quot;&lt;各ドキュメントの要約と全体概要&gt;&quot;,&quot;skip_execution&quot;:false,&quot;knowledge_sufficient&quot;:false}</pre>
+</section>
+<section>
+<h2>今のステップ（Harnessがテキスト変換）</h2>
+<pre>Step 3/4 (id 3)
+goal: Execute with ReAct tools (not a registered task id): read_file. プロジェクト全体の README を読み込む
+done_when: トップレベル README の内容を取得
+execution contract:
+  run: ReAct loop (freeform)
+  goal: Execute with ReAct tools (not a registered task id): read_file. プロジェクト全体の README を読み込む
+  done_when: トップレベル README の内容を取得
+  tools: (chosen by LLM from catalog)
+allowed tools (this step): read_file
+status: completed
+</pre>
+</section>
+<section>
+<h2>スキーマ・ツール定義（ステップ別）</h2>
+<pre>- read_file: args: { &quot;path&quot;: &quot;&lt;file path under project&gt;&quot; }</pre>
+</section>
+</details>
+<details class="subtask-zone" open>
+<summary>subtask 4</summary>
+<p class="mode-line">実行モード: <span class="mode-pill mode-react">ReAct</span></p>
+<section>
+<h2>作業指示書</h2>
+<pre>{&quot;input&quot;:[&quot;Take data ONLY from INPUT. Write result ONLY to OUTPUT. Think ONLY about the in-between procedure.&quot;],&quot;steps&quot;:[{&quot;id&quot;:1,&quot;task&quot;:&quot;list_dir&quot;,&quot;params&quot;:{&quot;path&quot;:&quot;doc&quot;},&quot;goal&quot;:&quot;ドキュメント配下のディレクトリ構造を確認&quot;,&quot;done_when&quot;:&quot;doc/ 内のファイル一覧が取得される&quot;},{&quot;id&quot;:2,&quot;task&quot;:&quot;read_file&quot;,&quot;params&quot;:{&quot;path&quot;:&quot;doc/architecture/README.md&quot;},&quot;goal&quot;:&quot;アーキテクチャ概要を読み込む&quot;,&quot;done_when&quot;:&quot;アーキテクチャドキュメントの内容を取得&quot;},{&quot;id&quot;:3,&quot;task&quot;:&quot;read_file&quot;,&quot;params&quot;:{&quot;path&quot;:&quot;README.md&quot;},&quot;goal&quot;:&quot;プロジェクト全体の README を読み込む&quot;,&quot;done_when&quot;:&quot;トップレベル README の内容を取得&quot;},{&quot;id&quot;:4,&quot;task&quot;:&quot;replan&quot;,&quot;params&quot;:{},&quot;goal&quot;:&quot;doc/ 内の他の重要なドキュメント（ideas/, development-principles など）も確認して要約を補完&quot;,&quot;done_when&quot;:&quot;すべての主要ドキュメントが読み込まれ、統合された要約が生成される&quot;}],&quot;output&quot;:&quot;&lt;各ドキュメントの要約と全体概要&gt;&quot;,&quot;skip_execution&quot;:false,&quot;knowledge_sufficient&quot;:false}</pre>
+</section>
+<section>
+<h2>今のステップ（Harnessがテキスト変換）</h2>
+<pre>Step 4/4 (id 4)
+goal: Execute with ReAct tools (not a registered task id): replan. doc/ 内の他の重要なドキュメント（ideas/, development-principles など）も確認して要約を補完
+done_when: すべての主要ドキュメントが読み込まれ、統合された要約が生成される
+execution contract:
+  run: ReAct loop (freeform)
+  goal: Execute with ReAct tools (not a registered task id): replan. doc/ 内の他の重要なドキュメント（ideas/, development-principles など）も確認して要約を補完
+  done_when: すべての主要ドキュメントが読み込まれ、統合された要約が生成される
+  tools: (chosen by LLM from catalog)
+allowed tools (this step): replan
+status: completed
+</pre>
+</section>
+<section>
+<h2>スキーマ・ツール定義（ステップ別）</h2>
+<pre>（なし）</pre>
+</section>
+</details>
 </section>
 </div>
 </details>

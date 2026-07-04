@@ -89,7 +89,7 @@ impl Default for ReActConfig {
             },
             session_max_turns: SessionMemory::DEFAULT_MAX_TURNS,
             two_phase: false,
-            max_steps_plan: 4,
+            max_steps_plan: 8,
             max_thoughts: 1,
             use_step_driver: true,
             show_prompt: false,
@@ -1090,8 +1090,13 @@ impl<E: AgentBrain> ReActLoop<E> {
             answer: result.answer.clone(),
             phases,
         };
-        if let Err(err) = self.memory.diary(&entry) {
-            eprintln!("[memory] diary: {err}");
+        // 実行完了後の最終回答（TurnResult.answer）を MemoryBridge 経由で書く（mempalace 直叩きはしない）。
+        match self.memory.diary(&entry) {
+            Ok(()) => {
+                let preview: String = user_input.chars().take(40).collect();
+                eprintln!("[memory] diary written: {preview}");
+            }
+            Err(err) => eprintln!("[memory] diary: {err}"),
         }
     }
 

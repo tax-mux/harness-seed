@@ -164,7 +164,7 @@ fn pipeline_step_prefix_japanese() {
 
 #[test]
 fn pipeline_skip_execution_no_steps() {
-    let body = r#"{"summary":"hi","skip_execution":true,"subtasks":[]}"#;
+    let body = r#"{"summary":"hi","skip_execution":true,"knowledge_sufficient":true,"subtasks":[]}"#;
     let hs = harness_from_answer_body(body, "hello");
     assert!(hs.plan.skip_execution);
     assert_eq!(hs.total_steps, 0);

@@ -36,6 +36,8 @@ harness-seed/
 
 | File | Content |
 |------|------|
+| [doc/development-principles.md](doc/development-principles.md) | **Development principles** — prefer general solutions; case-only logic has low value |
+| [doc/memory.md](doc/memory.md) | **Memory layer** — Memory RAG, MemoryBridge, diary / search (local + mempalace) |
 | [doc/architecture/README.md](doc/architecture/README.md) | **Architecture index (JA)** — planning layer, execution layer, tool selection |
 | [doc/architecture-en/README.md](doc/architecture-en/README.md) | **Architecture index (EN)** |
 | [doc/agent-minimum-action-unit.md](doc/agent-minimum-action-unit.md) | Minimum action unit of the AI agent (diagram) |

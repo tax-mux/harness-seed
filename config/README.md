@@ -131,12 +131,17 @@ cargo run --release -- --config-agent ./config.agent.json
 | `room` | エージェント room の明示 override | `null` |
 
 レイアウト: **`wing_{project}` はプロジェクト共有**、その中の **`room={agent_name}` がエージェント固有**。検索は wing 全体（他エージェントの room も見える）。diary は自 room のみ。
+
+| キー | 意味 | 既定 |
+|------|------|------|
 | `timeout_secs` | 呼び出しタイムアウト | `30` |
 | `base_url` | HTTP モード用 | `http://127.0.0.1:8765` |
 
 別ディレクトリで起動すると wing が変わり、検索・diary が混ざらない。`HARNESS_WORKSPACE` があればそのディレクトリ名を使う。固定したいときは `"wing": "OpenHarness"` を明示。
 
 環境変数: `HARNESS_SEED_MEMPALACE_COMMAND` / `MEMPALACE_COMMAND`、`HARNESS_SEED_MEMPALACE_AGENT`。
+
+実装の正本: [doc/memory.md](../doc/memory.md)。
 
 例 — local のみ:
 
@@ -145,7 +150,8 @@ cargo run --release -- --config-agent ./config.agent.json
   "local": true,
   "backends": [],
   "recent_work": { "enabled": true, "max_entries": 3, "max_chars": 800 },
-  "search": { "enabled": true, "top_k": 5, "max_chars": 3200 }
+  "search": { "enabled": true, "top_k": 5, "max_chars": 3200 },
+  "rag": { "router": "llm", "max_queries": 3 }
 }
 ```
 

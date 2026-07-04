@@ -263,7 +263,8 @@ LLM テストはホスト未起動・モデル未準備時 **SKIP**（失敗に�
 
 | 項目 | 状態 |
 |------|------|
-| マルチターン会話メモリ | `SessionMemory` で直近 N ターンを `Previous turns` として注入（`react.session_max_turns`、REPL `clear`）。詳細は [context-memory-mapping.md §10](context-memory-mapping.md#10-短期記憶sessionmemory実装)。ターン内 `TurnTrace` は毎回新規 |
+| マルチターン会話メモリ | `SessionMemory` → `Previous turns`（**作業ログ経路のときだけ**）。外部記憶は [memory.md](memory.md)（Memory RAG + Bridge）。ターン内 `TurnTrace` は毎回新規 |
+| Observation サイズ | `MAX_OBSERVATION_CHARS` で切り詰め（巨大ファイルで文脈溢れ防止） |
 | システムプロンプトの外部設定 | `brain.rs` 定数のみ（`config.json` 非対応） |
 | 並列ツール呼び出し | 1 ステップ 1 `Action` のみ |
 | Thought の必須化 | LLM 次第で `action` / `answer` を直返し可能 |

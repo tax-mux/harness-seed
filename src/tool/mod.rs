@@ -214,6 +214,27 @@ mod tests {
     }
 
     #[test]
+    fn read_file_rejects_directory_with_clear_message() {
+        let mut rt = ToolRuntime::with_packs(
+            RuntimeEnvironment::detect(),
+            None,
+            &[ToolPack::Coding],
+        );
+        let obs = rt.execute("read_file", &json!({ "path": "doc/ideas" })).1;
+        assert!(!obs.ok);
+        assert!(
+            obs.output.contains("directory") && obs.output.contains("list_dir"),
+            "got: {}",
+            obs.output
+        );
+        assert!(
+            !obs.output.contains("os error 5") && !obs.output.to_lowercase().contains("access"),
+            "must not look like a permission error: {}",
+            obs.output
+        );
+    }
+
+    #[test]
     fn write_and_read_file_roundtrip() {
         let rel = "tmp/test_tool_roundtrip.txt";
         let abs = resolve_in_workspace(rel).unwrap();

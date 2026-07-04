@@ -28,6 +28,7 @@ Planning schema (inside answer content when using JSON):
   ],
   "output": "<fixed OUTPUT contract line copied from prompt>",
   "skip_execution": <bool>,
+  "knowledge_sufficient": <bool>
 }
 
 Rules:
@@ -35,13 +36,16 @@ Rules:
 - Instruction contract: "Take data ONLY from INPUT. Write result ONLY to OUTPUT. Think ONLY about the in-between procedure."
 - Your job is the PROCEDURE in between: emit ordered `steps` that transform INPUT into OUTPUT.
 - Prefer emitting `answer` with the work instructions (JSON plan or numbered steps) when clear; use `thought` only for brief decomposition if needed.
-- If Recalled context is insufficient and you need prior project knowledge, emit `recall` with a short query (read-only; limited rounds). Then plan with the new hits.
+- The plan loop is short. Do NOT explore for many steps here (no tools except optional `recall`). If evidence is missing, answer quickly with knowledge_sufficient:false and steps that send the exec layer to investigate.
+- Decide knowledge_sufficient first: true only if Recalled and/or general knowledge fully answer the user without tools (greetings, chit-chat, self-contained facts). false if you need workspace files, tools, or more evidence than Recalled provides (project overview, code, configs). Thin or off-topic Recalled is NOT sufficient.
+- skip_execution may be true ONLY when knowledge_sufficient is true. The harness rejects skip otherwise and runs a freeform execution step (tools chosen by the exec layer).
+- If Recalled is insufficient and you need prior project knowledge from memory, emit `recall` with a short query (read-only; limited rounds). Then plan with the new hits.
 - Do NOT emit action / tools in the plan layer.
 - Use only task ids from the task catalog that match the data contract.
 - Greetings, chit-chat, and Q&A that need no tools: one answer step with STRING plan JSON:
-  {"step":"answer","content":"{\"summary\":\"short label\",\"skip_execution\":true,\"subtasks\":[],\"output\":\"<final reply to the user>\"}"}
+  {"step":"answer","content":"{\"summary\":\"short label\",\"skip_execution\":true,\"knowledge_sufficient\":true,\"subtasks\":[],\"output\":\"<final reply to the user>\"}"}
   Put the user-facing reply in `output` (required when skip_execution is true). Do NOT invent subtasks from bullet lists.
-- Recalled context: if relevant to the question, ground the plan/output on it (do not overwrite with conflicting generalities). If Recalled is irrelevant, general knowledge is fine — do not claim it came from memory. For project-specific gaps, use `recall` or leave for tools.
+- Recalled context: if relevant to the question, ground the plan/output on it (do not overwrite with conflicting generalities). If Recalled is irrelevant, general knowledge is fine — do not claim it came from memory. For project-specific gaps, set knowledge_sufficient false and plan tool steps (or recall first).
 - content MUST be a JSON string (escaped quotes), never a nested object.
 - When a later step depends on results not yet known, emit a step with task `replan` and a goal describing what to decide after prior steps finish.
 - When ready, use step answer with the full work instructions (JSON or text) in content.
@@ -110,11 +114,12 @@ impl RulePlanBrain {
             || input.eq_ignore_ascii_case("time")
             || input.starts_with("echo ")
         {
-            return r#"{"summary":"direct","skip_execution":true,"subtasks":[]}"#.into();
+            return r#"{"summary":"direct","skip_execution":true,"knowledge_sufficient":true,"subtasks":[]}"#.into();
         }
         serde_json::json!({
             "summary": "single task",
             "skip_execution": false,
+            "knowledge_sufficient": false,
             "subtasks": [{
                 "id": 1,
                 "goal": input,

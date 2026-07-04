@@ -77,21 +77,31 @@ fn format_diary_aaak(entry: &DiaryEntry) -> String {
     // mempalace add_drawer は content[:100] で ID を決めるため、先頭をユニークにする
     parts.push(format!("id:{}", unique_stamp()));
     parts.push(format!("SESSION:{date}"));
-    if !entry.summary.trim().is_empty() {
-        parts.push(format!("summary:{}", compress_token(&entry.summary)));
-    }
     if !entry.user_input.trim().is_empty() {
-        parts.push(format!("user:{}", compress_token(&entry.user_input)));
+        parts.push(format!("user:{}", compress_token(&entry.user_input, 80)));
+    }
+    if !entry.summary.trim().is_empty() {
+        parts.push(format!("summary:{}", compress_token(&entry.summary, 120)));
     }
     if !entry.phases.is_empty() {
         let phase_bits: Vec<String> = entry
             .phases
             .iter()
-            .map(|p| format!("p{}:{}", p.id, compress_token(&p.goal)))
+            .map(|p| {
+                let goal = compress_token(&p.goal, 60);
+                let ans = compress_token(&p.answer, 80);
+                if ans.is_empty() {
+                    format!("p{}:{goal}", p.id)
+                } else {
+                    format!("p{}:{goal}>{ans}", p.id)
+                }
+            })
             .collect();
         parts.push(format!("phases:{}", phase_bits.join("+")));
-    } else if !entry.answer.trim().is_empty() {
-        parts.push(format!("answer:{}", compress_token(&entry.answer)));
+    }
+    // 最終回答は phases の有無に関わらず残す（「さっき何してた」の主根拠）
+    if !entry.answer.trim().is_empty() {
+        parts.push(format!("answer:{}", compress_token(&entry.answer, 400)));
     }
     parts.join("|")
 }
@@ -104,13 +114,13 @@ fn unique_stamp() -> u128 {
         .unwrap_or(0)
 }
 
-fn compress_token(s: &str) -> String {
+fn compress_token(s: &str, max_chars: usize) -> String {
     let t = s.split_whitespace().collect::<Vec<_>>().join(".");
     let count = t.chars().count();
-    if count <= 120 {
+    if count <= max_chars {
         t
     } else {
-        let snippet: String = t.chars().take(120).collect();
+        let snippet: String = t.chars().take(max_chars).collect();
         format!("{snippet}…")
     }
 }
@@ -281,6 +291,40 @@ mod tests {
         assert_eq!(w[0]["wing"], "wing_harness-seed");
         assert_eq!(w[0]["room"], "harness-seed");
         assert!(w[0]["content"].as_str().unwrap().contains("SESSION:"));
+    }
+
+    #[test]
+    fn diary_always_includes_final_answer_even_with_phases() {
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let transport = FakeTransport {
+            response: Value::Null,
+            writes: writes.clone(),
+        };
+        let mut cfg = MempalaceConfig::default();
+        cfg.wing = Some("wing_harness-seed".into());
+        cfg.agent_name = "harness-seed".into();
+        let client = MempalaceClient::with_transport(cfg, transport);
+        let mut bridge = MempalaceBridge::with_client(client);
+        bridge
+            .diary(&DiaryEntry {
+                user_input: "doc/ideasを調べて".into(),
+                summary: "ideas list".into(),
+                answer: "ideas には memory-and-replan などがある".into(),
+                phases: vec![crate::memory::DiaryPhase {
+                    id: 1,
+                    goal: "list ideas".into(),
+                    answer: "listed".into(),
+                }],
+            })
+            .unwrap();
+        let content = writes.lock().unwrap()[0]["content"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(content.contains("answer:"));
+        assert!(content.contains("memory-and-replan") || content.contains("ideas"));
+        assert!(content.contains("phases:"));
+        assert!(content.contains("user:"));
     }
 
     #[test]

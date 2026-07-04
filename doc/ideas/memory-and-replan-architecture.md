@@ -11,12 +11,16 @@ HarnessSeed に「外部メモリ参照」「計画層の情報探索」「再�
 
 | # | 項目 | 状態 | コード |
 |---|------|------|--------|
-| 1–3 | `MemoryBridge` / `NoopBridge` / `LocalDiaryBridge` + recent_work / search | ✅ | `src/memory/`、`config.memory` |
+| 1–3 | `MemoryBridge` / local / layered + recent_work / search / diary | ✅ | `src/memory/`、`config.memory` |
+| — | **記憶 RAG**（作業ログ / 知識の分岐、アダプタ手前） | ✅ | `src/memory/rag.rs` — **正本: [../memory.md](../memory.md)** |
 | 4 | `PlanQueue` | ✅ | `src/plan/queue.rs`、`run_turn_advance` |
 | 5 | `task: "replan"` 分岐 | ✅ | `is_replan_subtask` → `run_replan_subtask` |
-| 6 | `RecallCapability`（計画層内ミニループ） | ✅ | `AgentStep::Recall`、`run_layer_loop` + `memory.recall_max_rounds` |
+| 6 | `RecallCapability`（計画層内・知識チャネル） | ✅ | `AgentStep::Recall`、`recall_knowledge` |
+| — | `knowledge_sufficient` / skip 拒否 / 計画 answer 未達時の強制 | ✅ | `PlanArtifact`、`layer.rs` |
 | — | mempalace バックエンド | ✅ | `adapters/mempalace-adapter` + `MempalaceBridge` |
-| — | corpus2skill バックエンド | ❌ 未実装 | `provider` 拡張で接続予定 |
+| — | corpus2skill バックエンド | ❌ 未実装 | `backends` 拡張で接続予定 |
+
+以下の本文は設計時のメモ。**現行の注入は「無条件 recent + user_input search」ではなく RAG 分岐**（§2 の図は歴史的経緯）。実装の正本は [memory.md](../memory.md)。
 
 ---
 
@@ -61,12 +65,14 @@ flowchart TB
     EXEC -->|通常完了| QUEUE
 ```
 
-| # | 名称 | 役割 | 実装対象 |
-|---|------|------|----------|
-| ① | 無条件事前注入 | 「続きやって」的な曖昧指示に対応。毎ターン機械的に直近作業をrecalledへ | `MemoryBridge::recent_work()` |
-| ② | 条件付き検索 | `user_input`をクエリにした意味検索 | `MemoryBridge::search()` |
-| ③ | RecallCapability | 計画層が自分で「情報が足りない」と判断した時だけ、読み取り専用で追加検索 | `PlanBrainMode::decide()`内部の非公開ループ |
-| ④ | PlanQueue | subtask列を固定Vecでなく可変キューにし、再計画で差し込めるようにする | `plan.subtasks`の型変更 + dispatcher |
+| # | 名称 | 役割（現行） | 実装 |
+|---|------|--------------|------|
+| ① | 作業ログ経路 | ルータが `work_log` のときだけ `recent_work` | `MemoryRag` + `MemoryBridge::recent_work` |
+| ② | 知識経路 | ルータが `knowledge` のとき `search(queries)` | `MemoryRag` + `MemoryBridge::search` |
+| ③ | RecallCapability | 計画層が追加の知識検索を要求 | `AgentStep::Recall`（上限 `recall_max_rounds`） |
+| ④ | PlanQueue | 可変 subtask キュー + replan | `plan/queue.rs` |
+
+※ 初期案の「①無条件注入」は話題混線の原因になるため、実装では **分岐付き RAG** に置き換えた。
 
 ---
 

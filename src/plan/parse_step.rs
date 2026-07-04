@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn answer_content_object_is_stringified() {
-        let raw = r#"{"step":"answer","content":{"summary":"chat","skip_execution":true,"subtasks":[]}}"#;
+        let raw = r#"{"step":"answer","content":{"summary":"chat","skip_execution":true,"knowledge_sufficient":true,"subtasks":[]}}"#;
         let step = parse_plan_agent_step(raw).unwrap();
         match step {
             AgentStep::Answer(body) => {

@@ -17,6 +17,7 @@ fn format_plan_for_display_lists_subtasks() {
             goal: String::new(),
             done_when: "listed".into(),
         }],
+        knowledge_sufficient: Some(false),
     };
     let reg = TaskRegistry::builtin();
     let text = format_plan_for_display(&plan, &reg);

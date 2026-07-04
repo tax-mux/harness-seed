@@ -135,7 +135,7 @@ fn main() -> ExitCode {
     if memory_layers != "noop" {
         eprintln!("memory.layers: {memory_layers}");
     }
-    let memory_rag = build_memory_rag_for_app(app, &react_config, no_llm);
+    let memory_rag = build_memory_rag_for_app(&app, &react_config, no_llm);
     let mut react = ReActLoop::with_blocks_and_tasks(
         brains.exec,
         brains.plan,

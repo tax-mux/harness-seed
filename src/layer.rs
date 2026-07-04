@@ -253,8 +253,94 @@ pub fn run_layer_loop<B: AgentBrain>(
         }
     }
 
+    // 計画層: 長く探索する場所ではない。answer 未達なら「課題解決に妥当な計画」を一度だけ強制する。
+    if opts.context_label == "plan" {
+        return finalize_plan_without_answer(
+            brain,
+            blocks,
+            session,
+            user_input,
+            &mut trace,
+            opts.max_steps,
+            plan,
+            subtask_results,
+            turn_observer,
+            show_prompt,
+            verbose,
+        );
+    }
+
     Err(ReActError::MaxStepsExceeded {
         limit: opts.max_steps,
+    })
+}
+
+const PLAN_FINALIZE_DIRECTIVE: &str = "\
+Plan step limit reached. Emit {\"step\":\"answer\",\"content\":...} now \
+with a plan that appropriately solves the user request. Do not emit thought or recall.";
+
+fn finalize_plan_without_answer<B: AgentBrain>(
+    brain: &mut B,
+    blocks: &mut crate::context::PromptBlocks,
+    session: &SessionMemory,
+    user_input: &str,
+    trace: &mut TurnTrace,
+    max_steps: usize,
+    plan: Option<PlanArtifact>,
+    subtask_results: Vec<SubtaskExecResult>,
+    turn_observer: Option<&TurnObserver>,
+    show_prompt: bool,
+    verbose: bool,
+) -> Result<TurnResult, ReActError> {
+    let steps_used = max_steps.saturating_add(1);
+    // Turn trace に載せて decide に渡す（計画層プロンプトの Plan trace に出る）
+    trace.push_thought(PLAN_FINALIZE_DIRECTIVE.into());
+    let prompt_ctx = TurnPromptContext::new(blocks, user_input, trace, session);
+    let step = brain.decide(&prompt_ctx);
+    if let Some(usage) = brain.poll_context_usage() {
+        if show_prompt {
+            eprintln_step_prompt("plan", steps_used, &usage.prompt_body);
+        }
+        eprintln!("[context plan] {usage}");
+        emit_llm_step(turn_observer, "plan", steps_used, &usage, &step);
+        trace.push_context_usage(usage);
+    }
+    if verbose {
+        eprintln!("[plan] finalize decide: {step:?}");
+    }
+
+    let answer = match step {
+        AgentStep::Answer(answer) => {
+            eprintln!("[plan] finalized via mandatory answer after step limit");
+            answer
+        }
+        other => {
+            let kind = match &other {
+                AgentStep::Thought(_) => "thought",
+                AgentStep::Action(_) => "action",
+                AgentStep::Recall(_) => "recall",
+                AgentStep::Answer(_) => "answer",
+            };
+            trace.push_thought(format!(
+                "mandatory answer not produced (got {kind}); freeform exec for user request"
+            ));
+            eprintln!("[plan] no answer after finalize prompt — freeform exec for user request");
+            // 定型ナラティブは載せない。ユーザ要求だけを実行層へ渡す。
+            serde_json::to_string(&PlanArtifact::single_subtask(user_input))
+                .unwrap_or_else(|_| "{}".into())
+        }
+    };
+
+    let context = TurnContextSummary::from_usages(&trace.context_usages);
+    Ok(TurnResult {
+        answer,
+        trace: std::mem::take(trace),
+        steps_used,
+        context,
+        plan,
+        harness: None,
+        subtask_results,
+        advance_phases: vec![],
     })
 }
 
@@ -284,6 +370,7 @@ pub fn run_plan_layer<B: AgentBrain>(
                 summary: "direct chat".into(),
                 skip_execution: true,
                 subtasks: vec![],
+                knowledge_sufficient: Some(true),
             };
             let harness = HarnessState::new("(trivial chat — plan layer skipped)", plan);
             if echo_harness_parsed {
@@ -453,7 +540,7 @@ mod tests {
             steps: vec![
                 AgentStep::Recall("ファルモ".into()),
                 AgentStep::Answer(
-                    r#"{"summary":"ok","skip_execution":true,"subtasks":[]}"#.into(),
+                    r#"{"summary":"ok","skip_execution":true,"knowledge_sufficient":true,"subtasks":[]}"#.into(),
                 ),
             ],
             index: 0,
@@ -494,5 +581,114 @@ mod tests {
             .thoughts
             .iter()
             .any(|t| t.contains("recall[1/2]") && t.contains("hits=1")));
+    }
+
+    struct AlwaysThought;
+
+    impl AgentBrain for AlwaysThought {
+        fn decide(&mut self, _ctx: &TurnPromptContext<'_>) -> AgentStep {
+            AgentStep::Thought("still exploring in plan layer".into())
+        }
+    }
+
+    #[test]
+    fn plan_loop_without_answer_requests_mandatory_plan_then_freeform_fallback() {
+        let mut brain = AlwaysThought;
+        let mut tools = ToolRuntime::from_registry(
+            crate::runtime::RuntimeEnvironment::detect(),
+            None,
+            crate::tool::full_builtin_registry(false),
+        );
+        let mut blocks = PromptBlocks::default();
+        let session = SessionMemory::default();
+
+        let (harness, trace, steps_used) = run_plan_layer(
+            &mut brain,
+            &mut tools,
+            &mut blocks,
+            &session,
+            "どういう改造が計画されているの？",
+            4,
+            false,
+            false,
+            false,
+            false,
+            None,
+            None,
+            None,
+            2,
+        )
+        .unwrap();
+
+        // 4 ステップ + 強制 answer 要求の 1 回
+        assert_eq!(steps_used, 5);
+        assert!(!harness.plan.skip_execution);
+        assert_eq!(harness.plan.knowledge_sufficient, Some(false));
+        assert_eq!(harness.plan.subtasks.len(), 1);
+        assert!(harness.plan.subtasks[0].task.is_none());
+        assert_eq!(
+            harness.plan.subtasks[0].goal,
+            "どういう改造が計画されているの？"
+        );
+        assert!(trace
+            .thoughts
+            .iter()
+            .any(|t| t.contains("Emit") && t.contains("answer")));
+        assert!(trace
+            .thoughts
+            .iter()
+            .any(|t| t.contains("mandatory answer not produced")));
+    }
+
+    struct FinalizeAnswerBrain {
+        calls: usize,
+    }
+
+    impl AgentBrain for FinalizeAnswerBrain {
+        fn decide(&mut self, _ctx: &TurnPromptContext<'_>) -> AgentStep {
+            self.calls += 1;
+            if self.calls <= 4 {
+                return AgentStep::Thought("not yet".into());
+            }
+            AgentStep::Answer(
+                r#"{"summary":"ok","skip_execution":true,"knowledge_sufficient":true,"subtasks":[],"output":"done"}"#
+                    .into(),
+            )
+        }
+    }
+
+    #[test]
+    fn plan_loop_mandatory_answer_can_skip_when_sufficient() {
+        let mut brain = FinalizeAnswerBrain { calls: 0 };
+        let mut tools = ToolRuntime::from_registry(
+            crate::runtime::RuntimeEnvironment::detect(),
+            None,
+            crate::tool::full_builtin_registry(false),
+        );
+        let mut blocks = PromptBlocks::default();
+        let session = SessionMemory::default();
+
+        let (harness, _, steps_used) = run_plan_layer(
+            &mut brain,
+            &mut tools,
+            &mut blocks,
+            &session,
+            "hello",
+            4,
+            false,
+            false,
+            false,
+            false,
+            None,
+            None,
+            None,
+            2,
+        )
+        .unwrap();
+
+        assert_eq!(steps_used, 5);
+        assert!(harness.plan.skip_execution);
+        assert_eq!(harness.plan.knowledge_sufficient, Some(true));
+        assert!(harness.plan.subtasks.is_empty());
     }
 }

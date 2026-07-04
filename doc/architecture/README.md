@@ -2,6 +2,10 @@
 
 HarnessSeed の二層モデル（計画層・実行層）とツール選定の解説。
 
+開発時の方針（汎用解の優先）: [development-principles.md](../development-principles.md)
+
+記憶層（RAG・Bridge・diary）: [memory.md](../memory.md)
+
 | # | ドキュメント | 内容 |
 |---|--------------|------|
 | 00 | [harness-seed の構造](00_harness-seedの構造.md) | 全体フロー、層の役割、実行モード |

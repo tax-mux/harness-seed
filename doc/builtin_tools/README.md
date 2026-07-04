@@ -21,6 +21,8 @@ HarnessSeed が `ToolRuntime`（`src/tool/`）に実装しているツール。L
 - **カタログ**: `ToolRegistry::format_catalog()` → `PromptBlocks.tool_catalog`
 - **システムプロンプト**: `src/llm/brain.rs` の `SYSTEM_PROMPT` にも列挙（追加時は両方を更新）
 - **パス制限**: `read_file` / `write_file` / `list_dir` / `grep` / `run_cmd` のパスは [ワークスペース](#ワークスペース) 内のみ
+- **Observation 上限**: 全ツール出力は `MAX_OBSERVATION_CHARS`（`src/action.rs`）で切り詰め（巨大ファイルで文脈溢れ防止）
+- **ディレクトリ**: `read_file` にディレクトリを渡すと失敗し、`list_dir` を案内する（Windows の os error 5 誤認を避ける）
 
 ### ワークスペース
 
