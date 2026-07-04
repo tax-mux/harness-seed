@@ -1794,7 +1794,10 @@ fn build_synthesis_evidence(
     }
 
     for obs in observations {
-        if !obs.ok || budget == 0 {
+        if budget == 0 {
+            break;
+        }
+        if !obs.ok {
             continue;
         }
         let snippet = truncate_evidence_chars(&obs.output, item_max_chars.min(budget));
