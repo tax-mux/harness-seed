@@ -60,7 +60,8 @@ pub use context::{
     REACT_SYSTEM_CORE, REACT_WEB_SEARCH_GUIDANCE,
 };
 pub use context_map::{
-    analyze_messages, analyze_prompt_body, format_colormap, ContextSection, ContextSectionKind,
+    aggregate_prompt_sections, analyze_messages, analyze_prompt_body, format_colormap,
+    format_colormap_titled, ContextSection, ContextSectionKind,
 };
 pub use context_log::{
     default_log_path, rotate_log_file, ContextLogEntry, ContextLogWriter, DEFAULT_CONTEXT_LOG_REL,
@@ -87,7 +88,8 @@ pub use plan::{
     RulePlanBrain, Subtask, PLAN_REACT_SYSTEM_CORE, PLAN_SYSTEM_CORE,
     build_plan_layer_messages, format_plan_fixed_zone_system, format_plan_layer_prompt,
     format_plan_zone_after_preview, format_plan_zone_prompt_preview,
-    format_planner_fixed_zone_html, is_replan_subtask, PlanQueue, PlanQueueError, REPLAN_TASK_ID,
+    format_planner_fixed_zone_html, execution_waves, is_replan_subtask, PlanQueue, PlanQueueError,
+    REPLAN_TASK_ID, ScheduleError,
 };
 pub use protocol::{
     protocol_error_response, run_json_repl, ActionDto, ContextSummaryDto, ObservationDto,
@@ -95,7 +97,8 @@ pub use protocol::{
     WireErrorBody, WireRequest, WireResponse, WIRE_VERSION,
 };
 pub use lifecycle::{
-    CompositeLifecycle, HostScratch, HostView, NoopLifecycle, TurnLifecycle, WriteScope,
+    invoke_lifecycle, CompositeLifecycle, HostScratch, HostView, NoopLifecycle, TurnLifecycle,
+    WriteScope,
 };
 pub use react::{
     run_repl, PlanPreviewResult, ReActConfig, ReActError, ReActLoop, SubtaskExecResult, TurnResult,

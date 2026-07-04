@@ -939,7 +939,8 @@ mod tests {
                     params: serde_json::json!({}),
                     goal: "dir".into(),
                     done_when: "done".into(),
-                }],
+                                    depends_on: vec![],
+}],
                 knowledge_sufficient: None,
             },
         );
@@ -995,7 +996,8 @@ mod tests {
                     params: serde_json::json!({}),
                     goal: "dir".into(),
                     done_when: "done".into(),
-                }],
+                                    depends_on: vec![],
+}],
                 knowledge_sufficient: None,
             },
         );
@@ -1057,7 +1059,8 @@ mod tests {
                     params: serde_json::json!({}),
                     goal: "dir".into(),
                     done_when: "done".into(),
-                }],
+                                    depends_on: vec![],
+}],
                 knowledge_sufficient: None,
             },
         );

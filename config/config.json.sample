@@ -15,6 +15,7 @@
     "show_tool_output": true,
     "session_max_turns": 8,
     "two_phase": true,
+    "parallel_subtasks": false,
     "max_steps_plan": 4,
     "advance": {
       "enabled": true,

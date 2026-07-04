@@ -196,14 +196,16 @@ mod tests {
                     params: json!({}),
                     goal: "step one".into(),
                     done_when: "done".into(),
-                },
+                                    depends_on: vec![],
+},
                 Subtask {
                     id: 2,
                     task: None,
                     params: json!({}),
                     goal: "step two".into(),
                     done_when: "done".into(),
-                },
+                                    depends_on: vec![],
+},
             ],
             knowledge_sufficient: None,
         };

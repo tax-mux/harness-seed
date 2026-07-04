@@ -9,15 +9,43 @@
 //! - `subtasks.{id}`: 各サブタスク専用（子チケットなど）。キーは **subtask id**（配列ではない）
 //!
 //! hook には [`HostView`] を渡す。**参照は袋全体、書き込みは自ノードのみ**。
-//! エラーは hook 内で処理し、呼び出し元へ伝播させないこと。
+//! ホストはエラーを hook 内で処理するのが望ましい。パニックした場合もエンジンが
+//! [`invoke_lifecycle`] で捕捉し、本筋の `run_turn` は継続する。
 //!
 //! 詳細: `doc/lifecycle.md`。
 
 use std::collections::BTreeMap;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use serde_json::{json, Map, Value};
 
 use crate::plan::{PlanArtifact, Subtask};
+
+/// hook 本体を実行し、パニックを本筋に伝播させない。
+///
+/// `HostView` が `&mut HostScratch` を含むため `AssertUnwindSafe` で包む。
+/// パニック時は stderr に出し、呼び出し元へは戻るだけとする（袋は途中書き込みのまま残りうる）。
+pub fn invoke_lifecycle(hook_name: &str, f: impl FnOnce()) {
+    match catch_unwind(AssertUnwindSafe(f)) {
+        Ok(()) => {}
+        Err(payload) => {
+            eprintln!(
+                "[lifecycle] {hook_name} panicked (ignored): {}",
+                panic_payload_message(&payload)
+            );
+        }
+    }
+}
+
+fn panic_payload_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic payload".into()
+    }
+}
 
 /// ターン専用のホスト状態（LLM コンテキストに出さない）。
 ///
@@ -300,14 +328,18 @@ impl CompositeLifecycle {
 
 impl TurnLifecycle for CompositeLifecycle {
     fn on_turn_started(&self, user_input: &str, mut host: HostView<'_>) {
-        for h in &self.hooks {
-            h.on_turn_started(user_input, host.reborrow());
+        for (i, h) in self.hooks.iter().enumerate() {
+            invoke_lifecycle(&format!("composite[{i}].on_turn_started"), || {
+                h.on_turn_started(user_input, host.reborrow());
+            });
         }
     }
 
     fn on_plan_finished(&self, user_input: &str, plan: &PlanArtifact, mut host: HostView<'_>) {
-        for h in &self.hooks {
-            h.on_plan_finished(user_input, plan, host.reborrow());
+        for (i, h) in self.hooks.iter().enumerate() {
+            invoke_lifecycle(&format!("composite[{i}].on_plan_finished"), || {
+                h.on_plan_finished(user_input, plan, host.reborrow());
+            });
         }
     }
 
@@ -319,8 +351,10 @@ impl TurnLifecycle for CompositeLifecycle {
         index: usize,
         mut host: HostView<'_>,
     ) {
-        for h in &self.hooks {
-            h.on_subtask_started(user_input, plan, subtask, index, host.reborrow());
+        for (i, h) in self.hooks.iter().enumerate() {
+            invoke_lifecycle(&format!("composite[{i}].on_subtask_started"), || {
+                h.on_subtask_started(user_input, plan, subtask, index, host.reborrow());
+            });
         }
     }
 
@@ -333,8 +367,10 @@ impl TurnLifecycle for CompositeLifecycle {
         steps_used: usize,
         mut host: HostView<'_>,
     ) {
-        for h in &self.hooks {
-            h.on_subtask_finished(user_input, plan, subtask, answer, steps_used, host.reborrow());
+        for (i, h) in self.hooks.iter().enumerate() {
+            invoke_lifecycle(&format!("composite[{i}].on_subtask_finished"), || {
+                h.on_subtask_finished(user_input, plan, subtask, answer, steps_used, host.reborrow());
+            });
         }
     }
 
@@ -346,8 +382,10 @@ impl TurnLifecycle for CompositeLifecycle {
         steps_used: usize,
         mut host: HostView<'_>,
     ) {
-        for h in &self.hooks {
-            h.on_turn_finished(user_input, answer, plan, steps_used, host.reborrow());
+        for (i, h) in self.hooks.iter().enumerate() {
+            invoke_lifecycle(&format!("composite[{i}].on_turn_finished"), || {
+                h.on_turn_finished(user_input, answer, plan, steps_used, host.reborrow());
+            });
         }
     }
 }
@@ -491,7 +529,8 @@ mod tests {
                 params: json!({}),
                 goal: "g".into(),
                 done_when: "d".into(),
-            }],
+                            depends_on: vec![],
+}],
             knowledge_sufficient: None,
         };
         composite.on_turn_started("hi", HostView::new(&mut scratch, WriteScope::Turn));

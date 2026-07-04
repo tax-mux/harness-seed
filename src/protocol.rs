@@ -264,6 +264,10 @@ fn turn_response_err(session_turns: usize, err: &ReActError) -> WireResponse {
             "plan_parse_failed",
             format!("Plan parse failed: {message}"),
         ),
+        ReActError::ScheduleFailed { message } => (
+            "schedule_failed",
+            format!("Subtask schedule failed: {message}"),
+        ),
     };
     WireResponse::Turn {
         version: WIRE_VERSION,

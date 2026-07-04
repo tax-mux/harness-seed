@@ -552,14 +552,16 @@ mod tests {
                     params: serde_json::json!({ "path": "src" }),
                     goal: "list".into(),
                     done_when: "listed".into(),
-                },
+                                    depends_on: vec![],
+},
                 Subtask {
                     id: 2,
                     task: Some("write_file_verify".into()),
                     params: serde_json::json!({}),
                     goal: "write".into(),
                     done_when: "verified".into(),
-                },
+                                    depends_on: vec![],
+},
             ],
             knowledge_sufficient: None,
         };
@@ -586,7 +588,8 @@ mod tests {
                 params: serde_json::json!({ "path": "src" }),
                 goal: String::new(),
                 done_when: String::new(),
-            }],
+                            depends_on: vec![],
+}],
             knowledge_sufficient: None,
         };
         let st = plan.subtasks[0].clone();
@@ -606,7 +609,8 @@ mod tests {
             params: serde_json::json!({ "path": "src" }),
             goal: String::new(),
             done_when: String::new(),
-        };
+                    depends_on: vec![],
+};
         let text = reg.format_subtask_execution_for_display(&sub);
         assert!(text.contains("step-driver"));
         assert!(text.contains("1. list_dir"));
@@ -631,7 +635,8 @@ mod tests {
                 params: serde_json::json!({}),
                 goal: "do it".into(),
                 done_when: "done".into(),
-            }],
+                            depends_on: vec![],
+}],
             knowledge_sufficient: None,
         };
         reg.resolve_plan(&mut plan, "user input", None);
@@ -668,7 +673,8 @@ mod tests {
                 params: serde_json::json!({}),
                 goal: String::new(),
                 done_when: String::new(),
-            }],
+                            depends_on: vec![],
+}],
             knowledge_sufficient: None,
         };
         let contract = crate::plan::PlanDataContract::new(
@@ -706,14 +712,16 @@ mod tests {
                     params: serde_json::json!({}),
                     goal: "load".into(),
                     done_when: "loaded".into(),
-                },
+                                    depends_on: vec![],
+},
                 Subtask {
                     id: 2,
                     task: Some("save_item".into()),
                     params: serde_json::json!({}),
                     goal: "persist changes".into(),
                     done_when: "saved".into(),
-                },
+                                    depends_on: vec![],
+},
             ],
             knowledge_sufficient: None,
         };
@@ -731,7 +739,8 @@ mod tests {
                     params: serde_json::json!({ "id": 9 }),
                     goal: goals.join(" → "),
                     done_when: "saved".into(),
-                }];
+                                    depends_on: vec![],
+}];
             },
         );
         reg.resolve_plan(&mut plan, "user", Some(&contract));
@@ -763,7 +772,8 @@ mod tests {
                 params: serde_json::json!({}),
                 goal: String::new(),
                 done_when: String::new(),
-            }],
+                            depends_on: vec![],
+}],
             knowledge_sufficient: None,
         };
         let contract = crate::plan::PlanDataContract::new("in", "out", "fetch_item")
