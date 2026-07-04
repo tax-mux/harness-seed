@@ -9,11 +9,17 @@ autoexamples = false
 autotests = true
 autobenches = true
 
+[features]
+default = ["mempalace"]
+## mempalace HTTP アダプタ（`memory.provider: "mempalace"`）。外すと本体は noop/local のみ。
+mempalace = ["dep:mempalace-adapter"]
+
 [dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
+mempalace-adapter = { path = "adapters/mempalace-adapter", optional = true }
 
 [[test]]
 name = "brain-plan"

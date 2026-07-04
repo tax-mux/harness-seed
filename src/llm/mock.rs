@@ -18,7 +18,17 @@ impl LlmConnector for MockLlmConnector {
         let plan_answer = r#"{"step":"answer","content":"{\"summary\":\"mock plan\",\"skip_execution\":false,\"subtasks\":[{\"id\":1,\"goal\":\"first step\",\"done_when\":\"done\"},{\"id\":2,\"goal\":\"second step\",\"done_when\":\"done\"}]}"}"#;
         let plan_list_dir = r#"{"step":"answer","content":"{\"summary\":\"list\",\"skip_execution\":false,\"subtasks\":[{\"id\":1,\"task\":\"list_dir\",\"params\":{\"path\":\"src\"},\"goal\":\"\",\"done_when\":\"\"}]}"}"#;
 
-        let content = if last_user.contains("Next plan step JSON") {
+        let content = if last_user.contains("Memory RAG route") {
+            if last_user.contains("続き")
+                || last_user.contains("つづき")
+                || last_user.to_lowercase().contains("continue")
+            {
+                r#"{"work_log":true,"knowledge":false,"queries":[]}"#
+            } else {
+                // user_input 行から短いクエリを拾えなくても knowledge 分岐だけ示せばよい
+                r#"{"work_log":false,"knowledge":true,"queries":["mock-query"]}"#
+            }
+        } else if last_user.contains("Next plan step JSON") {
             if last_user.contains("STEP_DRIVER_TEST") {
                 if last_user.contains("[thought") {
                     plan_list_dir

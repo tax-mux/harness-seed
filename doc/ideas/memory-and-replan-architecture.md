@@ -1,4 +1,4 @@
-# メモリ外付け + 計画層拡張 + タスク連結（未実装・設計メモ）
+# メモリ外付け + 計画層拡張 + タスク連結
 
 HarnessSeed に「外部メモリ参照」「計画層の情報探索」「再計画によるタスク連結」を段階的に足すための設計メモ。単発の機能追加ではなく、下の4層が積み重なった1つの構造として扱う。
 
@@ -7,7 +7,16 @@ HarnessSeed に「外部メモリ参照」「計画層の情報探索」「再�
 - 参照: [../architecture/00_harness-seedの構造.md](../architecture/00_harness-seedの構造.md)（二層モデルの原則）
 - 参照: [../context-memory-mapping.md](../context-memory-mapping.md)（記憶の層と格納先）
 
-**優先度**: 本体の機能強化が先。ここは設計メモのみ。実装するなら下記「7. 実装順序」の番号どおりに。
+**実装状況**（2026-07）:
+
+| # | 項目 | 状態 | コード |
+|---|------|------|--------|
+| 1–3 | `MemoryBridge` / `NoopBridge` / `LocalDiaryBridge` + recent_work / search | ✅ | `src/memory/`、`config.memory` |
+| 4 | `PlanQueue` | ✅ | `src/plan/queue.rs`、`run_turn_advance` |
+| 5 | `task: "replan"` 分岐 | ✅ | `is_replan_subtask` → `run_replan_subtask` |
+| 6 | `RecallCapability`（計画層内ミニループ） | ✅ | `AgentStep::Recall`、`run_layer_loop` + `memory.recall_max_rounds` |
+| — | mempalace バックエンド | ✅ | `adapters/mempalace-adapter` + `MempalaceBridge` |
+| — | corpus2skill バックエンド | ❌ 未実装 | `provider` 拡張で接続予定 |
 
 ---
 

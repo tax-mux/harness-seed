@@ -6,6 +6,7 @@ mod display;
 mod parse;
 mod parse_step;
 mod prompt;
+mod queue;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -31,6 +32,7 @@ pub use display::{
     format_plan_zone_after_preview, format_plan_zone_prompt_preview,
     format_planner_fixed_zone_html,
 };
+pub use queue::{is_replan_subtask, PlanQueue, PlanQueueError, REPLAN_TASK_ID};
 
 /// 計画フェーズ用 system 指示（ツールカタログなし）。
 pub const PLAN_SYSTEM_CORE: &str = r#"You are a planning agent. Reply with ONE JSON object only (no markdown).
@@ -53,6 +55,8 @@ Rules:
 - For external / current-events / web-only questions, use task `web_research` with params `{"query":"<search string>"}` when it appears in the catalog.
 - For repo-only coding work, use tasks like `list_dir`, `write_file_verify`, or freeform goals with grep/read_file/write_file/run_cmd.
 - Use skip_execution: true only for pure Q&A, greetings, or help with no filesystem/shell/web work.
+- When skip_execution is true, set `output` to the final user-facing reply (execution layer may not run).
+- Recalled context: use it when relevant; general knowledge is fine when Recalled is irrelevant — do not claim it came from memory.
 - Subtask ids must be unique positive integers starting at 1.
 "#;
 
@@ -104,6 +108,55 @@ impl PlanArtifact {
     pub fn needs_execution(&self) -> bool {
         !self.skip_execution && !self.subtasks.is_empty()
     }
+
+    /// `skip_execution` 時に exec LLM を呼ばず返す本文。
+    ///
+    /// 優先: 計画 JSON の `output` → 意味のある `summary` → 平文の作業指示書。
+    /// 取れなければ `None`（呼び出し側は exec にフォールバックしてよい）。
+    pub fn direct_reply(&self, work_instructions: &str) -> Option<String> {
+        let wi = work_instructions.trim();
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(wi) {
+            if let Some(o) = v
+                .get("output")
+                .and_then(|x| x.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                return Some(o.to_string());
+            }
+            if let Some(s) = v
+                .get("summary")
+                .and_then(|x| x.as_str())
+                .map(str::trim)
+                .filter(|s| usable_direct_reply(s))
+            {
+                return Some(s.to_string());
+            }
+        }
+        let sum = self.summary.trim();
+        if usable_direct_reply(sum) {
+            return Some(sum.to_string());
+        }
+        if !wi.is_empty()
+            && !wi.starts_with('{')
+            && !wi.contains("plan step parse error")
+            && usable_direct_reply(wi)
+        {
+            return Some(wi.to_string());
+        }
+        None
+    }
+}
+
+fn usable_direct_reply(text: &str) -> bool {
+    let t = text.trim();
+    if t.chars().count() < 4 {
+        return false;
+    }
+    !matches!(
+        t,
+        "direct execution" | "direct chat" | "single task" | "planned task" | "direct"
+    )
 }
 
 /// 計画層の成果物をコンソール向けに整形する。
@@ -291,4 +344,39 @@ fn format_mission_freeform(
         "\nComplete ONLY this subtask. Do not replan or work ahead to other subtasks.",
     );
     mission
+}
+
+#[cfg(test)]
+mod direct_reply_tests {
+    use super::*;
+
+    #[test]
+    fn prefers_output_field_in_work_instructions() {
+        let plan = PlanArtifact {
+            summary: "short label".into(),
+            skip_execution: true,
+            subtasks: vec![],
+        };
+        let wi = r#"{"summary":"short label","skip_execution":true,"subtasks":[],"output":"最終回答本文"}"#;
+        assert_eq!(
+            plan.direct_reply(wi).as_deref(),
+            Some("最終回答本文")
+        );
+    }
+
+    #[test]
+    fn falls_back_to_summary_when_no_output() {
+        let plan = PlanArtifact {
+            summary: "これは十分な長さの要約回答です".into(),
+            skip_execution: true,
+            subtasks: vec![],
+        };
+        assert!(plan.direct_reply("{}").unwrap().contains("要約回答"));
+    }
+
+    #[test]
+    fn ignores_placeholder_summary() {
+        let plan = PlanArtifact::passthrough("hi");
+        assert!(plan.direct_reply("").is_none());
+    }
 }

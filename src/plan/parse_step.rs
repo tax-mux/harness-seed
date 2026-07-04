@@ -7,9 +7,38 @@ use crate::llm::{extract_json_objects, salvage_answer_step_content};
 #[derive(Debug, Deserialize)]
 #[serde(tag = "step", rename_all = "snake_case")]
 enum PlanStepJson {
-    Thought { content: String },
+    Thought {
+        #[serde(deserialize_with = "deserialize_flex_text")]
+        content: String,
+    },
     Action { tool: String, #[serde(default)] args: Value },
-    Answer { content: String },
+    Answer {
+        /// 文字列、または計画 JSON オブジェクト（オブジェクトは文字列化して Harness へ渡す）。
+        #[serde(deserialize_with = "deserialize_flex_text")]
+        content: String,
+    },
+    /// 読み取り専用メモリ検索（計画層のみ）。
+    Recall {
+        #[serde(alias = "content", deserialize_with = "deserialize_flex_text")]
+        query: String,
+    },
+}
+
+/// LLM が `content` にオブジェクトを載せた場合も受け入れる。
+fn deserialize_flex_text<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    Ok(flex_value_to_text(value))
+}
+
+fn flex_value_to_text(value: Value) -> String {
+    match value {
+        Value::String(s) => s,
+        Value::Null => String::new(),
+        other => other.to_string(),
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -31,10 +60,16 @@ fn merge_plan_step(
     parsed: Result<AgentStep, PlanStepParseError>,
     thought: &mut Option<String>,
     answer: &mut Option<String>,
+    recall: &mut Option<String>,
     last_err: &mut Option<PlanStepParseError>,
 ) {
     match parsed {
         Ok(AgentStep::Answer(a)) => *answer = Some(a),
+        Ok(AgentStep::Recall(q)) => {
+            if recall.is_none() {
+                *recall = Some(q);
+            }
+        }
         Ok(AgentStep::Thought(t)) => {
             if thought.is_none() {
                 *thought = Some(t);
@@ -49,12 +84,14 @@ fn merge_plan_chunk(
     chunk: &str,
     thought: &mut Option<String>,
     answer: &mut Option<String>,
+    recall: &mut Option<String>,
     last_err: &mut Option<PlanStepParseError>,
 ) {
     merge_plan_step(
         parse_one_plan_json(chunk),
         thought,
         answer,
+        recall,
         last_err,
     );
     if answer.is_none() {
@@ -74,12 +111,13 @@ fn parse_one_plan_json(text: &str) -> Result<AgentStep, PlanStepParseError> {
             "plan layer cannot execute tools (attempted: {tool}); reply with thought or answer only"
         )),
         PlanStepJson::Answer { content } => AgentStep::Answer(content),
+        PlanStepJson::Recall { query } => AgentStep::Recall(query),
     })
 }
 
 /// 計画層 ReAct の 1 ステップを [`AgentStep`] に変換する。
 ///
-/// 1 行 1 JSON が理想。複数オブジェクト出力時は **answer > thought > action** の優先度で 1 件選ぶ。
+/// 1 行 1 JSON が理想。複数オブジェクト出力時は **answer > recall > thought** の優先度で 1 件選ぶ。
 pub fn parse_plan_agent_step(raw: &str) -> Result<AgentStep, PlanStepParseError> {
     let trimmed = strip_code_fence(raw.trim());
     if trimmed.is_empty() {
@@ -92,28 +130,32 @@ pub fn parse_plan_agent_step(raw: &str) -> Result<AgentStep, PlanStepParseError>
 
     let mut thought = None;
     let mut answer = None;
+    let mut recall = None;
     let mut last_err = None;
 
     for chunk in extract_json_objects(trimmed) {
-        merge_plan_chunk(&chunk, &mut thought, &mut answer, &mut last_err);
+        merge_plan_chunk(&chunk, &mut thought, &mut answer, &mut recall, &mut last_err);
     }
 
     if answer.is_none() {
-        merge_plan_chunk(trimmed, &mut thought, &mut answer, &mut last_err);
+        merge_plan_chunk(trimmed, &mut thought, &mut answer, &mut recall, &mut last_err);
     }
 
-    if answer.is_none() && thought.is_none() {
+    if answer.is_none() && thought.is_none() && recall.is_none() {
         for line in trimmed.lines() {
             let line = line.trim();
             if line.is_empty() {
                 continue;
             }
-            merge_plan_chunk(line, &mut thought, &mut answer, &mut last_err);
+            merge_plan_chunk(line, &mut thought, &mut answer, &mut recall, &mut last_err);
         }
     }
 
     if let Some(a) = answer {
         return Ok(AgentStep::Answer(a));
+    }
+    if let Some(q) = recall {
+        return Ok(AgentStep::Recall(q));
     }
     if let Some(t) = thought {
         return Ok(AgentStep::Thought(t));
@@ -157,4 +199,28 @@ fn strip_code_fence(s: &str) -> &str {
         .unwrap_or(s);
     let s = s.strip_suffix("```").unwrap_or(s);
     s.trim()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn answer_content_object_is_stringified() {
+        let raw = r#"{"step":"answer","content":{"summary":"chat","skip_execution":true,"subtasks":[]}}"#;
+        let step = parse_plan_agent_step(raw).unwrap();
+        match step {
+            AgentStep::Answer(body) => {
+                assert!(body.contains("skip_execution"));
+                assert!(body.contains("true"));
+            }
+            other => panic!("expected answer, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recall_step_parses() {
+        let step = parse_plan_agent_step(r#"{"step":"recall","query":"ファルモ"}"#).unwrap();
+        assert!(matches!(step, AgentStep::Recall(q) if q == "ファルモ"));
+    }
 }

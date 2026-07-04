@@ -77,6 +77,100 @@ cargo run --release -- --config-agent ./config.agent.json
 
 `workspace` は `HARNESS_WORKSPACE` に設定され、`list_dir` / `run_cmd` 等の基準になります。
 
+## `memory` セクション（外部記憶ブリッジ）
+
+ターン開始時に `recalled` へ直近作業・検索ヒットを注入し、ターン終了時に diary へ要約を書きます。
+
+**local（プロセス内 diary）は外部で置き換えません。** セッション作業は常に local に残り、mempalace などは `backends` で**追加**します。不通時も local だけは動きます。
+
+| キー | 意味 | 既定 |
+|------|------|------|
+| `local` | プロセス内 diary を使う | `backends` 指定時は `true` |
+| `backends` | 追加バックエンド名の配列 | `[]` |
+| `providers` | 名前 → 固有設定（本体は解釈しない） | `{}` |
+| `recent_work.*` / `search.*` | チャネル別 retrieve オプション | 下記 |
+| `rag.*` | アダプタ手前の記憶 RAG（作業ログ / 知識の分岐） | 下記 |
+| `recall_max_rounds` | 計画層が `{"step":"recall"}` で追加検索できる回数（0=無効） | `2` |
+
+ターン開始時は **記憶 RAG**（`src/memory/rag.rs`）が先に分岐する。アダプタ（local / mempalace）は `recent_work` / `search` の I/O だけ。
+
+| 経路 | いつ | Bridge |
+|------|------|--------|
+| 作業ログ | `work_log=true`（続き系） | `recent_work` |
+| 知識検索 | `knowledge=true` | `search(queries[])` |
+
+| レイヤ | 役割 |
+|--------|------|
+| `local` | 今セッションの作業（常設推奨） |
+| `mempalace` 等 | 長期・横断検索（追加、feature `mempalace`） |
+
+共通オプション:
+
+| キー | 意味 | 既定 |
+|------|------|------|
+| `recent_work.enabled` | 作業ログ経路で直近 diary を取る | `true` |
+| `recent_work.max_entries` | レイヤあたりの件数 | `3` |
+| `recent_work.max_chars` | `[recent work]` 文字上限 | `800` |
+| `search.enabled` | 知識経路で検索する | `true` |
+| `search.top_k` | 検索ヒット上限 | `5` |
+| `search.max_chars` | `[search hit]` 文字上限 | `3200` |
+| `rag.router` | `rule`（ヒント語）\| `llm`（JSON 分岐、失敗時 rule） | `llm` |
+| `rag.max_queries` | 知識検索語の上限 | `3` |
+
+`providers.mempalace`（Cursor の `mcp.json` と同じ起動が既定）:
+
+| キー | 意味 | 既定 |
+|------|------|------|
+| `protocol` | `mcp_stdio` \| `tools_path` \| `mcp_jsonrpc` | `mcp_stdio` |
+| `command` | MCP 実行ファイル | `python`（Windows は `C:\Python312\python.exe` があればそれ） |
+| `args` | MCP 引数 | `["-m","mempalace.mcp_server"]` |
+| `agent_name` | エージェント room 名（diary の書き込み先） | `harness-seed` |
+| `wing_from_cwd` | 起動ディレクトリ名 → `wing_{project}` | `true` |
+| `init_wing_if_missing` | 初回に wing が無ければシード drawer で作成 | `true` |
+| `wing` | 明示プロジェクトキー（最優先） | `null` |
+| `room` | エージェント room の明示 override | `null` |
+
+レイアウト: **`wing_{project}` はプロジェクト共有**、その中の **`room={agent_name}` がエージェント固有**。検索は wing 全体（他エージェントの room も見える）。diary は自 room のみ。
+| `timeout_secs` | 呼び出しタイムアウト | `30` |
+| `base_url` | HTTP モード用 | `http://127.0.0.1:8765` |
+
+別ディレクトリで起動すると wing が変わり、検索・diary が混ざらない。`HARNESS_WORKSPACE` があればそのディレクトリ名を使う。固定したいときは `"wing": "OpenHarness"` を明示。
+
+環境変数: `HARNESS_SEED_MEMPALACE_COMMAND` / `MEMPALACE_COMMAND`、`HARNESS_SEED_MEMPALACE_AGENT`。
+
+例 — local のみ:
+
+```json
+"memory": {
+  "local": true,
+  "backends": [],
+  "recent_work": { "enabled": true, "max_entries": 3, "max_chars": 800 },
+  "search": { "enabled": true, "top_k": 5, "max_chars": 3200 }
+}
+```
+
+例 — local + mempalace（Cursor と同じ MCP stdio）:
+
+```json
+"memory": {
+  "local": true,
+  "backends": ["mempalace"],
+  "providers": {
+    "mempalace": {
+      "protocol": "mcp_stdio",
+      "command": "C:\\Python312\\python.exe",
+      "args": ["-m", "mempalace.mcp_server"],
+      "agent_name": "harness-seed"
+    }
+  }
+}
+```
+
+旧 `provider: "mempalace"` も **local+mempalace** として解釈します（local を消さない）。`provider: "noop"` はレイヤなし。
+
+新しいバックエンド: `MemoryBridge` 実装 → `factory` の `build_backend` に登録 → `backends` と `providers.<名前>` を書く。
+
+
 ## `tools` セクション（組み込みツール）
 
 | キー | 意味 |

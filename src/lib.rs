@@ -15,11 +15,13 @@ pub mod harness;
 pub mod context_metrics;
 pub mod layer;
 pub mod llm;
+pub mod memory;
 pub mod plan;
 pub mod protocol;
 pub mod react;
 pub mod runtime;
 pub mod session;
+pub mod text_match;
 pub mod tasks;
 pub mod tool;
 pub mod tool_display;
@@ -40,9 +42,18 @@ pub use brain::{AgentBrain, BrainMode, BrainPair, SimpleRuleBrain};
 pub use brave_search::{BraveSearchConfig, BraveSearchError, WebSearchHit};
 pub use config::{
     default_config_path, AppConfig, BraveSearchSection, ConfigError, LlmSection, LogRotationConfig,
-    LogRotationSection, LogSection,
-    PromptSection, ReactSection, ToolsSection,
+    LogRotationSection, LogSection, MemoryRecentWorkSection, MemorySearchSection, MemorySection,
+    MempalaceSection, PromptSection, ReactSection, ToolsSection,
 };
+pub use memory::{
+    build_memory_bridge, build_memory_rag, diary_from_plan, format_recalled_block,
+    inject_memory_recalled, provider_options, recall_knowledge, resolve_memory_layers, DiaryEntry,
+    DiaryPhase, LayeredMemoryBridge, LocalDiaryBridge, MemoryBridge, MemoryError, MemoryLayerPlan,
+    MemoryRag, MemoryRoute, MemoryRouter, MemoryRuntimeConfig, NoopBridge, RecalledItem,
+    RecalledSource, RuleRouter, PROVIDER_LOCAL, PROVIDER_MEMPALACE, PROVIDER_NOOP,
+};
+#[cfg(feature = "mempalace")]
+pub use memory::MempalaceBridge;
 pub use context::{
     format_plan_rule_prompt_preview, format_trace, ContextError, PromptBlocks, TurnPromptContext,
     REACT_SYSTEM_CORE, REACT_WEB_SEARCH_GUIDANCE,
@@ -75,7 +86,7 @@ pub use plan::{
     PlanWriteTarget, RulePlanBrain, Subtask, PLAN_REACT_SYSTEM_CORE, PLAN_SYSTEM_CORE,
     build_plan_layer_messages, format_plan_fixed_zone_system, format_plan_layer_prompt,
     format_plan_zone_after_preview, format_plan_zone_prompt_preview,
-    format_planner_fixed_zone_html,
+    format_planner_fixed_zone_html, is_replan_subtask, PlanQueue, PlanQueueError, REPLAN_TASK_ID,
 };
 pub use protocol::{
     protocol_error_response, run_json_repl, ActionDto, ContextSummaryDto, ObservationDto,
@@ -95,7 +106,7 @@ pub use context_manifest::{
     VisionAttachment, SCOPED_RECALL_PREFIX,
 };
 pub use runtime::{OsFamily, RuntimeEnvironment, ShellKind};
-pub use session::{PastTurn, SessionMemory};
+pub use session::{PastTurn, SessionMemory, SessionPromptPolicy};
 pub use tasks::{
     apply_template, apply_template_value, audit_trace, ContextManifestSpec, ExecStep,
     MissionRenderContext, extract_reference_uid, StepAudit, SubtaskToolPolicy, TaskDefinition,

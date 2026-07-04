@@ -7,12 +7,23 @@ pub struct PastTurn {
     pub answer: String,
 }
 
+/// Previous turns をプロンプトに載せるか（記憶 RAG の `work_log` と揃える）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SessionPromptPolicy {
+    /// 作業ログ経路: 直近ターンを載せる。
+    IncludePrior,
+    /// 知識のみ / 不要: Previous turns を載せない。
+    #[default]
+    OmitPrior,
+}
+
 /// REPL セッション内の短期記憶（直近 N ターンをプロンプトへ注入）。
 #[derive(Debug, Clone)]
 pub struct SessionMemory {
     turns: Vec<PastTurn>,
     max_turns: usize,
     max_chars_per_field: usize,
+    prompt_policy: SessionPromptPolicy,
 }
 
 impl SessionMemory {
@@ -24,7 +35,25 @@ impl SessionMemory {
             turns: Vec::new(),
             max_turns: max_turns.max(1),
             max_chars_per_field: Self::DEFAULT_MAX_CHARS_PER_FIELD,
+            prompt_policy: SessionPromptPolicy::OmitPrior,
         }
+    }
+
+    /// 記憶 RAG の `work_log` に合わせて Previous turns の出し分けを設定する。
+    pub fn set_prompt_policy(&mut self, policy: SessionPromptPolicy) {
+        self.prompt_policy = policy;
+    }
+
+    pub fn prompt_policy(&self) -> SessionPromptPolicy {
+        self.prompt_policy
+    }
+
+    /// ルータ用の直前ターン一行要約（全文は渡さない）。
+    pub fn prior_one_liner(&self) -> Option<String> {
+        self.turns.last().map(|t| {
+            let answer = truncate_field(t.answer.clone(), 120);
+            format!("User: {} | Assistant: {answer}", t.user_input)
+        })
     }
 
     pub fn with_limits(max_turns: usize, max_chars_per_field: usize) -> Self {
@@ -61,8 +90,10 @@ impl SessionMemory {
     }
 
     /// `Previous turns:` セクション（空なら空文字）。
+    ///
+    /// [`SessionPromptPolicy::IncludePrior`]（作業ログ経路）のときだけ載せる。
     pub fn format_for_prompt(&self) -> String {
-        if self.turns.is_empty() {
+        if self.prompt_policy != SessionPromptPolicy::IncludePrior || self.turns.is_empty() {
             return String::new();
         }
         let mut out = String::from("Previous turns:\n");
@@ -102,14 +133,28 @@ mod tests {
     }
 
     #[test]
-    fn format_includes_user_and_answer() {
+    fn format_includes_user_and_answer_when_work_log() {
         let mut s = SessionMemory::new(4);
         s.push_turn("first question", "first answer");
+        s.set_prompt_policy(SessionPromptPolicy::IncludePrior);
         let text = s.format_for_prompt();
         assert!(text.contains("Previous turns:"));
         assert!(text.contains("[turn 1]"));
         assert!(text.contains("User: first question"));
         assert!(text.contains("Assistant: first answer"));
+    }
+
+    #[test]
+    fn format_omits_prior_on_knowledge_route() {
+        let mut s = SessionMemory::new(4);
+        s.push_turn(
+            "このプロジェクトについて説明して",
+            "HarnessSeed は ReAct harness です",
+        );
+        s.set_prompt_policy(SessionPromptPolicy::OmitPrior);
+        assert!(s.format_for_prompt().is_empty());
+        s.set_prompt_policy(SessionPromptPolicy::IncludePrior);
+        assert!(s.format_for_prompt().contains("HarnessSeed"));
     }
 
     #[test]

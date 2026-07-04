@@ -8,6 +8,7 @@ use crate::context::{
 };
 use crate::context_metrics::TurnContextSummary;
 use crate::harness::HarnessState;
+use crate::memory::{format_recalled_block, MemoryBridge};
 use crate::plan::PlanArtifact;
 use crate::react::{ReActError, SubtaskExecResult, TurnResult};
 use crate::turn_observer::{emit_llm_step, emit_observation_step, emit_phase_started, TurnObserver};
@@ -15,6 +16,9 @@ use crate::session::SessionMemory;
 use crate::tool::{execute_action, ToolRuntime};
 use crate::tool_display::eprintln_tool_execution;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// 計画層の `recall` ステップ既定上限。
+pub const DEFAULT_MAX_RECALL_ROUNDS: usize = 2;
 
 /// 1 ループ（計画層・サブタスク実行）あたり許容する `thought` の上限。
 pub const DEFAULT_MAX_THOUGHTS: usize = 1;
@@ -58,6 +62,8 @@ impl LayerLoopOptions {
 }
 
 /// 計画層・実行層共通の ReAct ループ。
+///
+/// `memory` / `max_recall_rounds` は計画層の [`AgentStep::Recall`] 用（実行層は `max_recall_rounds=0`）。
 pub fn run_layer_loop<B: AgentBrain>(
     brain: &mut B,
     tools: &mut ToolRuntime,
@@ -72,8 +78,11 @@ pub fn run_layer_loop<B: AgentBrain>(
     subtask_results: Vec<SubtaskExecResult>,
     turn_observer: Option<&TurnObserver>,
     stop_requested: Option<&AtomicBool>,
+    memory: Option<&dyn MemoryBridge>,
+    max_recall_rounds: usize,
 ) -> Result<TurnResult, ReActError> {
     let mut trace = TurnTrace::default();
+    let mut recall_rounds = 0usize;
 
     for steps_used in 1..=opts.max_steps {
         if stop_requested
@@ -199,6 +208,48 @@ pub fn run_layer_loop<B: AgentBrain>(
                     advance_phases: vec![],
                 });
             }
+            AgentStep::Recall(query) => {
+                let query = query.trim().to_string();
+                if query.is_empty() {
+                    trace.push_thought("recall ignored: empty query".into());
+                    continue;
+                }
+                if max_recall_rounds == 0 || memory.is_none() {
+                    trace.push_thought(format!(
+                        "recall not available (query={query}); continue without memory search"
+                    ));
+                    continue;
+                }
+                if recall_rounds >= max_recall_rounds {
+                    trace.push_thought(format!(
+                        "recall limit reached ({max_recall_rounds}); plan with current Recalled context"
+                    ));
+                    continue;
+                }
+                let Some(mem) = memory else { continue };
+                // 計画層 recall は知識チャネルのみ（作業ログ分岐は通さない）
+                let hits = crate::memory::recall_knowledge(mem, 5, &query);
+                recall_rounds += 1;
+                if hits.is_empty() {
+                    trace.push_thought(format!(
+                        "recall[{recall_rounds}/{max_recall_rounds}] query={query} hits=0"
+                    ));
+                } else {
+                    let block = format_recalled_block("plan recall", &hits, 3200);
+                    blocks.push_recalled(block);
+                    trace.push_thought(format!(
+                        "recall[{recall_rounds}/{max_recall_rounds}] query={query} hits={}",
+                        hits.len()
+                    ));
+                    if verbose {
+                        eprintln!(
+                            "[{}] recall query={query:?} hits={}",
+                            opts.context_label,
+                            hits.len()
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -221,6 +272,8 @@ pub fn run_plan_layer<B: AgentBrain>(
     echo_harness_parsed: bool,
     turn_observer: Option<&TurnObserver>,
     stop_requested: Option<&AtomicBool>,
+    memory: Option<&dyn MemoryBridge>,
+    max_recall_rounds: usize,
 ) -> Result<(HarnessState, crate::action::TurnTrace, usize), ReActError> {
     if let Some(contract) = &blocks.plan_data_contract {
         if contract.skip_plan_layer() {
@@ -253,6 +306,8 @@ pub fn run_plan_layer<B: AgentBrain>(
         vec![],
         turn_observer,
         stop_requested,
+        memory,
+        max_recall_rounds,
     )?;
     let harness = match crate::harness::parse_harness_strict(&turn.answer, user_input) {
         Ok(harness) => harness,
@@ -324,6 +379,8 @@ mod tests {
             vec![],
             None,
             None,
+            None,
+            0,
         )
         .unwrap();
 
@@ -367,6 +424,8 @@ mod tests {
             false,
             None,
             None,
+            None,
+            0,
         )
         .unwrap();
 
@@ -374,5 +433,66 @@ mod tests {
         assert_eq!(harness.plan.subtasks.len(), 0);
         assert_eq!(steps_used, 1);
         assert!(trace.thoughts.is_empty());
+    }
+
+    #[test]
+    fn plan_recall_injects_memory_hits() {
+        use crate::memory::{DiaryEntry, LocalDiaryBridge};
+
+        let mut memory = LocalDiaryBridge::new();
+        memory
+            .diary(&DiaryEntry {
+                user_input: "ファルモ導入".into(),
+                summary: "事例メモ".into(),
+                answer: "導入成功".into(),
+                phases: vec![],
+            })
+            .unwrap();
+
+        let mut brain = SeqBrain {
+            steps: vec![
+                AgentStep::Recall("ファルモ".into()),
+                AgentStep::Answer(
+                    r#"{"summary":"ok","skip_execution":true,"subtasks":[]}"#.into(),
+                ),
+            ],
+            index: 0,
+        };
+        let mut tools = ToolRuntime::from_registry(
+            crate::runtime::RuntimeEnvironment::detect(),
+            None,
+            crate::tool::full_builtin_registry(false),
+        );
+        let mut blocks = PromptBlocks::default();
+        let session = SessionMemory::default();
+
+        let (harness, trace, steps_used) = run_plan_layer(
+            &mut brain,
+            &mut tools,
+            &mut blocks,
+            &session,
+            "続き",
+            4,
+            false,
+            false,
+            false,
+            false,
+            None,
+            None,
+            Some(&memory),
+            2,
+        )
+        .unwrap();
+
+        assert!(harness.plan.skip_execution);
+        assert_eq!(steps_used, 2);
+        assert!(blocks
+            .recalled
+            .iter()
+            .any(|c| c.contains("plan recall") && c.contains("ファルモ")));
+        assert!(trace
+            .thoughts
+            .iter()
+            .any(|t| t.contains("recall[1/2]") && t.contains("hits=1")));
     }
 }

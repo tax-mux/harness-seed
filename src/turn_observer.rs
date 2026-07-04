@@ -30,6 +30,9 @@ impl From<&AgentStep> for AgentStepDto {
     fn from(step: &AgentStep) -> Self {
         match step {
             AgentStep::Thought(text) => Self::Thought { text: text.clone() },
+            AgentStep::Recall(query) => Self::Thought {
+                text: format!("recall: {query}"),
+            },
             AgentStep::Action(action) => Self::Action {
                 invoke_id: action.invoke_id,
                 tool: action.tool.clone(),

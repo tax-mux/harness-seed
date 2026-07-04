@@ -18,9 +18,14 @@ use crate::context_map::{analyze_prompt_body, format_colormap};
 use crate::context_metrics::TurnContextSummary;
 use crate::harness::{HarnessReference, HarnessState};
 use crate::layer::{run_layer_loop, run_plan_layer, LayerLoopOptions};
+use crate::memory::{
+    build_memory_rag, inject_memory_recalled, DiaryEntry, DiaryPhase, MemoryBridge, MemoryRag,
+    MemoryRuntimeConfig, NoopBridge,
+};
+use crate::session::SessionPromptPolicy;
 use crate::plan::{
-    format_mission, format_plan_for_display, format_planner_fixed_zone_html, PlanArtifact,
-    PlanBrainMode, PlanProgress, Subtask,
+    format_mission, format_plan_for_display, format_planner_fixed_zone_html, is_replan_subtask,
+    PlanArtifact, PlanBrainMode, PlanProgress, PlanQueue, Subtask,
 };
 use crate::runtime::RuntimeEnvironment;
 use crate::session::SessionMemory;
@@ -67,6 +72,8 @@ pub struct ReActConfig {
     pub advance: AdvanceConfig,
     /// ターンごとに `monitor/context_monitor.html` を更新する。
     pub monitor_plan_html: bool,
+    /// 外部メモリ注入（`memory` セクション）。
+    pub memory: MemoryRuntimeConfig,
 }
 
 impl Default for ReActConfig {
@@ -91,6 +98,7 @@ impl Default for ReActConfig {
             show_tool_output: true,
             advance: AdvanceConfig::default(),
             monitor_plan_html: false,
+            memory: MemoryRuntimeConfig::default(),
         }
     }
 }
@@ -172,6 +180,10 @@ pub struct ReActLoop<E: AgentBrain> {
     stop_requested: Option<Arc<AtomicBool>>,
     /// 次の `run_turn` / `run_plan_preview` で Harness に載せる参照情報。
     pending_reference_info: Vec<HarnessReference>,
+    /// 外部メモリ（既定 noop）。
+    memory: Box<dyn MemoryBridge>,
+    /// アダプタ手前の記憶 RAG（分岐・検索語）。
+    memory_rag: MemoryRag,
 }
 
 impl<E: AgentBrain> ReActLoop<E> {
@@ -193,6 +205,7 @@ impl<E: AgentBrain> ReActLoop<E> {
             TaskRegistry::load_default(),
             None,
             &crate::tool::default_packs(false),
+            Box::new(NoopBridge),
         )
     }
 
@@ -204,6 +217,7 @@ impl<E: AgentBrain> ReActLoop<E> {
         task_registry: TaskRegistry,
         brave_search: Option<BraveSearchConfig>,
         tool_packs: &[ToolPack],
+        memory: Box<dyn MemoryBridge>,
     ) -> Self {
         let session = SessionMemory::new(config.session_max_turns);
         let runtime = RuntimeEnvironment::detect();
@@ -212,6 +226,7 @@ impl<E: AgentBrain> ReActLoop<E> {
         let tools = ToolRuntime::with_packs(runtime.clone(), brave_search.clone(), tool_packs);
         blocks.tool_catalog = tools.catalog();
         blocks.web_search_enabled = tools.has_tool("web_search");
+        let memory_rag = build_memory_rag(&config.memory, None);
         Self {
             exec_brain,
             plan_brain,
@@ -223,7 +238,19 @@ impl<E: AgentBrain> ReActLoop<E> {
             turn_observer: None,
             stop_requested: None,
             pending_reference_info: Vec::new(),
+            memory,
+            memory_rag,
         }
+    }
+
+    /// メモリブリッジを差し替える（テスト・ホスト用）。
+    pub fn set_memory_bridge(&mut self, memory: Box<dyn MemoryBridge>) {
+        self.memory = memory;
+    }
+
+    /// 記憶 RAG を差し替える（LLM ルータ組み立て後など）。
+    pub fn set_memory_rag(&mut self, memory_rag: MemoryRag) {
+        self.memory_rag = memory_rag;
     }
 
     /// ターン開始前に参照情報を登録する（計画層の固定ゾーンと Harness JSON に反映）。
@@ -324,6 +351,14 @@ impl<E: AgentBrain> ReActLoop<E> {
 
     /// 計画層のみ実行（固定ゾーン → Planner → Harness パース）。実行層には進まない。
     pub fn run_plan_preview(&mut self, user_input: &str) -> Result<PlanPreviewResult, ReActError> {
+        let host_recalled = self.blocks.recalled.clone();
+        self.inject_memory_for_turn(user_input);
+        let result = self.run_plan_preview_inner(user_input);
+        restore_base_recalled(&mut self.blocks, &host_recalled);
+        result
+    }
+
+    fn run_plan_preview_inner(&mut self, user_input: &str) -> Result<PlanPreviewResult, ReActError> {
         let turn_refs = self.take_pending_reference_info_for_plan();
         let (mut harness, trace, steps_used) = run_plan_layer(
             &mut self.plan_brain,
@@ -338,6 +373,8 @@ impl<E: AgentBrain> ReActLoop<E> {
             false,
             self.turn_observer.as_ref(),
             self.stop_requested.as_deref(),
+            Some(self.memory.as_ref()),
+            self.config.memory.recall_max_rounds,
         )?;
         Self::merge_turn_reference_info(&mut harness, turn_refs);
         Ok(PlanPreviewResult {
@@ -405,13 +442,40 @@ impl<E: AgentBrain> ReActLoop<E> {
     }
 
     pub fn run_turn(&mut self, user_input: &str) -> Result<TurnResult, ReActError> {
-        if self.config.advance.enabled {
+        let host_recalled = self.blocks.recalled.clone();
+        self.inject_memory_for_turn(user_input);
+        let result = if self.config.advance.enabled {
             self.run_turn_advance(user_input)
         } else if self.config.two_phase {
             self.run_turn_two_phase(user_input)
         } else {
             let _ = self.take_pending_reference_info_for_plan();
             self.run_turn_single(user_input, true, None, vec![])
+        };
+        restore_base_recalled(&mut self.blocks, &host_recalled);
+        result
+    }
+
+    fn inject_memory_for_turn(&mut self, user_input: &str) {
+        let prior = self.session.prior_one_liner();
+        let route = inject_memory_recalled(
+            &mut self.blocks,
+            self.memory.as_ref(),
+            &self.config.memory,
+            &self.memory_rag,
+            user_input,
+            prior.as_deref(),
+        );
+        self.session.set_prompt_policy(if route.work_log {
+            SessionPromptPolicy::IncludePrior
+        } else {
+            SessionPromptPolicy::OmitPrior
+        });
+        if self.config.verbose {
+            eprintln!(
+                "[memory.rag] work_log={} knowledge={} queries={:?}",
+                route.work_log, route.knowledge, route.queries
+            );
         }
     }
 
@@ -437,6 +501,8 @@ impl<E: AgentBrain> ReActLoop<E> {
             true,
             self.turn_observer.as_ref(),
             self.stop_requested.as_deref(),
+            Some(self.memory.as_ref()),
+            self.config.memory.recall_max_rounds,
         )?;
         Self::merge_turn_reference_info(&mut harness, turn_refs);
         self.apply_harness_from_plan(&mut harness, user_input);
@@ -448,18 +514,19 @@ impl<E: AgentBrain> ReActLoop<E> {
 
         if !plan.needs_execution() {
             restore_base_recalled(&mut self.blocks, &base_recalled);
-            let mut result =
-                self.run_turn_single(user_input, true, Some(plan), vec![])?;
-            append_trace(&mut result.trace, &plan_trace);
-            result.context = TurnContextSummary::from_usages(&result.trace.context_usages);
-            result.steps_used += plan_steps;
-            result.harness = Some(harness);
-            result.advance_phases.clear();
-            self.clear_harness_prompt_blocks();
+            let result = self.finish_skip_execution(
+                user_input,
+                plan,
+                harness,
+                plan_trace,
+                plan_steps,
+            )?;
             return Ok(result);
         }
 
-        let phase_limit = advance.max_phases.min(plan.subtasks.len());
+        let budget = advance.max_phases;
+        let initial: Vec<Subtask> = plan.subtasks.iter().take(budget).cloned().collect();
+        let mut plan_queue = PlanQueue::from_plan(&initial, budget);
         let mut advance_progress = AdvanceProgress::new(user_input, plan.summary.clone());
         let mut plan_progress = PlanProgress::default();
         let mut subtask_results = Vec::new();
@@ -467,8 +534,9 @@ impl<E: AgentBrain> ReActLoop<E> {
         let mut combined_trace = plan_trace;
         let mut total_steps = plan_steps;
         let mut final_answer = String::new();
+        let mut phase_index = 0usize;
 
-        for (phase_index, subtask) in plan.subtasks.iter().take(phase_limit).enumerate() {
+        while let Some(subtask) = plan_queue.pop_next() {
             if self.is_stop_requested() {
                 return Err(ReActError::Cancelled);
             }
@@ -482,29 +550,71 @@ impl<E: AgentBrain> ReActLoop<E> {
                 &base_recalled,
                 &advance_progress,
                 &plan,
-                subtask,
+                &subtask,
                 &advance,
             );
 
             if advance.show_phases {
-                println!("--- Advance phase {} / {phase_limit} ---", subtask.id);
+                println!(
+                    "--- Advance phase {} (budget {}/{}) ---",
+                    subtask.id,
+                    plan_queue.consumed_count(),
+                    plan_queue.total_budget()
+                );
                 println!("  goal: {}", subtask.goal);
             }
             if self.config.verbose {
                 eprintln!("[advance] phase {}: {}", subtask.id, subtask.goal);
             }
+
+            if is_replan_subtask(&subtask) {
+                let (new_subs, replan_steps, replan_trace) =
+                    self.run_replan_subtask(user_input, &subtask)?;
+                total_steps += replan_steps;
+                append_trace(&mut combined_trace, &replan_trace);
+                let note = match plan_queue.splice_from_replan(new_subs, subtask.id) {
+                    Ok(n) => {
+                        if self.config.verbose || self.config.show_task_execution {
+                            eprintln!("[replan] spliced {n} subtask(s) after {}", subtask.id);
+                        }
+                        format!("replan: inserted {n} subtask(s)")
+                    }
+                    Err(err) => {
+                        eprintln!("[replan] {err}");
+                        format!("replan failed: {err}")
+                    }
+                };
+                advance_progress.push(subtask.id, subtask.goal.clone(), note.clone());
+                plan_progress.push(subtask.id, note.clone());
+                subtask_results.push(SubtaskExecResult {
+                    id: subtask.id,
+                    answer: note.clone(),
+                    steps_used: replan_steps,
+                    used_step_driver: false,
+                });
+                advance_phases.push(AdvancePhaseSummary {
+                    id: subtask.id,
+                    goal: subtask.goal.clone(),
+                    answer: note.clone(),
+                    steps_used: replan_steps,
+                });
+                final_answer = note;
+                phase_index += 1;
+                continue;
+            }
+
             if self.config.show_task_execution {
                 println!("--- Exec subtask {} ---", subtask.id);
                 println!(
                     "{}",
                     self.task_registry
-                        .format_subtask_execution_for_display(subtask)
+                        .format_subtask_execution_for_display(&subtask)
                 );
             }
 
-            self.prepare_harness_for_subtask(&mut harness, subtask);
+            self.prepare_harness_for_subtask(&mut harness, &subtask);
             let (exec, used_driver) =
-                self.run_subtask_exec_audited(user_input, &plan, subtask, &plan_progress)?;
+                self.run_subtask_exec_audited(user_input, &plan, &subtask, &plan_progress)?;
             harness.advance_after_subtask(subtask.id);
             self.sync_harness_step_to_blocks(&harness);
 
@@ -533,6 +643,7 @@ impl<E: AgentBrain> ReActLoop<E> {
             total_steps += exec.steps_used;
             final_answer = exec.answer;
             append_trace(&mut combined_trace, &exec.trace);
+            phase_index += 1;
         }
 
         restore_base_recalled(&mut self.blocks, &base_recalled);
@@ -550,6 +661,45 @@ impl<E: AgentBrain> ReActLoop<E> {
         };
         self.finish_turn(user_input, &result);
         Ok(result)
+    }
+
+    /// `task: "replan"` — 計画層を再実行し、新しい subtask 列を返す（ネスト replan は落とす）。
+    fn run_replan_subtask(
+        &mut self,
+        user_input: &str,
+        subtask: &Subtask,
+    ) -> Result<(Vec<Subtask>, usize, TurnTrace), ReActError> {
+        let replan_input = if subtask.goal.trim().is_empty() {
+            format!("{user_input}\n\nReplan: revise remaining work based on completed phases in Recalled context.")
+        } else {
+            format!("{user_input}\n\nReplan directive: {}", subtask.goal)
+        };
+        if self.config.verbose {
+            eprintln!("[replan] planning: {}", subtask.goal);
+        }
+        let (harness, trace, steps) = run_plan_layer(
+            &mut self.plan_brain,
+            &mut self.tools,
+            &mut self.blocks,
+            &self.session,
+            &replan_input,
+            self.config.max_steps_plan,
+            self.config.verbose,
+            self.config.show_prompt,
+            self.config.show_tool_output,
+            false,
+            self.turn_observer.as_ref(),
+            self.stop_requested.as_deref(),
+            Some(self.memory.as_ref()),
+            self.config.memory.recall_max_rounds,
+        )?;
+        let new_subs: Vec<Subtask> = harness
+            .plan
+            .subtasks
+            .into_iter()
+            .filter(|s| !is_replan_subtask(s))
+            .collect();
+        Ok((new_subs, steps, trace))
     }
 
     /// 計画層 ReAct → 実行層 ReAct（直列）。
@@ -571,6 +721,8 @@ impl<E: AgentBrain> ReActLoop<E> {
             true,
             self.turn_observer.as_ref(),
             self.stop_requested.as_deref(),
+            Some(self.memory.as_ref()),
+            self.config.memory.recall_max_rounds,
         )?;
         Self::merge_turn_reference_info(&mut harness, turn_refs);
         self.apply_harness_from_plan(&mut harness, user_input);
@@ -589,15 +741,13 @@ impl<E: AgentBrain> ReActLoop<E> {
         }
 
         if !plan.needs_execution() {
-            let mut result =
-                self.run_turn_single(user_input, true, Some(plan.clone()), vec![])?;
-            append_trace(&mut result.trace, &plan_trace);
-            result.context = TurnContextSummary::from_usages(&result.trace.context_usages);
-            result.steps_used += plan_steps;
-            result.harness = Some(harness);
-            result.advance_phases.clear();
-            self.clear_harness_prompt_blocks();
-            return Ok(result);
+            return self.finish_skip_execution(
+                user_input,
+                plan,
+                harness,
+                plan_trace,
+                plan_steps,
+            );
         }
 
         let mut progress = PlanProgress::default();
@@ -811,6 +961,50 @@ impl<E: AgentBrain> ReActLoop<E> {
         Ok((exec, false))
     }
 
+    /// `skip_execution` 計画: exec LLM を呼ばず plan の output/summary を最終回答にする。
+    fn finish_skip_execution(
+        &mut self,
+        user_input: &str,
+        plan: PlanArtifact,
+        harness: HarnessState,
+        plan_trace: TurnTrace,
+        plan_steps: usize,
+    ) -> Result<TurnResult, ReActError> {
+        if let Some(answer) = plan.direct_reply(&harness.work_instructions) {
+            if self.config.verbose {
+                eprintln!("[plan] skip_execution — direct reply (no exec LLM)");
+            }
+            let result = TurnResult {
+                answer,
+                context: TurnContextSummary::from_usages(&plan_trace.context_usages),
+                trace: plan_trace,
+                steps_used: plan_steps,
+                plan: Some(plan),
+                harness: Some(harness),
+                subtask_results: vec![],
+                advance_phases: vec![],
+            };
+            self.clear_harness_prompt_blocks();
+            self.finish_turn(user_input, &result);
+            return Ok(result);
+        }
+        // plan に使える本文が無いときだけ従来どおり exec にフォールバック
+        if self.config.verbose {
+            eprintln!("[plan] skip_execution — no direct reply, fallback to exec LLM");
+        }
+        self.blocks.work_instructions_text =
+            Some(harness.format_work_instructions_for_prompt());
+        let mut result =
+            self.run_turn_single(user_input, true, Some(plan), vec![])?;
+        append_trace(&mut result.trace, &plan_trace);
+        result.context = TurnContextSummary::from_usages(&result.trace.context_usages);
+        result.steps_used += plan_steps;
+        result.harness = Some(harness);
+        result.advance_phases.clear();
+        self.clear_harness_prompt_blocks();
+        Ok(result)
+    }
+
     fn run_turn_single(
         &mut self,
         user_input: &str,
@@ -832,6 +1026,8 @@ impl<E: AgentBrain> ReActLoop<E> {
             subtask_results,
             self.turn_observer.as_ref(),
             self.stop_requested.as_deref(),
+            None,
+            0,
         )?;
         if record_session {
             self.finish_turn(user_input, &result);
@@ -842,6 +1038,7 @@ impl<E: AgentBrain> ReActLoop<E> {
     fn finish_turn(&mut self, user_input: &str, result: &TurnResult) {
         self.session
             .push_turn(user_input.to_string(), result.answer.clone());
+        self.record_diary(user_input, result);
         if self.config.show_context_metrics && !result.context.is_empty() {
             eprintln!("[context turn] {}", result.context);
             if let Some(last) = result.trace.context_usages.last() {
@@ -851,6 +1048,51 @@ impl<E: AgentBrain> ReActLoop<E> {
         }
         self.write_context_log(user_input, result);
         self.write_monitor_html(user_input, result);
+    }
+
+    fn record_diary(&mut self, user_input: &str, result: &TurnResult) {
+        let summary = result
+            .plan
+            .as_ref()
+            .map(|p| p.summary.clone())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| {
+                result
+                    .answer
+                    .chars()
+                    .take(200)
+                    .collect::<String>()
+            });
+        let phases = if result.advance_phases.is_empty() {
+            result
+                .subtask_results
+                .iter()
+                .map(|s| DiaryPhase {
+                    id: s.id,
+                    goal: format!("subtask {}", s.id),
+                    answer: s.answer.clone(),
+                })
+                .collect()
+        } else {
+            result
+                .advance_phases
+                .iter()
+                .map(|p| DiaryPhase {
+                    id: p.id,
+                    goal: p.goal.clone(),
+                    answer: p.answer.clone(),
+                })
+                .collect()
+        };
+        let entry = DiaryEntry {
+            user_input: user_input.to_string(),
+            summary,
+            answer: result.answer.clone(),
+            phases,
+        };
+        if let Err(err) = self.memory.diary(&entry) {
+            eprintln!("[memory] diary: {err}");
+        }
     }
 
     fn write_context_log(&self, user_input: &str, result: &TurnResult) {
@@ -1028,6 +1270,7 @@ mod tests {
         react.run_turn("help").unwrap();
         react.run_turn("help").unwrap();
         assert_eq!(react.session.len(), 2);
+        react.session.set_prompt_policy(SessionPromptPolicy::IncludePrior);
         assert!(react.session.format_for_prompt().contains("利用可能"));
     }
 
@@ -1077,5 +1320,22 @@ mod tests {
         assert!(!preview.planner_text.is_empty());
         assert_eq!(preview.harness.plan.subtasks.len(), 1);
         assert!(preview.steps_used >= 1);
+    }
+
+    #[test]
+    fn local_memory_survives_across_turns_without_panic() {
+        use crate::memory::LocalDiaryBridge;
+        let mut config = ReActConfig::default();
+        config.advance.enabled = true;
+        config.advance.show_phases = false;
+        config.show_plan = false;
+        config.show_task_execution = false;
+        let mut react = ReActLoop::new(SimpleRuleBrain::new(), PlanBrainMode::rule(), config);
+        react.set_memory_bridge(Box::new(LocalDiaryBridge::new()));
+        react.run_turn("echo first-unique-token").unwrap();
+        let second = react.run_turn("続きやって").unwrap();
+        assert!(!second.answer.is_empty());
+        // host recalled はターン終了後に復元される
+        assert!(react.blocks.recalled.is_empty());
     }
 }

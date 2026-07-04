@@ -115,11 +115,12 @@ mod tests {
     #[test]
     fn user_prompt_includes_previous_turns() {
         let mut session = SessionMemory::new(4);
-        session.push_turn("first", "one");
+        session.push_turn("first question", "one answer");
+        session.set_prompt_policy(crate::session::SessionPromptPolicy::IncludePrior);
         let blocks = PromptBlocks::default();
         let messages = LlmBrain::<MockLlmConnector>::build_messages(&ctx(
             &blocks,
-            "second",
+            "first question follow-up",
             &TurnTrace::default(),
             &session,
         ));
@@ -128,8 +129,8 @@ mod tests {
             .find(|m| m.role == "user")
             .expect("user message");
         assert!(user.content.as_text().contains("Previous turns:"));
-        assert!(user.content.as_text().contains("User: first"));
-        assert!(user.content.as_text().contains("Assistant: one"));
-        assert!(user.content.as_text().contains("User input:\nsecond"));
+        assert!(user.content.as_text().contains("User: first question"));
+        assert!(user.content.as_text().contains("Assistant: one answer"));
+        assert!(user.content.as_text().contains("User input:\nfirst question follow-up"));
     }
 }

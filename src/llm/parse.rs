@@ -40,13 +40,8 @@ pub fn parse_agent_step(raw: &str, invoke_id: u64) -> Result<AgentStep, ParseErr
     if let Ok(step) = parse_one_json(trimmed, invoke_id) {
         return Ok(step);
     }
-    if let Some(step) = salvage_step_object(trimmed) {
-        return Ok(step);
-    }
-    if let Some(content) = salvage_answer_step_content(trimmed) {
-        return Ok(AgentStep::Answer(content));
-    }
 
+    // 複数オブジェクトがあるときは厳密パースを優先（救済が先に thought を掴むのを防ぐ）
     let mut thought = None;
     let mut action = None;
     let mut answer = None;
@@ -56,7 +51,7 @@ pub fn parse_agent_step(raw: &str, invoke_id: u64) -> Result<AgentStep, ParseErr
         match parse_one_json(&chunk, invoke_id) {
             Ok(AgentStep::Answer(a)) => answer = Some(a),
             Ok(AgentStep::Action(a)) => action = Some(a),
-            Ok(AgentStep::Thought(t)) => {
+            Ok(AgentStep::Thought(t)) | Ok(AgentStep::Recall(t)) => {
                 if thought.is_none() {
                     thought = Some(t);
                 }
@@ -65,6 +60,16 @@ pub fn parse_agent_step(raw: &str, invoke_id: u64) -> Result<AgentStep, ParseErr
                 if answer.is_none() {
                     if let Some(a) = salvage_answer_step_content(&chunk) {
                         answer = Some(a);
+                    } else if let Some(step) = salvage_step_object(&chunk) {
+                        match step {
+                            AgentStep::Answer(a) => answer = Some(a),
+                            AgentStep::Action(a) => action = Some(a),
+                            AgentStep::Thought(t) | AgentStep::Recall(t) => {
+                                if thought.is_none() {
+                                    thought = Some(t);
+                                }
+                            }
+                        }
                     } else {
                         last_err = Some(e);
                     }
@@ -84,12 +89,18 @@ pub fn parse_agent_step(raw: &str, invoke_id: u64) -> Result<AgentStep, ParseErr
             match parse_one_json(line, invoke_id) {
                 Ok(AgentStep::Answer(a)) => answer = Some(a),
                 Ok(AgentStep::Action(a)) => action = Some(a),
-                Ok(AgentStep::Thought(t)) => {
+                Ok(AgentStep::Thought(t)) | Ok(AgentStep::Recall(t)) => {
                     if thought.is_none() {
                         thought = Some(t);
                     }
                 }
-                Err(e) => last_err = Some(e),
+                Err(e) => {
+                    if let Some(a) = salvage_answer_step_content(line) {
+                        answer = Some(a);
+                    } else {
+                        last_err = Some(e);
+                    }
+                }
             }
         }
     }
@@ -102,6 +113,14 @@ pub fn parse_agent_step(raw: &str, invoke_id: u64) -> Result<AgentStep, ParseErr
     }
     if let Some(t) = thought {
         return Ok(AgentStep::Thought(t));
+    }
+
+    // 最後に壊れた単一オブジェクトを救済（未引用の日本語 content など）
+    if let Some(step) = salvage_step_object(trimmed) {
+        return Ok(step);
+    }
+    if let Some(content) = salvage_answer_step_content(trimmed) {
+        return Ok(AgentStep::Answer(content));
     }
 
     Err(last_err.unwrap_or(ParseError::InvalidJson(
@@ -325,6 +344,7 @@ fn salvage_content_field(chunk: &str) -> Option<String> {
         if let Some(value) = extract_json_string_value_sloppy(after_colon)
             .or_else(|| extract_json_string_value_lenient(after_colon))
             .or_else(|| extract_json_string_value(after_colon))
+            .or_else(|| extract_unquoted_content_value(after_colon))
         {
             let trimmed = normalize_escaped_json_body(value.trim());
             if !trimmed.is_empty() {
@@ -334,6 +354,42 @@ fn salvage_content_field(chunk: &str) -> Option<String> {
         search_from = key_start + 1;
     }
     None
+}
+
+/// `"content": 「日本語…` のように引用符を付け忘れた content を救済する。
+fn extract_unquoted_content_value(after_colon: &str) -> Option<String> {
+    let s = after_colon.trim_start();
+    if s.is_empty() || s.starts_with('"') || s.starts_with('{') || s.starts_with('[') {
+        return None;
+    }
+    // 末尾の `}` / `,` / 空白を除いた本文
+    let mut end = s.len();
+    let bytes = s.as_bytes();
+    while end > 0 {
+        let c = bytes[end - 1];
+        if c == b'}' || c == b',' || c.is_ascii_whitespace() {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+    // 閉じ `}` の手前まで（ネスト無しの answer オブジェクト想定）
+    if let Some(rel) = s[..end].rfind('\n') {
+        // 最終行が `}` だけのときはその前まで
+        let tail = s[rel..end].trim();
+        if tail.is_empty() || tail == "}" {
+            end = rel;
+        }
+    }
+    let body = s[..end].trim().trim_end_matches(',').trim();
+    if body.len() < 2 {
+        return None;
+    }
+    // JSON キーっぽい残骸を落とす
+    if body.starts_with('"') {
+        return None;
+    }
+    Some(body.to_string())
 }
 
 /// `answer` ステップの `content` が改行入りで JSON パースに失敗したときの救済。
@@ -473,5 +529,21 @@ mod tests {
 }"}"#;
         let step = parse_agent_step(raw, 1).unwrap();
         assert!(matches!(step, AgentStep::Answer(a) if a.contains("summary")));
+    }
+
+    #[test]
+    fn salvages_answer_with_unquoted_japanese_content() {
+        let raw = r#"{
+  "step": "answer",
+  "content": 「ファルモ」は主に以下の2つの意味があります：
+
+1. **ファルモ・ジャパン** - 医療機器やヘルスケア関連の企業
+2. **ファルモサ** - 健康食品ブランド
+}"#;
+        let step = parse_agent_step(raw, 1).unwrap();
+        assert!(matches!(
+            step,
+            AgentStep::Answer(a) if a.contains("ファルモ・ジャパン") && a.contains("ファルモサ")
+        ));
     }
 }

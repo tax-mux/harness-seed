@@ -5,11 +5,13 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use harness_seed::{
+    build_memory_rag,
     cli_agent::{
         cli_flag_takes_value, is_cli_global_flag, log_agent_setup, prepare_cli_agent_workspace,
         setup_cli_agent,
     },
-    run_json_repl, run_repl, AppConfig, BrainPair, ReActLoop, SimpleRuleBrain, TaskRegistry, VERSION,
+    run_json_repl, run_repl, AppConfig, BrainPair, MemoryRag, ReActConfig, ReActLoop,
+    SimpleRuleBrain, TaskRegistry, VERSION,
 };
 
 fn main() -> ExitCode {
@@ -128,6 +130,12 @@ fn main() -> ExitCode {
     if brave_search.is_some() {
         eprintln!("tools: web_search (Brave Search API)");
     }
+    let memory = app.memory_bridge();
+    let memory_layers = app.memory_provider_name();
+    if memory_layers != "noop" {
+        eprintln!("memory.layers: {memory_layers}");
+    }
+    let memory_rag = build_memory_rag_for_app(app, &react_config, no_llm);
     let mut react = ReActLoop::with_blocks_and_tasks(
         brains.exec,
         brains.plan,
@@ -136,7 +144,9 @@ fn main() -> ExitCode {
         task_registry,
         brave_search,
         &tool_packs,
+        memory,
     );
+    react.set_memory_rag(memory_rag);
     if let Some(setup) = agent_setup {
         for tool in setup.script_tools {
             react.register_plugin(tool);
@@ -216,6 +226,7 @@ fn run_plan_zone_mode(
     };
     eprintln!("brain: {}", brains.label());
 
+    let memory_rag = build_memory_rag_for_app(app, &react_config, no_llm);
     let mut react = ReActLoop::with_blocks_and_tasks(
         SimpleRuleBrain::new(),
         brains.plan,
@@ -224,7 +235,9 @@ fn run_plan_zone_mode(
         task_registry,
         app.resolved_brave_search(),
         &tool_packs,
+        app.memory_bridge(),
     );
+    react.set_memory_rag(memory_rag);
     if let Some(setup) = agent_setup {
         for tool in setup.script_tools {
             react.register_plugin(tool);
@@ -372,6 +385,31 @@ fn parse_config_path(args: &[String]) -> PathBuf {
         }
     }
     harness_seed::default_config_path()
+}
+
+/// 記憶 RAG（アダプタ手前）。`memory.rag.router=llm` かつ LLM 利用時のみ LlmRouter。
+fn build_memory_rag_for_app(app: &AppConfig, react_config: &ReActConfig, no_llm: bool) -> MemoryRag {
+    let want_llm = react_config.memory.rag_router.eq_ignore_ascii_case("llm")
+        && !no_llm
+        && app.uses_llm();
+    let connector = if want_llm {
+        match harness_seed::LlmConfig::from_app(app)
+            .and_then(harness_seed::LlmConnectorKind::from_config)
+        {
+            Ok(c) => {
+                eprintln!("memory.rag: router=llm (fallback=rule)");
+                Some(c)
+            }
+            Err(err) => {
+                eprintln!("[memory.rag] llm router unavailable ({err}); using rule");
+                None
+            }
+        }
+    } else {
+        eprintln!("memory.rag: router=rule");
+        None
+    };
+    build_memory_rag(&react_config.memory, connector)
 }
 
 fn print_usage() {

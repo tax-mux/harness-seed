@@ -42,5 +42,37 @@
       "fetch_content": false,
       "max_content_chars": 2048
     }
+  },
+  "memory": {
+    "local": true,
+    "backends": [],
+    "providers": {
+      "mempalace": {
+        "protocol": "mcp_stdio",
+        "command": "C:\\Python312\\python.exe",
+        "args": ["-m", "mempalace.mcp_server"],
+        "agent_name": "harness-seed",
+        "wing_from_cwd": true,
+        "init_wing_if_missing": true,
+        "timeout_secs": 30,
+        "wing": null,
+        "room": null
+      }
+    },
+    "recent_work": {
+      "enabled": true,
+      "max_entries": 3,
+      "max_chars": 800
+    },
+    "search": {
+      "enabled": true,
+      "top_k": 5,
+      "max_chars": 3200
+    },
+    "rag": {
+      "router": "llm",
+      "max_queries": 3
+    },
+    "recall_max_rounds": 2
   }
 }
