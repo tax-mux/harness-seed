@@ -26,4 +26,7 @@ pub use gemini::{normalize_gemini_base_url, resolve_gemini_base_url, GeminiConne
 pub use lmstudio::LmStudioConnector;
 pub use mock::MockLlmConnector;
 pub use openai::OpenAiConnector;
-pub use parse::{extract_json_objects, parse_agent_step, salvage_answer_step_content, ParseError};
+pub use parse::{
+    coerce_tool_named_step_json, extract_json_objects, parse_agent_step, salvage_answer_step_content,
+    ParseError,
+};

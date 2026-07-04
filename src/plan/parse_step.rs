@@ -102,7 +102,9 @@ fn merge_plan_chunk(
 }
 
 fn parse_one_plan_json(text: &str) -> Result<AgentStep, PlanStepParseError> {
-    let step: PlanStepJson = serde_json::from_str(text)
+    let coerced = crate::llm::coerce_tool_named_step_json(text);
+    let parse_text = coerced.as_deref().unwrap_or(text);
+    let step: PlanStepJson = serde_json::from_str(parse_text)
         .map_err(|e| PlanStepParseError::InvalidJson(e.to_string()))?;
 
     Ok(match step {
@@ -220,6 +222,9 @@ mod tests {
 
     #[test]
     fn recall_step_parses() {
+        let step = parse_plan_agent_step(r#"{"step":"list_dir","args":{"path":"."}}"#).unwrap();
+        assert!(matches!(step, AgentStep::Thought(t) if t.contains("list_dir")));
+
         let step = parse_plan_agent_step(r#"{"step":"recall","query":"ファルモ"}"#).unwrap();
         assert!(matches!(step, AgentStep::Recall(q) if q == "ファルモ"));
     }

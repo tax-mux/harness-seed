@@ -1,7 +1,43 @@
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::action::{Action, AgentStep};
+
+/// 予約済み step 名以外が `step` に入っているとき、ツール呼び出しとみなして action JSON に直す。
+///
+/// 例: `{"step":"list_dir","args":{"path":"."}}`
+///  → `{"step":"action","tool":"list_dir","args":{"path":"."}}`
+pub fn coerce_tool_named_step_json(text: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(text.trim()).ok()?;
+    let obj = v.as_object()?;
+    let step = obj.get("step")?.as_str()?.trim();
+    if step.is_empty() {
+        return None;
+    }
+    const RESERVED: &[&str] = &["thought", "action", "answer", "recall"];
+    if RESERVED
+        .iter()
+        .any(|r| r.eq_ignore_ascii_case(step))
+    {
+        return None;
+    }
+    let tool = obj
+        .get("tool")
+        .and_then(|t| t.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(step);
+    let args = obj
+        .get("args")
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Default::default()));
+    serde_json::to_string(&json!({
+        "step": "action",
+        "tool": tool,
+        "args": args,
+    }))
+    .ok()
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "step", rename_all = "snake_case")]
@@ -129,7 +165,9 @@ pub fn parse_agent_step(raw: &str, invoke_id: u64) -> Result<AgentStep, ParseErr
 }
 
 fn parse_one_json(text: &str, invoke_id: u64) -> Result<AgentStep, ParseError> {
-    let step: StepJson = serde_json::from_str(text)
+    let coerced = coerce_tool_named_step_json(text);
+    let parse_text = coerced.as_deref().unwrap_or(text);
+    let step: StepJson = serde_json::from_str(parse_text)
         .map_err(|e| ParseError::InvalidJson(e.to_string()))?;
 
     Ok(match step {
@@ -472,6 +510,21 @@ mod tests {
         let raw = r#"{"step":"action","tool":"echo","args":{"message":"hi"}}"#;
         let step = parse_agent_step(raw, 7).unwrap();
         assert!(matches!(step, AgentStep::Action(a) if a.invoke_id == 7 && a.tool == "echo"));
+    }
+
+    #[test]
+    fn coerces_tool_name_used_as_step_to_action() {
+        let raw = r#"{"step":"list_dir","args":{"path":"."}}"#;
+        let step = parse_agent_step(raw, 3).unwrap();
+        assert!(matches!(
+            step,
+            AgentStep::Action(a) if a.invoke_id == 3 && a.tool == "list_dir"
+                && a.args.get("path").and_then(|p| p.as_str()) == Some(".")
+        ));
+
+        let raw = r#"{"step":"read_file","args":{"path":"README.md"}}"#;
+        let step = parse_agent_step(raw, 1).unwrap();
+        assert!(matches!(step, AgentStep::Action(a) if a.tool == "read_file"));
     }
 
     #[test]
