@@ -38,6 +38,7 @@ harness-seed/
 |----------|------|
 | [doc/development-principles.md](doc/development-principles.md) | **開発方針** — 汎用解を優先、個別事例だけのロジックは価値が低い |
 | [doc/memory.md](doc/memory.md) | **記憶層** — Memory RAG、MemoryBridge、diary / search（local + mempalace） |
+| [doc/lifecycle.md](doc/lifecycle.md) | **ライフサイクル hook** — `TurnLifecycle`、`HostScratch`（ホスト副作用。LLM コンテキストには出さない） |
 | [doc/architecture/README.md](doc/architecture/README.md) | **アーキテクチャ索引（日本語）** — 計画層・実行層・ツール選択 |
 | [doc/architecture-en/README.md](doc/architecture-en/README.md) | **Architecture index (English)** |
 | [doc/agent-minimum-action-unit.md](doc/agent-minimum-action-unit.md) | AIエージェントの最少行動単位（図解） |
