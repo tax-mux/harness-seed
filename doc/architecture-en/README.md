@@ -4,6 +4,8 @@ Documentation for HarnessSeed's two-layer model (planning + execution) and tool 
 
 Memory layer (RAG, Bridge, diary): [memory.md](../memory.md) (Japanese; implementation source of truth).
 
+Host extensions (lifecycle hooks, HostScratch): [lifecycle.md](../lifecycle.md) (Japanese; implementation source of truth).
+
 Development principles: [development-principles.md](../development-principles.md).
 
 | # | Document | Content |

@@ -18,6 +18,7 @@ use crate::context_map::{analyze_prompt_body, format_colormap};
 use crate::context_metrics::TurnContextSummary;
 use crate::harness::{HarnessReference, HarnessState};
 use crate::layer::{run_layer_loop, run_plan_layer, LayerLoopOptions};
+use crate::lifecycle::{HostScratch, TurnLifecycle};
 use crate::memory::{
     build_memory_rag, inject_memory_recalled, DiaryEntry, DiaryPhase, MemoryBridge, MemoryRag,
     MemoryRuntimeConfig, NoopBridge,
@@ -177,6 +178,12 @@ pub struct ReActLoop<E: AgentBrain> {
     pub task_registry: TaskRegistry,
     /// 各 LLM ステップ・ツール観測の通知（GUI 向け）。
     pub turn_observer: Option<TurnObserver>,
+    /// ターン／計画／サブタスクの副作用専用 hook（本筋ループは変更しない）。
+    pub lifecycle: Option<Arc<dyn TurnLifecycle>>,
+    /// ターン専用ホスト袋（LLM コンテキストに出さない）。
+    host_scratch: HostScratch,
+    /// 次の `run_turn` 開始時に `host_scratch` へマージする seed。
+    pending_host_seed: Option<HostScratch>,
     stop_requested: Option<Arc<AtomicBool>>,
     /// 次の `run_turn` / `run_plan_preview` で Harness に載せる参照情報。
     pending_reference_info: Vec<HarnessReference>,
@@ -236,10 +243,37 @@ impl<E: AgentBrain> ReActLoop<E> {
             blocks,
             task_registry,
             turn_observer: None,
+            lifecycle: None,
+            host_scratch: HostScratch::new(),
+            pending_host_seed: None,
             stop_requested: None,
             pending_reference_info: Vec::new(),
             memory,
             memory_rag,
+        }
+    }
+
+    /// ライフサイクル hook を登録する（Redmine 連携など。本筋には影響しない）。
+    pub fn set_lifecycle(&mut self, lifecycle: Option<Arc<dyn TurnLifecycle>>) {
+        self.lifecycle = lifecycle;
+    }
+
+    /// 次ターン開始時にホスト袋へ載せる seed（UI で選んだ ticket id など）。
+    ///
+    /// `run_turn` 先頭で袋をクリアしたあとマージされ、その後 `on_turn_started` が走る。
+    pub fn seed_host_scratch(&mut self, seed: HostScratch) {
+        self.pending_host_seed = Some(seed);
+    }
+
+    /// 直近ターンのホスト袋（読み取り）。次の `run_turn` 開始でクリアされる。
+    pub fn host_scratch(&self) -> &HostScratch {
+        &self.host_scratch
+    }
+
+    fn begin_host_scratch_for_turn(&mut self) {
+        self.host_scratch.clear();
+        if let Some(seed) = self.pending_host_seed.take() {
+            self.host_scratch.merge(seed);
         }
     }
 
@@ -295,7 +329,7 @@ impl<E: AgentBrain> ReActLoop<E> {
             .blocks
             .plan_data_contract
             .as_ref()
-            .map(|c| c.excluded_task_ids())
+            .map(|c| c.excluded_task_ids.iter().map(String::as_str).collect())
             .unwrap_or_default();
         self.blocks.plan_task_catalog = Some(
             self.task_registry.catalog_for_planner_filtered(
@@ -409,6 +443,67 @@ impl<E: AgentBrain> ReActLoop<E> {
         emit_plan_artifact(self.turn_observer.as_ref(), "plan", plan, &display);
     }
 
+    fn emit_turn_started(&mut self, user_input: &str) {
+        let Some(h) = self.lifecycle.clone() else {
+            return;
+        };
+        h.on_turn_started(user_input, &mut self.host_scratch);
+    }
+
+    fn emit_plan_finished(&mut self, user_input: &str, plan: &PlanArtifact) {
+        let Some(h) = self.lifecycle.clone() else {
+            return;
+        };
+        h.on_plan_finished(user_input, plan, &mut self.host_scratch);
+    }
+
+    fn emit_subtask_started(
+        &mut self,
+        user_input: &str,
+        plan: &PlanArtifact,
+        subtask: &Subtask,
+        index: usize,
+    ) {
+        let Some(h) = self.lifecycle.clone() else {
+            return;
+        };
+        h.on_subtask_started(user_input, plan, subtask, index, &mut self.host_scratch);
+    }
+
+    fn emit_subtask_finished(
+        &mut self,
+        user_input: &str,
+        plan: &PlanArtifact,
+        subtask: &Subtask,
+        answer: &str,
+        steps_used: usize,
+    ) {
+        let Some(h) = self.lifecycle.clone() else {
+            return;
+        };
+        h.on_subtask_finished(
+            user_input,
+            plan,
+            subtask,
+            answer,
+            steps_used,
+            &mut self.host_scratch,
+        );
+    }
+
+    fn emit_turn_finished(&mut self, user_input: &str, result: &TurnResult) {
+        let Some(h) = self.lifecycle.clone() else {
+            return;
+        };
+        h.on_turn_finished(
+            user_input,
+            &result.answer,
+            result.plan.as_ref(),
+            result.steps_used,
+            &mut self.host_scratch,
+        );
+    }
+
     /// 計画フェーズの Harness パース結果をプロンプト固定ゾーンへ反映する。
     fn apply_harness_from_plan(&mut self, harness: &mut HarnessState, user_input: &str) {
         self.resolve_plan_for_turn(&mut harness.plan, user_input);
@@ -442,6 +537,8 @@ impl<E: AgentBrain> ReActLoop<E> {
     }
 
     pub fn run_turn(&mut self, user_input: &str) -> Result<TurnResult, ReActError> {
+        self.begin_host_scratch_for_turn();
+        self.emit_turn_started(user_input);
         let host_recalled = self.blocks.recalled.clone();
         self.inject_memory_for_turn(user_input);
         let result = if self.config.advance.enabled {
@@ -508,6 +605,7 @@ impl<E: AgentBrain> ReActLoop<E> {
         self.apply_harness_from_plan(&mut harness, user_input);
         let plan = harness.plan.clone();
         self.notify_plan_artifact(&plan);
+        self.emit_plan_finished(user_input, &plan);
         if self.config.show_plan {
             println!("{}", format_plan_for_display(&plan, &self.task_registry));
         }
@@ -567,6 +665,8 @@ impl<E: AgentBrain> ReActLoop<E> {
                 eprintln!("[advance] phase {}: {}", subtask.id, subtask.goal);
             }
 
+            self.emit_subtask_started(user_input, &plan, &subtask, phase_index);
+
             if is_replan_subtask(&subtask) {
                 let (new_subs, replan_steps, replan_trace) =
                     self.run_replan_subtask(user_input, &subtask)?;
@@ -584,6 +684,13 @@ impl<E: AgentBrain> ReActLoop<E> {
                         format!("replan failed: {err}")
                     }
                 };
+                self.emit_subtask_finished(
+                    user_input,
+                    &plan,
+                    &subtask,
+                    &note,
+                    replan_steps,
+                );
                 advance_progress.push(subtask.id, subtask.goal.clone(), note.clone());
                 plan_progress.push(subtask.id, note.clone());
                 subtask_results.push(SubtaskExecResult {
@@ -626,6 +733,13 @@ impl<E: AgentBrain> ReActLoop<E> {
                 );
             }
 
+            self.emit_subtask_finished(
+                user_input,
+                &plan,
+                &subtask,
+                &exec.answer,
+                exec.steps_used,
+            );
             advance_progress.push(subtask.id, subtask.goal.clone(), exec.answer.clone());
             plan_progress.push(subtask.id, exec.answer.clone());
             subtask_results.push(SubtaskExecResult {
@@ -728,6 +842,7 @@ impl<E: AgentBrain> ReActLoop<E> {
         self.apply_harness_from_plan(&mut harness, user_input);
         let plan = harness.plan.clone();
         self.notify_plan_artifact(&plan);
+        self.emit_plan_finished(user_input, &plan);
         if self.config.show_plan {
             println!("{}", format_plan_for_display(&plan, &self.task_registry));
         }
@@ -756,10 +871,11 @@ impl<E: AgentBrain> ReActLoop<E> {
         let mut final_answer = String::new();
         let mut combined_trace = plan_trace;
 
-        for subtask in &plan.subtasks {
+        for (index, subtask) in plan.subtasks.iter().enumerate() {
             if self.is_stop_requested() {
                 return Err(ReActError::Cancelled);
             }
+            self.emit_subtask_started(user_input, &plan, subtask, index);
             if self.config.show_task_execution {
                 println!("--- Exec subtask {} ---", subtask.id);
                 println!(
@@ -783,6 +899,13 @@ impl<E: AgentBrain> ReActLoop<E> {
                     TaskRegistry::format_trace_tools_used(&exec.trace)
                 );
             }
+            self.emit_subtask_finished(
+                user_input,
+                &plan,
+                subtask,
+                &exec.answer,
+                exec.steps_used,
+            );
             total_steps += exec.steps_used;
             progress.push(subtask.id, exec.answer.clone());
             subtask_results.push(SubtaskExecResult {
@@ -1048,6 +1171,7 @@ impl<E: AgentBrain> ReActLoop<E> {
         }
         self.write_context_log(user_input, result);
         self.write_monitor_html(user_input, result);
+        self.emit_turn_finished(user_input, result);
     }
 
     fn record_diary(&mut self, user_input: &str, result: &TurnResult) {
@@ -1302,6 +1426,98 @@ mod tests {
         assert_eq!(result.steps_used, 5);
         assert!(!result.subtask_results[0].used_step_driver);
         assert!(result.answer.contains("hello world"));
+    }
+
+    #[test]
+    fn lifecycle_hooks_fire_without_changing_answer() {
+        use crate::lifecycle::{HostScratch, TurnLifecycle};
+        use std::sync::Mutex;
+
+        #[derive(Default)]
+        struct Rec {
+            events: Mutex<Vec<String>>,
+        }
+        impl TurnLifecycle for Rec {
+            fn on_turn_started(&self, _: &str, host: &mut HostScratch) {
+                let ticket = host.get_i64("ticket_id").unwrap_or(-1);
+                self.events
+                    .lock()
+                    .unwrap()
+                    .push(format!("turn_started:{ticket}"));
+            }
+            fn on_plan_finished(&self, _: &str, _: &PlanArtifact, host: &mut HostScratch) {
+                host.insert("parent_ticket", 42);
+                self.events.lock().unwrap().push("plan_finished".into());
+            }
+            fn on_subtask_started(
+                &self,
+                _: &str,
+                _: &PlanArtifact,
+                _: &Subtask,
+                _: usize,
+                host: &mut HostScratch,
+            ) {
+                let parent = host.get_i64("parent_ticket").unwrap_or(-1);
+                host.insert("child_ticket", 7);
+                self.events
+                    .lock()
+                    .unwrap()
+                    .push(format!("subtask_started:{parent}"));
+            }
+            fn on_subtask_finished(
+                &self,
+                _: &str,
+                _: &PlanArtifact,
+                _: &Subtask,
+                _: &str,
+                _: usize,
+                host: &mut HostScratch,
+            ) {
+                let child = host.get_i64("child_ticket").unwrap_or(-1);
+                self.events
+                    .lock()
+                    .unwrap()
+                    .push(format!("subtask_finished:{child}"));
+            }
+            fn on_turn_finished(
+                &self,
+                _: &str,
+                _: &str,
+                _: Option<&PlanArtifact>,
+                _: usize,
+                host: &mut HostScratch,
+            ) {
+                let parent = host.get_i64("parent_ticket").unwrap_or(-1);
+                self.events
+                    .lock()
+                    .unwrap()
+                    .push(format!("turn_finished:{parent}"));
+            }
+        }
+
+        let rec = Arc::new(Rec::default());
+        let mut config = ReActConfig::default();
+        config.two_phase = true;
+        let mut react = ReActLoop::new(SimpleRuleBrain::new(), PlanBrainMode::rule(), config);
+        react.set_lifecycle(Some(rec.clone()));
+        let mut seed = HostScratch::new();
+        seed.insert("ticket_id", 10);
+        react.seed_host_scratch(seed);
+        let result = react.run_turn("hello world").unwrap();
+        assert!(result.answer.contains("hello world"));
+        assert_eq!(
+            rec.events.lock().unwrap().as_slice(),
+            [
+                "turn_started:10",
+                "plan_finished",
+                "subtask_started:42",
+                "subtask_finished:7",
+                "turn_finished:42",
+            ]
+        );
+        assert_eq!(react.host_scratch().get_i64("ticket_id"), Some(10));
+        assert_eq!(react.host_scratch().get_i64("parent_ticket"), Some(42));
+        assert_eq!(react.host_scratch().get_i64("child_ticket"), Some(7));
     }
 
     #[test]

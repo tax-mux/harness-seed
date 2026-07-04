@@ -28,6 +28,7 @@ Rules:
 - Use only tools listed in the Tool catalog below (exact names and args).
 - If the user needs a tool, return action (not answer yet).
 - After observations appear in the trace, use them and return answer when done.
+- Avoid wasteful re-exploration: if the trace already has a successful observation for the same tool and arguments and you have not changed relevant state since, do not repeat that call—use the observation and advance (narrower evidence, act, or answer). Re-running the same command after you changed something (verify / heal loops) is appropriate.
 - For coding tasks in this repo: grep or list_dir → read_file → write_file → run_cmd (e.g. cargo check) as needed.
 - For simple greetings, you may answer directly without tools.
 - All filesystem paths must stay inside the project workspace.
