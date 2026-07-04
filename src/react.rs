@@ -1009,37 +1009,66 @@ impl<E: AgentBrain> ReActLoop<E> {
             let driver_outcomes: Vec<(Subtask, Result<(TurnResult, bool), String>)> =
                 std::thread::scope(|scope| {
                     let mut handles = Vec::with_capacity(drivers.len());
+                    let join_fallback: Vec<Subtask> =
+                        drivers.iter().map(|(_, st)| st.clone()).collect();
                     for (_idx, st) in drivers {
                         let registry = registry.clone();
                         let packs = packs.clone();
                         let brave = brave.clone();
                         let env = env.clone();
                         handles.push(scope.spawn(move || {
-                            let mut tools = ToolRuntime::with_packs(env, brave, &packs);
-                            let outcome = registry
-                                .run_subtask_driver(&st, &mut tools, verbose, show_tool_output)
-                                .map(|drv| {
-                                    (
-                                        TurnResult {
-                                            answer: drv.answer,
-                                            context: TurnContextSummary::default(),
-                                            trace: drv.trace,
-                                            steps_used: drv.steps_used,
-                                            plan: None,
-                                            harness: None,
-                                            subtask_results: vec![],
-                                            advance_phases: vec![],
-                                        },
-                                        true,
-                                    )
-                                })
-                                .map_err(|e| e.to_string());
+                            let st_id = st.id;
+                            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                                || {
+                                    let mut tools =
+                                        ToolRuntime::with_packs(env, brave, &packs);
+                                    registry
+                                        .run_subtask_driver(
+                                            &st,
+                                            &mut tools,
+                                            verbose,
+                                            show_tool_output,
+                                        )
+                                        .map(|drv| {
+                                            (
+                                                TurnResult {
+                                                    answer: drv.answer,
+                                                    context: TurnContextSummary::default(),
+                                                    trace: drv.trace,
+                                                    steps_used: drv.steps_used,
+                                                    plan: None,
+                                                    harness: None,
+                                                    subtask_results: vec![],
+                                                    advance_phases: vec![],
+                                                },
+                                                true,
+                                            )
+                                        })
+                                        .map_err(|e| e.to_string())
+                                },
+                            ))
+                            .unwrap_or_else(|_| {
+                                Err(format!(
+                                    "parallel driver panicked (subtask {st_id})"
+                                ))
+                            });
                             (st, outcome)
                         }));
                     }
                     handles
                         .into_iter()
-                        .map(|h| h.join().expect("parallel driver thread"))
+                        .enumerate()
+                        .map(|(i, h)| {
+                            h.join().unwrap_or_else(|_| {
+                                (
+                                    join_fallback[i].clone(),
+                                    Err(format!(
+                                        "parallel driver thread aborted (subtask {})",
+                                        join_fallback[i].id
+                                    )),
+                                )
+                            })
+                        })
                         .collect()
                 });
 
@@ -1047,8 +1076,11 @@ impl<E: AgentBrain> ReActLoop<E> {
                 let (exec, used_driver) = match outcome {
                     Ok(v) => v,
                     Err(err) => {
-                        // ドライバ失敗時はメインスレッドで ReAct にフォールバック
-                        if self.config.verbose {
+                        // ドライバ失敗・スレッドパニック時はメインで ReAct にフォールバック
+                        if self.config.verbose
+                            || err.contains("panicked")
+                            || err.contains("aborted")
+                        {
                             eprintln!(
                                 "[driver] subtask {} failed ({err}); falling back to ReAct",
                                 st.id
