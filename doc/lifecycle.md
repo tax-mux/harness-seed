@@ -62,13 +62,13 @@ begin_host_scratch_for_turn  （袋クリア → seed マージ）
 
 本筋の rules / recalled / tool catalog / observation 全文は**渡さない**。チケット説明などに使える構造化断片だけを渡す。
 
-| hook | 引数 |
-|------|------|
-| `on_turn_started` | `user_input`, `host` |
-| `on_plan_finished` | `user_input`, `plan`, `host` |
-| `on_subtask_started` | `user_input`, `plan`, `subtask`, `index`（0 始まり）, `host` |
-| `on_subtask_finished` | 上記 + `answer`, `steps_used`, `host` |
-| `on_turn_finished` | `user_input`, `answer`, `plan?`, `steps_used`, `host` |
+| hook | 引数 | write scope |
+|------|------|-------------|
+| `on_turn_started` | `user_input`, `host: HostView` | `turn` |
+| `on_plan_finished` | `user_input`, `plan`, `host` | `turn` |
+| `on_subtask_started` | `user_input`, `plan`, `subtask`, `index`（0 始まり）, `host` | `subtasks.{subtask.id}` |
+| `on_subtask_finished` | 上記 + `answer`, `steps_used`, `host` | `subtasks.{subtask.id}` |
+| `on_turn_finished` | `user_input`, `answer`, `plan?`, `steps_used`, `host` | `turn` |
 
 外部チケットの説明文の目安:
 
@@ -79,68 +79,78 @@ begin_host_scratch_for_turn  （袋クリア → seed マージ）
 | 子の結果（`on_subtask_finished`） | そのサブタスクの `answer` |
 | 親の完了コメント（`on_turn_finished`） | 最終 `answer` |
 
-## 5. HostScratch（ターン袋）
+## 5. HostScratch（ターン袋・入れ子）
 
-ターン専用のキー・バリュー置き場。**プロンプト組み立て・LLM 入力には一切使わない。**
+ターン専用の入れ子 JSON。**プロンプト組み立て・LLM 入力には一切使わない。**
 
-典型キー例（ホスト自由）:
+```json
+{
+  "turn": {
+    "project_id": 1,
+    "ticket_id": 10,
+    "parent_ticket_id": 42
+  },
+  "subtasks": {
+    "1": { "child_ticket_id": 7 },
+    "2": { "child_ticket_id": 8 }
+  }
+}
+```
 
-- `redmine.project_id`
-- `redmine.ticket_id`（ユーザー指示や UI から seed）
-- `redmine.parent_ticket_id`（`on_plan_finished` で作成後に書く）
-- `redmine.child.0` …（`on_subtask_started` で子を切ったあと）
+| 領域 | キー | 書いてよい hook |
+|------|------|-----------------|
+| `turn` | ホスト自由 | `on_turn_started` / `on_plan_finished` / `on_turn_finished`（および seed） |
+| `subtasks.{id}` | **subtask id**（配列ではない） | その id の `on_subtask_started` / `on_subtask_finished` のみ |
+
+**参照は袋全体**（`host.to_value()` / `turn_get_*` / `subtask_get_*`）。**書き込みは自ノードのみ**（`HostView::insert`）。並列時も子同士は枝が違うので競合しにくい。
 
 ### 5.1 寿命
 
 1. `run_turn` 先頭で袋を **clear**
-2. `seed_host_scratch` があれば **merge**
-3. `on_turn_started` 以降、各 hook が同じ袋を読み書き
+2. `seed_host_scratch` があれば **`turn` のみ merge**（`subtasks` は載せない）
+3. 各 hook が `HostView` 経由で読み書き
 4. ターン後は `react.host_scratch()` で読める（**次の `run_turn` 開始で再び clear**）
 
 ### 5.2 標識の入れ方
 
-**UI で選んだ ID（推奨）**
+**UI で選んだ ID（推奨・seed は turn へ）**
 
 ```rust
 let mut seed = HostScratch::new();
-seed.insert("redmine.project_id", 1);
-seed.insert("redmine.ticket_id", 10);
+seed.turn_insert("project_id", 1);
+seed.turn_insert("ticket_id", 10);
 react.seed_host_scratch(seed);
 react.run_turn(&user_input)?;
 ```
 
 **指示文から読む**
 
-`on_turn_started` で `user_input` をパースし、`host.insert(...)` する。エンジンはドメイン語彙を解釈しない。
+`on_turn_started` で `user_input` をパースし、`host.insert(...)`（write scope は `turn`）する。
 
-### 5.3 API 要約
+### 5.3 HostView
 
-| メソッド | 意味 |
-|----------|------|
-| `insert` / `get` / `get_i64` / `get_str` / `remove` / `contains` | エントリ操作 |
-| `merge` | 他袋を上書きマージ |
-| `clear` / `is_empty` / `iter` | 全体操作 |
-
-値型は `serde_json::Value`。
+| 操作 | API |
+|------|-----|
+| 全体参照 | `to_value()` / `turn()` / `subtask(id)` / `turn_get_*` / `subtask_get_*` |
+| 自ノード書き込み | `insert` / `remove` / `get` / `get_i64`（自ノード） |
+| write scope | `WriteScope::Turn` または `WriteScope::Subtask(id)`（エンジンが付与） |
 
 ## 6. 登録と実装例
 
 ```rust
-use harness_seed::{HostScratch, PlanArtifact, ReActLoop, Subtask, TurnLifecycle};
-use std::sync::Arc;
+use harness_seed::{HostScratch, HostView, PlanArtifact, Subtask, TurnLifecycle};
 
 struct PmSync;
 
 impl TurnLifecycle for PmSync {
-    fn on_turn_started(&self, user_input: &str, host: &mut HostScratch) {
-        // 必要なら指示文から ID を袋へ
-        let _ = (user_input, host);
+    fn on_turn_started(&self, user_input: &str, host: HostView<'_>) {
+        let _ = (user_input, host.turn_get_i64("ticket_id"));
     }
 
-    fn on_plan_finished(&self, _user_input: &str, plan: &PlanArtifact, host: &mut HostScratch) {
-        // 親チケット作成。plan.summary / plan.subtasks を説明に使う
-        // host.insert("pm.parent_id", created_id);
-        let _ = (plan, host);
+    fn on_plan_finished(&self, _user_input: &str, plan: &PlanArtifact, mut host: HostView<'_>) {
+        // 親チケット作成 → turn に書く
+        host.insert("parent_ticket_id", 42);
+        let _ = plan;
     }
 
     fn on_subtask_started(
@@ -148,11 +158,13 @@ impl TurnLifecycle for PmSync {
         _user_input: &str,
         _plan: &PlanArtifact,
         subtask: &Subtask,
-        index: usize,
-        host: &mut HostScratch,
+        _index: usize,
+        mut host: HostView<'_>,
     ) {
-        // 子チケット。host の parent_id を参照
-        let _ = (subtask, index, host);
+        let parent = host.turn_get_i64("parent_ticket_id");
+        // 子チケット作成 → この subtask のノードに書く
+        host.insert("child_ticket_id", 7);
+        let _ = (subtask, parent);
     }
 
     fn on_subtask_finished(
@@ -162,10 +174,10 @@ impl TurnLifecycle for PmSync {
         subtask: &Subtask,
         answer: &str,
         _steps_used: usize,
-        host: &mut HostScratch,
+        host: HostView<'_>,
     ) {
-        // 子に結果を書く
-        let _ = (subtask, answer, host);
+        let child = host.get_i64("child_ticket_id");
+        let _ = (subtask, answer, child);
     }
 
     fn on_turn_finished(
@@ -174,17 +186,15 @@ impl TurnLifecycle for PmSync {
         answer: &str,
         _plan: Option<&PlanArtifact>,
         _steps_used: usize,
-        host: &mut HostScratch,
+        host: HostView<'_>,
     ) {
-        // 親を更新 / 通知
-        let _ = (answer, host);
+        // 子ノードを集約して親を更新
+        let _ = (answer, host.subtask_get_i64(1, "child_ticket_id"));
     }
 }
-
-// react.set_lifecycle(Some(Arc::new(PmSync)));
 ```
 
-複数連携は `CompositeLifecycle` で順に呼ぶ（同一 `HostScratch` を共有）。
+複数連携は `CompositeLifecycle` で順に呼ぶ（同一袋・同一 write scope）。
 
 ## 7. TurnObserver との違い
 

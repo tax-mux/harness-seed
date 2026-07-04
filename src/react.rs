@@ -18,7 +18,7 @@ use crate::context_map::{analyze_prompt_body, format_colormap};
 use crate::context_metrics::TurnContextSummary;
 use crate::harness::{HarnessReference, HarnessState};
 use crate::layer::{run_layer_loop, run_plan_layer, LayerLoopOptions};
-use crate::lifecycle::{HostScratch, TurnLifecycle};
+use crate::lifecycle::{HostScratch, HostView, TurnLifecycle, WriteScope};
 use crate::memory::{
     build_memory_rag, inject_memory_recalled, DiaryEntry, DiaryPhase, MemoryBridge, MemoryRag,
     MemoryRuntimeConfig, NoopBridge,
@@ -273,7 +273,7 @@ impl<E: AgentBrain> ReActLoop<E> {
     fn begin_host_scratch_for_turn(&mut self) {
         self.host_scratch.clear();
         if let Some(seed) = self.pending_host_seed.take() {
-            self.host_scratch.merge(seed);
+            self.host_scratch.merge_turn_seed(seed);
         }
     }
 
@@ -447,14 +447,21 @@ impl<E: AgentBrain> ReActLoop<E> {
         let Some(h) = self.lifecycle.clone() else {
             return;
         };
-        h.on_turn_started(user_input, &mut self.host_scratch);
+        h.on_turn_started(
+            user_input,
+            HostView::new(&mut self.host_scratch, WriteScope::Turn),
+        );
     }
 
     fn emit_plan_finished(&mut self, user_input: &str, plan: &PlanArtifact) {
         let Some(h) = self.lifecycle.clone() else {
             return;
         };
-        h.on_plan_finished(user_input, plan, &mut self.host_scratch);
+        h.on_plan_finished(
+            user_input,
+            plan,
+            HostView::new(&mut self.host_scratch, WriteScope::Turn),
+        );
     }
 
     fn emit_subtask_started(
@@ -467,7 +474,14 @@ impl<E: AgentBrain> ReActLoop<E> {
         let Some(h) = self.lifecycle.clone() else {
             return;
         };
-        h.on_subtask_started(user_input, plan, subtask, index, &mut self.host_scratch);
+        let id = subtask.id;
+        h.on_subtask_started(
+            user_input,
+            plan,
+            subtask,
+            index,
+            HostView::new(&mut self.host_scratch, WriteScope::Subtask(id)),
+        );
     }
 
     fn emit_subtask_finished(
@@ -481,13 +495,14 @@ impl<E: AgentBrain> ReActLoop<E> {
         let Some(h) = self.lifecycle.clone() else {
             return;
         };
+        let id = subtask.id;
         h.on_subtask_finished(
             user_input,
             plan,
             subtask,
             answer,
             steps_used,
-            &mut self.host_scratch,
+            HostView::new(&mut self.host_scratch, WriteScope::Subtask(id)),
         );
     }
 
@@ -500,7 +515,7 @@ impl<E: AgentBrain> ReActLoop<E> {
             &result.answer,
             result.plan.as_ref(),
             result.steps_used,
-            &mut self.host_scratch,
+            HostView::new(&mut self.host_scratch, WriteScope::Turn),
         );
     }
 
@@ -1430,7 +1445,7 @@ mod tests {
 
     #[test]
     fn lifecycle_hooks_fire_without_changing_answer() {
-        use crate::lifecycle::{HostScratch, TurnLifecycle};
+        use crate::lifecycle::{HostScratch, HostView, TurnLifecycle};
         use std::sync::Mutex;
 
         #[derive(Default)]
@@ -1438,14 +1453,14 @@ mod tests {
             events: Mutex<Vec<String>>,
         }
         impl TurnLifecycle for Rec {
-            fn on_turn_started(&self, _: &str, host: &mut HostScratch) {
-                let ticket = host.get_i64("ticket_id").unwrap_or(-1);
+            fn on_turn_started(&self, _: &str, host: HostView<'_>) {
+                let ticket = host.turn_get_i64("ticket_id").unwrap_or(-1);
                 self.events
                     .lock()
                     .unwrap()
                     .push(format!("turn_started:{ticket}"));
             }
-            fn on_plan_finished(&self, _: &str, _: &PlanArtifact, host: &mut HostScratch) {
+            fn on_plan_finished(&self, _: &str, _: &PlanArtifact, mut host: HostView<'_>) {
                 host.insert("parent_ticket", 42);
                 self.events.lock().unwrap().push("plan_finished".into());
             }
@@ -1453,31 +1468,31 @@ mod tests {
                 &self,
                 _: &str,
                 _: &PlanArtifact,
-                _: &Subtask,
+                subtask: &Subtask,
                 _: usize,
-                host: &mut HostScratch,
+                mut host: HostView<'_>,
             ) {
-                let parent = host.get_i64("parent_ticket").unwrap_or(-1);
+                let parent = host.turn_get_i64("parent_ticket").unwrap_or(-1);
                 host.insert("child_ticket", 7);
-                self.events
-                    .lock()
-                    .unwrap()
-                    .push(format!("subtask_started:{parent}"));
+                self.events.lock().unwrap().push(format!(
+                    "subtask_started:{}:{parent}",
+                    subtask.id
+                ));
             }
             fn on_subtask_finished(
                 &self,
                 _: &str,
                 _: &PlanArtifact,
-                _: &Subtask,
+                subtask: &Subtask,
                 _: &str,
                 _: usize,
-                host: &mut HostScratch,
+                host: HostView<'_>,
             ) {
                 let child = host.get_i64("child_ticket").unwrap_or(-1);
-                self.events
-                    .lock()
-                    .unwrap()
-                    .push(format!("subtask_finished:{child}"));
+                self.events.lock().unwrap().push(format!(
+                    "subtask_finished:{}:{child}",
+                    subtask.id
+                ));
             }
             fn on_turn_finished(
                 &self,
@@ -1485,13 +1500,14 @@ mod tests {
                 _: &str,
                 _: Option<&PlanArtifact>,
                 _: usize,
-                host: &mut HostScratch,
+                host: HostView<'_>,
             ) {
-                let parent = host.get_i64("parent_ticket").unwrap_or(-1);
+                let parent = host.turn_get_i64("parent_ticket").unwrap_or(-1);
+                let child = host.subtask_get_i64(1, "child_ticket").unwrap_or(-1);
                 self.events
                     .lock()
                     .unwrap()
-                    .push(format!("turn_finished:{parent}"));
+                    .push(format!("turn_finished:{parent}:{child}"));
             }
         }
 
@@ -1501,7 +1517,7 @@ mod tests {
         let mut react = ReActLoop::new(SimpleRuleBrain::new(), PlanBrainMode::rule(), config);
         react.set_lifecycle(Some(rec.clone()));
         let mut seed = HostScratch::new();
-        seed.insert("ticket_id", 10);
+        seed.turn_insert("ticket_id", 10);
         react.seed_host_scratch(seed);
         let result = react.run_turn("hello world").unwrap();
         assert!(result.answer.contains("hello world"));
@@ -1510,14 +1526,20 @@ mod tests {
             [
                 "turn_started:10",
                 "plan_finished",
-                "subtask_started:42",
-                "subtask_finished:7",
-                "turn_finished:42",
+                "subtask_started:1:42",
+                "subtask_finished:1:7",
+                "turn_finished:42:7",
             ]
         );
-        assert_eq!(react.host_scratch().get_i64("ticket_id"), Some(10));
-        assert_eq!(react.host_scratch().get_i64("parent_ticket"), Some(42));
-        assert_eq!(react.host_scratch().get_i64("child_ticket"), Some(7));
+        assert_eq!(react.host_scratch().turn_get_i64("ticket_id"), Some(10));
+        assert_eq!(react.host_scratch().turn_get_i64("parent_ticket"), Some(42));
+        assert_eq!(
+            react.host_scratch().subtask_get_i64(1, "child_ticket"),
+            Some(7)
+        );
+        let json = react.host_scratch().to_value();
+        assert_eq!(json["turn"]["parent_ticket"], 42);
+        assert_eq!(json["subtasks"]["1"]["child_ticket"], 7);
     }
 
     #[test]
