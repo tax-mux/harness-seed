@@ -83,7 +83,7 @@ pub fn format_plan_fixed_zone_system(
     build_plan_layer_messages_with_catalog(&ctx, &catalog)
         .into_iter()
         .find(|m| m.role == "system")
-        .map(|m| m.content)
+        .map(|m| m.content.as_text())
         .unwrap_or_default()
 }
 

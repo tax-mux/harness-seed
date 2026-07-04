@@ -81,14 +81,14 @@ impl GeminiConnector {
 
         for m in messages {
             match m.role.as_str() {
-                "system" => system_lines.push(m.content.clone()),
+                "system" => system_lines.push(m.content.as_text()),
                 "assistant" => contents.push(json!({
                     "role": "model",
-                    "parts": [{ "text": m.content }]
+                    "parts": m.content.gemini_parts()
                 })),
                 _ => contents.push(json!({
                     "role": "user",
-                    "parts": [{ "text": m.content }]
+                    "parts": m.content.gemini_parts()
                 })),
             }
         }

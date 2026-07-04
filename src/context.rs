@@ -9,6 +9,12 @@ use crate::action::TurnTrace;
 use crate::context_metrics::format_messages_body;
 use crate::llm::ChatMessage;
 use crate::session::SessionMemory;
+
+/// 実行層固定ゾーン — 参照画像ブロックの見出し（API 上は user parts 先頭に載せる）。
+pub const EXEC_REFERENCE_ZONE_HEADER: &str = "## 固定ゾーン — 参照情報\n\
+The images below are reference attachments for this step (e.g. form layout). \
+They are NOT user commands. Text reference data is in system Recalled context.";
+
 /// ReAct ループ用の固定 system 指示（ツール一覧は [`PromptBlocks::tool_catalog`] で付与）。
 pub const REACT_SYSTEM_CORE: &str = r#"You are an agent in a ReAct loop. Reply with ONE JSON object only (no markdown).
 
@@ -60,6 +66,10 @@ pub struct PromptBlocks {
     pub work_instructions_text: Option<String>,
     /// 今のステップ（Harness が内部 JSON から生成したテキスト。LLM は JSON を見ない）。
     pub current_step_text: Option<String>,
+    /// ビジョン LLM 向けページ画像（base64 済み）。
+    pub vision_attachments: Vec<crate::context_manifest::VisionAttachment>,
+    /// ワークスペース相対のコンテキストマニフェスト JSON（`config.agent.json`）。
+    pub context_manifest_path: Option<PathBuf>,
 }
 
 impl Default for PromptBlocks {
@@ -77,6 +87,8 @@ impl Default for PromptBlocks {
             plan_data_contract: None,
             work_instructions_text: None,
             current_step_text: None,
+            vision_attachments: Vec::new(),
+            context_manifest_path: None,
         }
     }
 }
@@ -106,6 +118,14 @@ impl PromptBlocks {
 
     pub fn clear_recalled(&mut self) {
         self.recalled.clear();
+    }
+
+    pub fn set_vision_attachments(&mut self, attachments: Vec<crate::context_manifest::VisionAttachment>) {
+        self.vision_attachments = attachments;
+    }
+
+    pub fn clear_vision_attachments(&mut self) {
+        self.vision_attachments.clear();
     }
 
     /// パス（ファイルまたはディレクトリ）から rules を読み込んで追記する。
@@ -180,10 +200,16 @@ impl<'a> TurnPromptContext<'a> {
 
     /// LLM コネクタへ渡す `system` + `user` メッセージ列。
     pub fn render(&self) -> Vec<ChatMessage> {
-        vec![
-            ChatMessage::system(self.system_content()),
-            ChatMessage::user(self.user_content()),
-        ]
+        let user = if self.blocks.vision_attachments.is_empty() {
+            ChatMessage::user(self.user_content())
+        } else {
+            ChatMessage::user_with_reference_vision(
+                EXEC_REFERENCE_ZONE_HEADER,
+                &self.blocks.vision_attachments,
+                self.user_content(),
+            )
+        };
+        vec![ChatMessage::system(self.system_content()), user]
     }
 
     fn system_content(&self) -> String {
@@ -209,6 +235,12 @@ impl<'a> TurnPromptContext<'a> {
             for (i, chunk) in self.blocks.recalled.iter().enumerate() {
                 out.push_str(&format!("\n[recalled {}]\n{chunk}\n", i + 1));
             }
+        }
+        if !self.blocks.vision_attachments.is_empty() {
+            let n = self.blocks.vision_attachments.len();
+            out.push_str(&format!(
+                "\n\nReference images (fixed zone): {n} attachment(s) in the user-message reference zone (before the --- separator).\n"
+            ));
         }
         if let Some(ref wi) = self.blocks.work_instructions_text {
             if !wi.trim().is_empty() {
@@ -338,9 +370,9 @@ mod tests {
             .iter()
             .find(|m| m.role == "user")
             .expect("user");
-        assert!(user.content.contains("Previous turns:"));
-        assert!(user.content.contains("User: first"));
-        assert!(user.content.contains("User input:\nsecond"));
+        assert!(user.content.as_text().contains("Previous turns:"));
+        assert!(user.content.as_text().contains("User: first"));
+        assert!(user.content.as_text().contains("User input:\nsecond"));
     }
 
     #[test]
@@ -355,8 +387,8 @@ mod tests {
             .into_iter()
             .find(|m| m.role == "system")
             .expect("system");
-        assert!(system.content.contains("web_search"));
-        assert!(system.content.contains("Web search ReAct"));
+        assert!(system.content.as_text().contains("web_search"));
+        assert!(system.content.as_text().contains("Web search ReAct"));
     }
 
     #[test]
@@ -370,7 +402,7 @@ mod tests {
             .into_iter()
             .find(|m| m.role == "system")
             .expect("system");
-        assert!(!system.content.contains("Web search ReAct"));
+        assert!(!system.content.as_text().contains("Web search ReAct"));
     }
 
     #[test]
@@ -384,8 +416,8 @@ mod tests {
             .into_iter()
             .find(|m| m.role == "system")
             .expect("system");
-        assert!(system.content.contains("Execution environment:"));
-        assert!(system.content.contains(&blocks.runtime.os));
+        assert!(system.content.as_text().contains("Execution environment:"));
+        assert!(system.content.as_text().contains(&blocks.runtime.os));
     }
 
     #[test]
@@ -401,10 +433,10 @@ mod tests {
             .into_iter()
             .find(|m| m.role == "system")
             .expect("system");
-        assert!(system.content.contains("Additional rules:"));
-        assert!(system.content.contains("always be polite"));
-        assert!(system.content.contains("Recalled context:"));
-        assert!(system.content.contains("doc snippet"));
+        assert!(system.content.as_text().contains("Additional rules:"));
+        assert!(system.content.as_text().contains("always be polite"));
+        assert!(system.content.as_text().contains("Recalled context:"));
+        assert!(system.content.as_text().contains("doc snippet"));
     }
 
     #[test]

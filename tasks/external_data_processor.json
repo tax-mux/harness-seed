@@ -1,0 +1,18 @@
+{
+  "id": "process_data",
+  "summary": "外部ツール process_data を用いてデータ処理を実行する",
+  "default_params": {
+    "input": ""
+  },
+  "done_when": "process_data の処理結果が返される",
+  "steps": [
+    {
+      "order": 1,
+      "method": "process_data",
+      "args": {
+        "input": "{input}"
+      },
+      "required": true
+    }
+  ]
+}

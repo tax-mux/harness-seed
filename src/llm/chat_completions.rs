@@ -123,7 +123,7 @@ impl LlmConnector for ChatCompletionsConnector {
             .choices
             .into_iter()
             .next()
-            .map(|c| c.message.content)
+            .map(|c| c.message.content.as_text())
             .ok_or_else(|| ConnectorError::InvalidResponse("empty choices".into()))?;
 
         let usage = ContextUsage::from_parts(

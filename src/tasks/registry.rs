@@ -11,7 +11,7 @@ use crate::tool::workspace_root;
 
 use super::audit::{audit_trace, TaskExecutionAudit};
 use super::policy::SubtaskToolPolicy;
-use super::spec::{TaskDefinition, TaskError};
+use super::spec::{apply_template, apply_template_value, TaskDefinition, TaskError};
 
 /// 組み込みタスク JSON（`tasks/` ディレクトリと同期すること）。
 const BUILTIN_LIST_DIR: &str = include_str!("../../tasks/list_dir.json");
@@ -215,7 +215,7 @@ impl TaskRegistry {
             }
             if !def.mission_append.trim().is_empty() {
                 block.push_str("\n");
-                block.push_str(def.mission_append.trim());
+                block.push_str(&apply_template(def.mission_append.trim(), &merged));
                 block.push('\n');
             }
             (
@@ -263,6 +263,13 @@ impl TaskRegistry {
         );
 
         Ok(mission)
+    }
+
+    /// サブタスク用の解決済みツールポリシー（`task` id があるときのみ）。
+    pub fn merged_subtask_params(&self, subtask: &Subtask) -> Option<Value> {
+        let task_id = subtask.task.as_ref()?;
+        let def = self.get(task_id)?;
+        Some(merge_params(&def.default_params, &subtask.params))
     }
 
     /// サブタスク用の解決済みツールポリシー（`task` id があるときのみ）。

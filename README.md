@@ -70,7 +70,10 @@ cargo run
 # Verbose logs: cargo run -- -v
 # JSON Lines REPL: cargo run -- --json  (doc/wire-protocol.md)
 
-# The LLM brain is determined by llm.provider in config/config.json (defaults to Ollama)
+# First-time setup (config/config.json is gitignored)
+cp config/config.json.sample config/config.json
+
+# The LLM brain is determined by llm.provider in config/config.json
 # Rules-only brain: cargo run -- --no-llm
 
 # Switching providers: Overwrite config.json with a sample template
@@ -118,7 +121,8 @@ cargo run
 
 | File | Usage |
 |------|------|
-| `config/config.json` | **Active configuration read by runs and tests** (Edit this file) |
+| `config/config.json.sample` | **Default template** (tracked; no secrets) |
+| `config/config.json` | **Active configuration** (gitignored; copy from sample and edit) |
 | `config/samples/config.ollama.json` | Ollama template |
 | `config/samples/config.lmstudio.json` | LM Studio template |
 | `config/samples/config.openai.json` | OpenAI template |

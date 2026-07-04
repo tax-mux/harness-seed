@@ -58,8 +58,8 @@ fn exec_render_includes_work_instructions_and_current_step() {
         .into_iter()
         .find(|m| m.role == "system")
         .expect("system");
-    assert!(system.content.contains("Work instructions (from planner"));
-    assert!(system.content.contains("Do the thing"));
-    assert!(system.content.contains("Current step (harness"));
-    assert!(system.content.contains("Step 1/1"));
+    assert!(system.content.as_text().contains("Work instructions (from planner"));
+    assert!(system.content.as_text().contains("Do the thing"));
+    assert!(system.content.as_text().contains("Current step (harness"));
+    assert!(system.content.as_text().contains("Step 1/1"));
 }

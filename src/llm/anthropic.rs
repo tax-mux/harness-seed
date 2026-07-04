@@ -63,14 +63,14 @@ impl AnthropicConnector {
 
         for m in messages {
             match m.role.as_str() {
-                "system" => system_lines.push(m.content.clone()),
+                "system" => system_lines.push(m.content.as_text()),
                 "assistant" => api_messages.push(json!({
                     "role": "assistant",
-                    "content": m.content
+                    "content": m.content.as_text()
                 })),
                 _ => api_messages.push(json!({
                     "role": "user",
-                    "content": m.content
+                    "content": m.content.anthropic_content()
                 })),
             }
         }

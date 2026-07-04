@@ -20,8 +20,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub const DEFAULT_MAX_THOUGHTS: usize = 1;
 
 const THOUGHT_LIMIT_TOOL: &str = "__thought_limit";
-const THOUGHT_LIMIT_MSG: &str = "Only one thought step is allowed in this run. \
-Do not emit another thought. Return {\"step\":\"action\",...} or {\"step\":\"answer\",...}.";
+
+fn thought_limit_message(max_thoughts: usize) -> String {
+    format!(
+        "Thought limit reached ({max_thoughts} per run). \
+         Do not emit another thought. Return {{\"step\":\"action\",...}} or {{\"step\":\"answer\",...}}."
+    )
+}
 
 /// 層ごとのループ設定。
 #[derive(Debug, Clone, Copy)]
@@ -42,10 +47,10 @@ impl LayerLoopOptions {
         }
     }
 
-    pub const fn exec(max_steps: usize) -> Self {
+    pub const fn exec(max_steps: usize, max_thoughts: usize) -> Self {
         Self {
             max_steps,
-            max_thoughts: DEFAULT_MAX_THOUGHTS,
+            max_thoughts,
             tools_enabled: true,
             context_label: "step",
         }
@@ -56,7 +61,7 @@ impl LayerLoopOptions {
 pub fn run_layer_loop<B: AgentBrain>(
     brain: &mut B,
     tools: &mut ToolRuntime,
-    blocks: &crate::context::PromptBlocks,
+    blocks: &mut crate::context::PromptBlocks,
     session: &SessionMemory,
     user_input: &str,
     opts: LayerLoopOptions,
@@ -110,6 +115,10 @@ pub fn run_layer_loop<B: AgentBrain>(
         if verbose {
             eprintln!("[{}] {step:?}", opts.context_label);
         }
+        // ビジョン画像は初回 LLM 呼び出しのみ（以降のステップで base64 を再送しない）
+        if steps_used == 1 {
+            blocks.clear_vision_attachments();
+        }
 
         match step {
             AgentStep::Thought(thought) => {
@@ -118,7 +127,7 @@ pub fn run_layer_loop<B: AgentBrain>(
                 } else {
                     let id = tools.allocate_invoke_id();
                     trace.push_action(Action::new(id, THOUGHT_LIMIT_TOOL, serde_json::json!({})));
-                    let observation = Observation::failure(id, THOUGHT_LIMIT_MSG);
+                    let observation = Observation::failure(id, &thought_limit_message(opts.max_thoughts));
                     emit_observation_step(
                         turn_observer,
                         opts.context_label,
@@ -202,7 +211,7 @@ pub fn run_layer_loop<B: AgentBrain>(
 pub fn run_plan_layer<B: AgentBrain>(
     brain: &mut B,
     tools: &mut ToolRuntime,
-    blocks: &crate::context::PromptBlocks,
+    blocks: &mut crate::context::PromptBlocks,
     session: &SessionMemory,
     user_input: &str,
     max_steps: usize,
@@ -298,16 +307,16 @@ mod tests {
             None,
             crate::tool::full_builtin_registry(false),
         );
-        let blocks = PromptBlocks::default();
+        let mut blocks = PromptBlocks::default();
         let session = SessionMemory::default();
 
         let turn = run_layer_loop(
             &mut brain,
             &mut tools,
-            &blocks,
+            &mut blocks,
             &session,
             "test",
-            LayerLoopOptions::exec(8),
+            LayerLoopOptions::exec(8, 1),
             false,
             false,
             false,
@@ -327,7 +336,7 @@ mod tests {
             turn.trace
                 .observations
                 .iter()
-                .any(|o| !o.ok && o.output.contains("Only one thought"))
+                .any(|o| !o.ok && o.output.contains("Thought limit reached"))
         );
     }
 
@@ -342,13 +351,13 @@ mod tests {
             None,
             crate::tool::full_builtin_registry(false),
         );
-        let blocks = PromptBlocks::default();
+        let mut blocks = PromptBlocks::default();
         let session = SessionMemory::default();
 
         let (harness, trace, steps_used) = run_plan_layer(
             &mut brain,
             &mut tools,
-            &blocks,
+            &mut blocks,
             &session,
             "自己紹介して",
             4,

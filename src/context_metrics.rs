@@ -97,7 +97,18 @@ impl ContextUsage {
 pub fn format_messages_body(messages: &[ChatMessage]) -> String {
     messages
         .iter()
-        .map(|m| format!("{}: {}\n", m.role, m.content))
+        .map(|m| {
+            let images = m.content.image_count();
+            if images == 0 {
+                format!("{}: {}\n", m.role, m.content.as_text())
+            } else {
+                format!(
+                    "{}: {} [+{images} image(s)]\n",
+                    m.role,
+                    m.content.as_text()
+                )
+            }
+        })
         .collect()
 }
 

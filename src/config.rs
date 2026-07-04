@@ -16,7 +16,7 @@ use crate::tool::{default_packs, packs_from_names, ToolPack};
 
 const DEFAULT_CONFIG_PATH: &str = "config/config.json";
 
-/// 実行時設定（`config/config.json`）。ひな形は `config/samples/`。
+/// 実行時設定（`config/config.json`）。ひな形は `config/config.json.sample` と `config/samples/`。
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AppConfig {
     #[serde(default)]
@@ -52,6 +52,8 @@ pub struct ReactSection {
     pub two_phase: Option<bool>,
     /// 計画層 ReAct ループの最大ステップ。
     pub max_steps_plan: Option<usize>,
+    /// 実行層 ReAct ループあたりの `thought` 上限（既定: 1）。
+    pub max_thoughts: Option<usize>,
     /// `tasks/*.json` の `steps[]` 契約があるサブタスクを LLM なしで順次実行する。
     pub use_step_driver: Option<bool>,
     /// 各 ReAct ステップのプロンプト全文を stderr に出す。
@@ -312,6 +314,7 @@ impl AppConfig {
                 .unwrap_or(SessionMemory::DEFAULT_MAX_TURNS),
             two_phase: self.react.two_phase.unwrap_or(false),
             max_steps_plan: self.react.max_steps_plan.unwrap_or(4),
+            max_thoughts: self.react.max_thoughts.unwrap_or(1).max(1),
             use_step_driver: self.react.use_step_driver.unwrap_or(true),
             show_prompt: cli_show_prompt || self.react.show_prompt.unwrap_or(false),
             show_plan: self.react.show_plan.unwrap_or(true),
@@ -677,13 +680,13 @@ pub fn env_path(name: &str) -> Option<PathBuf> {
     std::env::var(name).ok().map(PathBuf::from)
 }
 
-/// 相対パスをクレートルート（`CARGO_MANIFEST_DIR`）基準に解決する。
-fn resolve_workspace_path(path: &str) -> PathBuf {
+/// 相対パスを [`workspace_root`] 基準に解決する。
+pub fn resolve_workspace_path(path: &str) -> PathBuf {
     let p = PathBuf::from(path);
     if p.is_absolute() {
         return p;
     }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(p)
+    crate::tool::workspace_root().join(p)
 }
 
 fn env_string(name: &str) -> Option<String> {
@@ -740,7 +743,7 @@ mod tests {
 
     #[test]
     fn loads_active_config_json() {
-        let cfg = AppConfig::load_path("config/config.json").unwrap();
+        let cfg = AppConfig::load_path("config/config.json.sample").unwrap();
         assert_eq!(cfg.llm.provider.as_deref(), Some("lmstudio"));
         assert_eq!(cfg.react.max_steps, Some(16));
         assert_eq!(cfg.tools.brave_search.max_results, Some(5));

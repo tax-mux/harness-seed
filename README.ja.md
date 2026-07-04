@@ -70,7 +70,10 @@ cargo run
 # 詳細ログ: cargo run -- -v
 # JSON Lines REPL: cargo run -- --json  （doc/wire-protocol.md）
 
-# LLM 頭脳は config/config.json の llm.provider で決まる（初期状態は Ollama）
+# 初回セットアップ（config/config.json は gitignore）
+cp config/config.json.sample config/config.json
+
+# LLM 頭脳は config/config.json の llm.provider で決まる
 # ルール頭脳のみ: cargo run -- --no-llm
 
 # プロバイダ切替: サンプルを config.json に上書きコピー
@@ -118,7 +121,8 @@ cargo run
 
 | ファイル | 用途 |
 |----------|------|
-| `config/config.json` | **実行・テストが読む正本**（ここを編集する） |
+| `config/config.json.sample` | **既定のひな形**（リポジトリに固定。秘密情報なし） |
+| `config/config.json` | **実行時の正本**（gitignore。sample をコピーして編集） |
 | `config/samples/config.ollama.json` | Ollama ひな形 |
 | `config/samples/config.lmstudio.json` | LM Studio ひな形 |
 | `config/samples/config.openai.json` | OpenAI ひな形 |
