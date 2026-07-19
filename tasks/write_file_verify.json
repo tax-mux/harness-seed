@@ -1,11 +1,13 @@
 {
   "id": "write_file_verify",
   "summary": "ファイルを書き込み、read_file で内容を確認する",
+  "planner_summary": "ファイルを作成・上書きしたうえで内容確認まで必要なときに選ぶ。write_file のあと read_file で検証する契約。一覧だけ・検索だけ・既にあるファイルの読取のみでは選ばない。実行は ReAct が引数を埋める（steps は監査用）。",
   "default_params": {
     "path": "tmp/out.txt",
     "content": ""
   },
   "done_when": "write と read の両方が observation にある",
+  "react_only": true,
   "steps": [
     {
       "order": 1,

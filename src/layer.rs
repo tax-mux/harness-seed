@@ -360,6 +360,8 @@ pub fn run_plan_layer<B: AgentBrain>(
     stop_requested: Option<&AtomicBool>,
     memory: Option<&dyn MemoryBridge>,
     max_recall_rounds: usize,
+    task_registry: &crate::tasks::TaskRegistry,
+    plan_candidate_selection: bool,
 ) -> Result<(HarnessState, crate::action::TurnTrace, usize), ReActError> {
     if let Some(contract) = &blocks.plan_data_contract {
         if contract.skip_plan_layer() {
@@ -379,6 +381,39 @@ pub fn run_plan_layer<B: AgentBrain>(
             return Ok((harness, crate::action::TurnTrace::default(), 0));
         }
     }
+
+    // 計画フェーズ内: summary で候補選定 → 詳細カタログをコンテキスト登録
+    if plan_candidate_selection {
+        let selected = crate::plan::select_and_register_plan_candidates(
+            brain,
+            tools,
+            blocks,
+            session,
+            user_input,
+            task_registry,
+            verbose,
+            show_prompt,
+            turn_observer,
+            stop_requested,
+        );
+        if selected.is_empty() {
+            if verbose {
+                eprintln!("[plan] candidate selection empty — treat as direct chat");
+            }
+            let plan = PlanArtifact {
+                summary: "direct chat".into(),
+                skip_execution: true,
+                subtasks: vec![],
+                knowledge_sufficient: Some(true),
+            };
+            let harness = HarnessState::new("(no task candidates — direct chat)", plan);
+            if echo_harness_parsed {
+                harness.eprintln_parsed();
+            }
+            return Ok((harness, crate::action::TurnTrace::default(), 0));
+        }
+    }
+
     let turn = run_layer_loop(
         brain,
         tools,
@@ -513,6 +548,8 @@ mod tests {
             None,
             None,
             0,
+            &crate::tasks::TaskRegistry::builtin(),
+            false,
         )
         .unwrap();
 
@@ -568,6 +605,8 @@ mod tests {
             None,
             Some(&memory),
             2,
+            &crate::tasks::TaskRegistry::builtin(),
+            false,
         )
         .unwrap();
 
@@ -617,6 +656,8 @@ mod tests {
             None,
             None,
             2,
+            &crate::tasks::TaskRegistry::builtin(),
+            false,
         )
         .unwrap();
 
@@ -683,6 +724,8 @@ mod tests {
             None,
             None,
             2,
+            &crate::tasks::TaskRegistry::builtin(),
+            false,
         )
         .unwrap();
 

@@ -170,6 +170,23 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn builtin_list_dir_not_selected_as_driver_when_react_only() {
+        let reg = TaskRegistry::builtin();
+        let sub = Subtask {
+            id: 1,
+            task: Some("list_dir".into()),
+            params: json!({ "path": "src" }),
+            goal: String::new(),
+            done_when: String::new(),
+            depends_on: vec![],
+        };
+        assert!(
+            !reg.use_step_driver(&sub),
+            "react_only builtins must not take the step-driver path"
+        );
+    }
+
+    #[test]
     fn driver_list_dir_runs_one_step() {
         let reg = TaskRegistry::builtin();
         let sub = Subtask {

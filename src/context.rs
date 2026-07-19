@@ -64,6 +64,10 @@ pub struct PromptBlocks {
     pub tool_catalog: String,
     /// 登録済み実行ツールに合わせた計画層タスクカタログ（未設定なら全タスク）。
     pub plan_task_catalog: Option<String>,
+    /// 計画フェーズで選ばれた候補 task id（コンテキスト登録済み）。
+    pub plan_selected_candidates: Option<Vec<String>>,
+    /// true のとき計画頭脳は候補選定 JSON を返す（通常の PlanArtifact ではない）。
+    pub candidate_selection_turn: bool,
     /// このターンの read / write 契約（ホストアプリが設定）。
     pub plan_data_contract: Option<crate::plan::PlanDataContract>,
     /// 作業指示書テキスト（Planner 出力。Harness が保持）。
@@ -88,6 +92,8 @@ impl Default for PromptBlocks {
                 false,
             )),
             plan_task_catalog: None,
+            plan_selected_candidates: None,
+            candidate_selection_turn: false,
             plan_data_contract: None,
             work_instructions_text: None,
             current_step_text: None,

@@ -61,8 +61,11 @@ pub struct ReActConfig {
     pub max_steps_plan: usize,
     /// 実行層 ReAct ループあたりの `thought` 上限。
     pub max_thoughts: usize,
-    /// `tasks/*.json` の `steps[]` 契約があるサブタスクを LLM なしで順次実行する。
+    /// `react_only: false` かつ steps 契約があるサブタスクを LLM なしで順次実行する。
+    /// 組み込みタスクは `react_only: true` のため、このフラグが true でも ReAct 経路になる。
     pub use_step_driver: bool,
+    /// 計画フェーズで summary による候補選定→コンテキスト登録を行う。
+    pub plan_candidate_selection: bool,
     /// 各 ReAct ステップの LLM プロンプト全文を stderr に出す。
     pub show_prompt: bool,
     /// 計画層の `PlanArtifact` を stdout に表示する（`two_phase` 時）。
@@ -98,6 +101,7 @@ impl Default for ReActConfig {
             max_steps_plan: 8,
             max_thoughts: 1,
             use_step_driver: true,
+            plan_candidate_selection: true,
             show_prompt: false,
             show_plan: true,
             show_task_execution: true,
@@ -430,6 +434,8 @@ impl<E: AgentBrain> ReActLoop<E> {
             self.stop_requested.as_deref(),
             Some(self.memory.as_ref()),
             self.config.memory.recall_max_rounds,
+            &self.task_registry,
+            self.config.plan_candidate_selection,
         )?;
         Self::merge_turn_reference_info(&mut harness, turn_refs);
         Ok(PlanPreviewResult {
@@ -646,6 +652,8 @@ impl<E: AgentBrain> ReActLoop<E> {
             self.stop_requested.as_deref(),
             Some(self.memory.as_ref()),
             self.config.memory.recall_max_rounds,
+            &self.task_registry,
+            self.config.plan_candidate_selection,
         )?;
         Self::merge_turn_reference_info(&mut harness, turn_refs);
         self.apply_harness_from_plan(&mut harness, user_input);
@@ -861,6 +869,8 @@ impl<E: AgentBrain> ReActLoop<E> {
             self.stop_requested.as_deref(),
             Some(self.memory.as_ref()),
             self.config.memory.recall_max_rounds,
+            &self.task_registry,
+            self.config.plan_candidate_selection,
         )?;
         let new_subs: Vec<Subtask> = harness
             .plan
@@ -892,6 +902,8 @@ impl<E: AgentBrain> ReActLoop<E> {
             self.stop_requested.as_deref(),
             Some(self.memory.as_ref()),
             self.config.memory.recall_max_rounds,
+            &self.task_registry,
+            self.config.plan_candidate_selection,
         )?;
         Self::merge_turn_reference_info(&mut harness, turn_refs);
         self.apply_harness_from_plan(&mut harness, user_input);

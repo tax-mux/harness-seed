@@ -1,10 +1,12 @@
 {
   "id": "web_research",
-  "summary": "Brave Web 検索で外部情報を収集する（要 tools.brave_search.api_key）",
+  "summary": "Brave Web 検索で外部情報を収集する",
+  "planner_summary": "最新ニュース・外部事実・Web 上の公開情報を調べるときに選ぶ。Brave web_search が必要（API キー必須）。ローカルファイルやワークスペース内の調査だけでは選ばない。クエリは params.query に具体的な検索語を入れる。",
   "default_params": {
     "query": ""
   },
   "done_when": "web_search の observation に検索結果があり、ユーザー質問に答えられる",
+  "react_only": true,
   "steps": [
     {
       "order": 1,

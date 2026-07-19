@@ -155,6 +155,126 @@ impl TaskRegistry {
         lines.join("\n")
     }
 
+    /// 計画候補選定用: id + planner_summary のみ（手順の詳細は載せない）。
+    pub fn catalog_summaries_for_planner(
+        &self,
+        available_tools: &HashSet<String>,
+        include_web_research: bool,
+        exclude_task_ids: &[&str],
+        require_all_tools: bool,
+    ) -> String {
+        let filter_by_tools = require_all_tools || !available_tools.is_empty();
+        let mut lines = vec![
+            "Task candidates (summaries only — pick ids that fit the user goal):".into(),
+        ];
+        let mut ids: Vec<_> = self.tasks.keys().collect();
+        ids.sort();
+        for id in ids {
+            if exclude_task_ids.contains(&id.as_str()) {
+                continue;
+            }
+            if *id == "web_research" && !include_web_research {
+                continue;
+            }
+            let def = &self.tasks[id];
+            if filter_by_tools && !task_available_with_tools(def, available_tools) {
+                continue;
+            }
+            lines.push(format!("- {id}: {}", def.effective_planner_summary()));
+        }
+        if lines.len() <= 1 {
+            lines.push("- generic: Freeform ReAct when no specialized task fits.".into());
+        }
+        lines.join("\n")
+    }
+
+    /// 選ばれた候補 id だけの詳細カタログ（手順・required tools）。
+    pub fn catalog_for_candidate_ids(
+        &self,
+        candidate_ids: &[String],
+        available_tools: &HashSet<String>,
+        include_web_research: bool,
+        require_all_tools: bool,
+    ) -> String {
+        let mut allow: HashSet<&str> = candidate_ids.iter().map(String::as_str).collect();
+        if allow.is_empty() {
+            allow.insert("generic");
+        }
+        // generic は常にフォールバックとして残せる
+        if !allow.contains("generic") && self.tasks.contains_key("generic") {
+            allow.insert("generic");
+        }
+        let exclude: Vec<&str> = self
+            .tasks
+            .keys()
+            .filter(|id| !allow.contains(id.as_str()))
+            .map(|s| s.as_str())
+            .collect();
+        let mut catalog = self.catalog_for_planner_filtered(
+            available_tools,
+            include_web_research,
+            &exclude,
+            require_all_tools,
+        );
+        catalog.push_str(
+            "\n\nOnly use task ids listed above (selected for this turn). Prefer them over inventing freeform steps.",
+        );
+        catalog
+    }
+
+    /// 候補タスクが必要とするツール名（steps + tool_policy.allow）。`generic` 含む場合は None（全ツール）。
+    pub fn tools_for_candidate_ids(&self, candidate_ids: &[String]) -> Option<HashSet<String>> {
+        if candidate_ids.iter().any(|id| id == "generic") {
+            return None;
+        }
+        let mut tools = HashSet::new();
+        for id in candidate_ids {
+            let Some(def) = self.get(id) else {
+                continue;
+            };
+            if def.steps.is_empty() && def.tool_policy.allow.is_empty() {
+                // 契約なし ≈ 自由 → 全ツール
+                return None;
+            }
+            for step in &def.steps {
+                tools.insert(step.method.clone());
+            }
+            for name in &def.tool_policy.allow {
+                tools.insert(name.clone());
+            }
+        }
+        if tools.is_empty() {
+            None
+        } else {
+            Some(tools)
+        }
+    }
+
+    /// 登録タスク id のうち、利用可能ツールで実行可能なもの。
+    pub fn available_task_ids(
+        &self,
+        available_tools: &HashSet<String>,
+        include_web_research: bool,
+        exclude_task_ids: &[&str],
+        require_all_tools: bool,
+    ) -> Vec<String> {
+        let filter_by_tools = require_all_tools || !available_tools.is_empty();
+        let mut ids: Vec<_> = self.tasks.keys().cloned().collect();
+        ids.sort();
+        ids.into_iter()
+            .filter(|id| {
+                if exclude_task_ids.contains(&id.as_str()) {
+                    return false;
+                }
+                if id == "web_research" && !include_web_research {
+                    return false;
+                }
+                let def = &self.tasks[id];
+                !filter_by_tools || task_available_with_tools(def, available_tools)
+            })
+            .collect()
+    }
+
     /// サブタスクの実行方式・ツール手順をコンソール向けに整形する。
     pub fn format_subtask_execution_for_display(&self, subtask: &Subtask) -> String {
         let mut out = String::new();

@@ -8,6 +8,7 @@ use crate::session::SessionMemory;
 use crate::tasks::TaskRegistry;
 
 use super::brain::PLAN_REACT_SYSTEM_CORE;
+use super::candidates::CANDIDATE_SELECTION_SYSTEM;
 
 /// 計画層 ReAct ループ 1 ステップ目に渡すメッセージ列（LLM 未使用）。
 pub fn build_plan_layer_messages(
@@ -68,6 +69,38 @@ pub fn build_plan_layer_messages_with_catalog(
         ctx.user_input
     );
 
+    vec![ChatMessage::system(system), ChatMessage::user(user)]
+}
+
+/// 候補選定ターン用メッセージ（summary カタログのみ）。
+pub fn build_candidate_selection_messages(ctx: &TurnPromptContext<'_>) -> Vec<ChatMessage> {
+    let catalog = ctx
+        .blocks
+        .plan_task_catalog
+        .clone()
+        .unwrap_or_else(|| "Task candidates:\n- generic: freeform".into());
+    let mut system = String::from(CANDIDATE_SELECTION_SYSTEM);
+    if let Some(contract) = &ctx.blocks.plan_data_contract {
+        system.push_str("\n\n");
+        system.push_str(&contract.format_for_planner());
+        system.push_str(
+            "\n(Use the data contract as a hint for INPUT/OUTPUT; still choose task ids by summary fit.)\n",
+        );
+    }
+    if !ctx.blocks.recalled.is_empty() {
+        system.push_str("\n\nRecalled context (hint only):\n");
+        for (i, chunk) in ctx.blocks.recalled.iter().enumerate() {
+            // 候補選定では長文を抑えめに
+            let clipped: String = chunk.chars().take(800).collect();
+            system.push_str(&format!("\n[recalled {}]\n{clipped}\n", i + 1));
+        }
+    }
+    system.push_str("\n\n");
+    system.push_str(catalog.trim());
+    let user = format!(
+        "User goal:\n{}\n\nReply with candidates JSON only:",
+        ctx.user_input
+    );
     vec![ChatMessage::system(system), ChatMessage::user(user)]
 }
 

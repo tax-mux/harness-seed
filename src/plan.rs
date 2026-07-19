@@ -1,6 +1,7 @@
 //! 計画層（ReAct 派生ループ・ツールなし）→ 実行層（ReAct + ツール）の直列オーケストレーション。
 
 mod brain;
+mod candidates;
 mod contract;
 mod display;
 mod parse;
@@ -16,6 +17,10 @@ use crate::context::PromptBlocks;
 use crate::session::SessionMemory;
 use crate::tasks::TaskRegistry;
 
+pub use candidates::{
+    normalize_candidates, parse_candidate_selection, select_and_register_plan_candidates,
+    CANDIDATE_SELECTION_SYSTEM,
+};
 pub use brain::{
     artifact_from_plan_turn, PlanBrainMode, PlanLlmBrain, RulePlanBrain, PLAN_REACT_SYSTEM_CORE,
 };

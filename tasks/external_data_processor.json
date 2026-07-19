@@ -1,10 +1,12 @@
 {
   "id": "process_data",
   "summary": "外部ツール process_data を用いてデータ処理を実行する",
+  "planner_summary": "ホストが process_data プラグインを登録しているとき、外部データ処理パイプラインを回す依頼で選ぶ。通常のファイル一覧・検索・一般チャットでは選ばない。プラグイン未登録ならカタログに出ない。",
   "default_params": {
     "input": ""
   },
   "done_when": "process_data の処理結果が返される",
+  "react_only": true,
   "steps": [
     {
       "order": 1,

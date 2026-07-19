@@ -1,7 +1,9 @@
 {
   "id": "generic",
   "summary": "固定の実行順なし（ReAct がツールを選択）",
+  "planner_summary": "専用タスクに当てはまらない依頼、複数ツールの自由な組み合わせ、短い Q&A や探索的作業に選ぶ。list_dir / write_file_verify / web_research など専用タスクが明らかに適合する場合はそちらを優先し、generic は補助または単独の自由実行に留める。",
   "default_params": {},
   "done_when": "user request satisfied",
+  "react_only": true,
   "steps": []
 }
