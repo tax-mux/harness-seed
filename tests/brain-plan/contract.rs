@@ -17,6 +17,7 @@ fn trivial_chat_skips_execution() {
                     depends_on: vec![],
 }],
         knowledge_sufficient: None,
+        user_reply: None,
     };
     c.enforce_plan(&mut plan);
     assert!(plan.skip_execution);
@@ -81,6 +82,7 @@ fn host_enforce_collapses_plan() {
 },
         ],
         knowledge_sufficient: None,
+        user_reply: None,
     };
     c.enforce_plan(&mut plan);
     assert_eq!(plan.subtasks.len(), 1);

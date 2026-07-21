@@ -19,6 +19,7 @@ fn format_plan_for_display_lists_subtasks() {
                     depends_on: vec![],
 }],
         knowledge_sufficient: Some(false),
+        user_reply: None,
     };
     let reg = TaskRegistry::builtin();
     let text = format_plan_for_display(&plan, &reg);

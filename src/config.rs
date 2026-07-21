@@ -131,6 +131,12 @@ pub struct ReactSection {
     pub use_step_driver: Option<bool>,
     /// 計画フェーズでタスク summary から候補を選びコンテキストへ登録する。
     pub plan_candidate_selection: Option<bool>,
+    /// 候補 summary カタログの最大件数。
+    pub plan_catalog_max_entries: Option<usize>,
+    /// 候補 summary カタログの最大文字数。
+    pub plan_catalog_max_chars: Option<usize>,
+    /// ステップ引数監査: `off`（既定）/ `soft` / `hard`。
+    pub arg_audit_mode: Option<String>,
     /// 各 ReAct ステップのプロンプト全文を stderr に出す。
     pub show_prompt: Option<bool>,
     /// 計画層の成果物を stdout に表示する（`two_phase` 時）。
@@ -394,6 +400,22 @@ impl AppConfig {
             max_thoughts: self.react.max_thoughts.unwrap_or(1).max(1),
             use_step_driver: self.react.use_step_driver.unwrap_or(true),
             plan_candidate_selection: self.react.plan_candidate_selection.unwrap_or(true),
+            plan_catalog_max_entries: self
+                .react
+                .plan_catalog_max_entries
+                .unwrap_or(40)
+                .max(1),
+            plan_catalog_max_chars: self
+                .react
+                .plan_catalog_max_chars
+                .unwrap_or(8_000)
+                .max(256),
+            arg_audit_mode: self
+                .react
+                .arg_audit_mode
+                .as_deref()
+                .map(crate::tasks::ArgAuditMode::parse)
+                .unwrap_or_default(),
             show_prompt: cli_show_prompt || self.react.show_prompt.unwrap_or(false),
             show_plan: self.react.show_plan.unwrap_or(true),
             show_task_execution: self.react.show_task_execution.unwrap_or(true),

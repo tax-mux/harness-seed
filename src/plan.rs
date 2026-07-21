@@ -19,7 +19,8 @@ use crate::tasks::TaskRegistry;
 
 pub use candidates::{
     normalize_candidates, parse_candidate_selection, select_and_register_plan_candidates,
-    CANDIDATE_SELECTION_SYSTEM,
+    select_and_register_plan_candidates_with_budget, CANDIDATE_SELECTION_SYSTEM,
+    PLAN_CATALOG_SUMMARY_MAX_CHARS, PLAN_CATALOG_SUMMARY_MAX_ENTRIES,
 };
 pub use brain::{
     artifact_from_plan_turn, PlanBrainMode, PlanLlmBrain, RulePlanBrain, PLAN_REACT_SYSTEM_CORE,
@@ -94,6 +95,10 @@ pub struct PlanArtifact {
     /// `skip_execution: true` はこれが `Some(true)` のときだけ許可（ハーネスが強制）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub knowledge_sufficient: Option<bool>,
+    /// `skip_execution` 時のユーザー向け本文（ハーネス／パーサが構造的にセット）。
+    /// `None` なら exec LLM フォールバック（内部ラベルを返答に使わない）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_reply: Option<String>,
 }
 
 impl PlanArtifact {
@@ -104,6 +109,7 @@ impl PlanArtifact {
             skip_execution: true,
             subtasks: vec![],
             knowledge_sufficient: Some(true),
+            user_reply: None,
         }
     }
 
@@ -112,15 +118,44 @@ impl PlanArtifact {
         Self {
             summary: "single task".into(),
             skip_execution: false,
-            subtasks: vec![Subtask {
-                id: 1,
-                task: None,
-                params: json!({}),
-                goal: user_input.to_string(),
-                done_when: "user request satisfied".into(),
-                depends_on: vec![],
-            }],
+            subtasks: vec![],
             knowledge_sufficient: Some(false),
+            user_reply: None,
+        }
+        .with_single_goal(user_input)
+    }
+
+    fn with_single_goal(mut self, user_input: &str) -> Self {
+        self.subtasks = vec![Subtask {
+            id: 1,
+            task: None,
+            params: json!({}),
+            goal: user_input.to_string(),
+            done_when: "user request satisfied".into(),
+            depends_on: vec![],
+        }];
+        self
+    }
+
+    /// 雑談等: skip するがユーザー本文は無く、exec LLM に任せる。
+    pub fn skip_needs_exec(summary: impl Into<String>) -> Self {
+        Self {
+            summary: summary.into(),
+            skip_execution: true,
+            subtasks: vec![],
+            knowledge_sufficient: Some(true),
+            user_reply: None,
+        }
+    }
+
+    /// skip し、そのまま返すユーザー本文を持つ。
+    pub fn skip_with_reply(summary: impl Into<String>, reply: impl Into<String>) -> Self {
+        Self {
+            summary: summary.into(),
+            skip_execution: true,
+            subtasks: vec![],
+            knowledge_sufficient: Some(true),
+            user_reply: Some(reply.into()),
         }
     }
 
@@ -139,6 +174,7 @@ impl PlanArtifact {
             }
             self.skip_execution = false;
             self.knowledge_sufficient = Some(false);
+            self.user_reply = None;
         }
         if !self.skip_execution && self.subtasks.is_empty() {
             self.subtasks = vec![default_evidence_subtask(self.summary.trim())];
@@ -150,9 +186,16 @@ impl PlanArtifact {
 
     /// `skip_execution` 時に exec LLM を呼ばず返す本文。
     ///
-    /// 優先: 計画 JSON の `output` → 意味のある `summary` → 平文の作業指示書。
-    /// 取れなければ `None`（呼び出し側は exec にフォールバックしてよい）。
+    /// 優先: 構造化 `user_reply` → 計画 JSON の `output`。
+    /// summary / 平文 WI は内部ラベルになり得るため使わない。
     pub fn direct_reply(&self, work_instructions: &str) -> Option<String> {
+        if let Some(r) = &self.user_reply {
+            let t = r.trim();
+            if !t.is_empty() {
+                return Some(t.to_string());
+            }
+            return None;
+        }
         let wi = work_instructions.trim();
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(wi) {
             if let Some(o) = v
@@ -163,25 +206,6 @@ impl PlanArtifact {
             {
                 return Some(o.to_string());
             }
-            if let Some(s) = v
-                .get("summary")
-                .and_then(|x| x.as_str())
-                .map(str::trim)
-                .filter(|s| usable_direct_reply(s))
-            {
-                return Some(s.to_string());
-            }
-        }
-        let sum = self.summary.trim();
-        if usable_direct_reply(sum) {
-            return Some(sum.to_string());
-        }
-        if !wi.is_empty()
-            && !wi.starts_with('{')
-            && !wi.contains("plan step parse error")
-            && usable_direct_reply(wi)
-        {
-            return Some(wi.to_string());
         }
         None
     }
@@ -189,7 +213,7 @@ impl PlanArtifact {
 
 /// 知識不足で steps が空のときの汎用実行 subtask（タスク id 固定なし）。
 fn default_evidence_subtask(summary: &str) -> Subtask {
-    let goal = if usable_direct_reply(summary) {
+    let goal = if summary.chars().count() >= 4 {
         format!(
             "{summary}. Recalled context alone is insufficient — use available tools as needed, then fully answer the user."
         )
@@ -204,33 +228,6 @@ fn default_evidence_subtask(summary: &str) -> Subtask {
         done_when: "user request satisfied with sufficient evidence".into(),
         depends_on: vec![],
     }
-}
-
-fn usable_direct_reply(text: &str) -> bool {
-    let t = text.trim();
-    if t.chars().count() < 4 {
-        return false;
-    }
-    // 計画層の内部ラベル・合成 WI はユーザー向け回答に使わない（exec LLM へフォールバック）
-    if matches!(
-        t,
-        "direct execution"
-            | "direct chat"
-            | "single task"
-            | "planned task"
-            | "direct"
-    ) {
-        return false;
-    }
-    let lower = t.to_lowercase();
-    if lower.contains("no task candidates")
-        || lower.contains("plan layer skipped")
-        || lower.contains("trivial chat")
-        || lower.contains("direct chat")
-    {
-        return false;
-    }
-    true
 }
 
 /// 計画層の成果物をコンソール向けに整形する。
@@ -431,6 +428,7 @@ mod direct_reply_tests {
             skip_execution: true,
             subtasks: vec![],
             knowledge_sufficient: Some(true),
+            user_reply: None,
         };
         let wi = r#"{"summary":"short label","skip_execution":true,"subtasks":[],"output":"最終回答本文"}"#;
         assert_eq!(
@@ -440,13 +438,11 @@ mod direct_reply_tests {
     }
 
     #[test]
-    fn falls_back_to_summary_when_no_output() {
-        let plan = PlanArtifact {
-            summary: "これは十分な長さの要約回答です".into(),
-            skip_execution: true,
-            subtasks: vec![],
-            knowledge_sufficient: Some(true),
-        };
+    fn uses_structured_user_reply() {
+        let plan = PlanArtifact::skip_with_reply(
+            "label",
+            "これは十分な長さの要約回答です",
+        );
         assert!(plan.direct_reply("{}").unwrap().contains("要約回答"));
     }
 
@@ -458,12 +454,7 @@ mod direct_reply_tests {
 
     #[test]
     fn ignores_harness_internal_work_instructions() {
-        let plan = PlanArtifact {
-            summary: "direct chat".into(),
-            skip_execution: true,
-            subtasks: vec![],
-            knowledge_sufficient: Some(true),
-        };
+        let plan = PlanArtifact::skip_needs_exec("direct chat");
         assert!(plan
             .direct_reply("(no task candidates — direct chat)")
             .is_none());

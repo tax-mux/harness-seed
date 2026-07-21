@@ -74,6 +74,15 @@ pub enum TurnStepEvent {
         layer: String,
         label: String,
     },
+    /// 計画前のタスク候補選定結果（id 列のみ。意味はホスト／タスク定義側）。
+    Candidates {
+        layer: String,
+        ids: Vec<String>,
+        /// 意図的な空候補（雑談など）。
+        chitchat: bool,
+        /// パース成功など、選定結果が信頼できるか。
+        ok: bool,
+    },
 }
 
 pub fn emit_phase_started(observer: Option<&TurnObserver>, layer: &str, label: &str) {
@@ -139,5 +148,23 @@ pub fn emit_observation_step(
         tool: tool.to_string(),
         ok: observation.ok,
         output: observation.output.clone(),
+    });
+}
+
+pub fn emit_candidates(
+    observer: Option<&TurnObserver>,
+    layer: &str,
+    ids: &[String],
+    chitchat: bool,
+    ok: bool,
+) {
+    let Some(obs) = observer else {
+        return;
+    };
+    obs(TurnStepEvent::Candidates {
+        layer: layer.to_string(),
+        ids: ids.to_vec(),
+        chitchat,
+        ok,
     });
 }

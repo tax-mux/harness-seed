@@ -362,19 +362,16 @@ pub fn run_plan_layer<B: AgentBrain>(
     max_recall_rounds: usize,
     task_registry: &crate::tasks::TaskRegistry,
     plan_candidate_selection: bool,
+    plan_catalog_max_entries: usize,
+    plan_catalog_max_chars: usize,
 ) -> Result<(HarnessState, crate::action::TurnTrace, usize), ReActError> {
     if let Some(contract) = &blocks.plan_data_contract {
         if contract.skip_plan_layer() {
             if verbose {
                 eprintln!("[plan] trivial chat — skip plan LLM");
             }
-            let plan = PlanArtifact {
-                summary: "direct chat".into(),
-                skip_execution: true,
-                subtasks: vec![],
-                knowledge_sufficient: Some(true),
-            };
-            // WI は内部ラベルのみ。direct_reply が捨てて exec LLM が雑談応答する
+            let plan = PlanArtifact::skip_needs_exec("direct chat");
+            // WI は内部ラベルのみ。user_reply 無し → exec LLM が雑談応答する
             let harness = HarnessState::new("(trivial chat — plan layer skipped)", plan);
             if echo_harness_parsed {
                 harness.eprintln_parsed();
@@ -385,7 +382,7 @@ pub fn run_plan_layer<B: AgentBrain>(
 
     // 計画フェーズ内: summary で候補選定 → 詳細カタログをコンテキスト登録
     if plan_candidate_selection {
-        let selected = crate::plan::select_and_register_plan_candidates(
+        let selected = crate::plan::select_and_register_plan_candidates_with_budget(
             brain,
             tools,
             blocks,
@@ -396,17 +393,14 @@ pub fn run_plan_layer<B: AgentBrain>(
             show_prompt,
             turn_observer,
             stop_requested,
+            plan_catalog_max_entries,
+            plan_catalog_max_chars,
         );
         if selected.is_empty() {
             if verbose {
                 eprintln!("[plan] candidate selection empty — treat as direct chat");
             }
-            let plan = PlanArtifact {
-                summary: "direct chat".into(),
-                skip_execution: true,
-                subtasks: vec![],
-                knowledge_sufficient: Some(true),
-            };
+            let plan = PlanArtifact::skip_needs_exec("direct chat");
             let harness = HarnessState::new("(no task candidates — direct chat)", plan);
             if echo_harness_parsed {
                 harness.eprintln_parsed();
@@ -551,6 +545,8 @@ mod tests {
             0,
             &crate::tasks::TaskRegistry::builtin(),
             false,
+            40,
+            8000,
         )
         .unwrap();
 
@@ -608,6 +604,8 @@ mod tests {
             2,
             &crate::tasks::TaskRegistry::builtin(),
             false,
+            40,
+            8000,
         )
         .unwrap();
 
@@ -659,6 +657,8 @@ mod tests {
             2,
             &crate::tasks::TaskRegistry::builtin(),
             false,
+            40,
+            8000,
         )
         .unwrap();
 
@@ -727,6 +727,8 @@ mod tests {
             2,
             &crate::tasks::TaskRegistry::builtin(),
             false,
+            40,
+            8000,
         )
         .unwrap();
 
