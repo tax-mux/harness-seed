@@ -374,6 +374,7 @@ pub fn run_plan_layer<B: AgentBrain>(
                 subtasks: vec![],
                 knowledge_sufficient: Some(true),
             };
+            // WI は内部ラベルのみ。direct_reply が捨てて exec LLM が雑談応答する
             let harness = HarnessState::new("(trivial chat — plan layer skipped)", plan);
             if echo_harness_parsed {
                 harness.eprintln_parsed();
