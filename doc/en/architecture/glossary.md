@@ -19,9 +19,10 @@ An **embeddable agent execution engine** (a “seed”) for existing application
 
 ### Host
 
-The application that calls HarnessSeed (mail triage, coding agents, and so on). Domain rules, external APIs, and ticket systems live on the host. The engine does not know product names.
+The app that embeds HarnessSeed (mail triage, coding agents, and so on). Domain rules, external APIs, and ticket sync live on the host. The engine does not know product names.
 
 - Details: [04_host-extensions.md](04_host-extensions.md)
+- Bootstrap registration SSoT: `SeedBuilder` ([06_tool-plugins.md](06_tool-plugins.md))
 
 ### Turn
 

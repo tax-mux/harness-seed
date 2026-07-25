@@ -7,11 +7,11 @@ use std::process::ExitCode;
 use harness_seed::{
     build_memory_rag,
     cli_agent::{
-        cli_flag_takes_value, is_cli_global_flag, log_agent_setup, prepare_cli_agent_workspace,
-        setup_cli_agent,
+        cli_flag_takes_value, is_cli_global_flag, log_agent_setup, merge_cli_agent,
+        prepare_cli_agent_workspace,
     },
-    run_json_repl, run_repl, AppConfig, BrainPair, MemoryRag, ReActConfig, ReActLoop,
-    SimpleRuleBrain, TaskRegistry, VERSION,
+    run_json_repl, run_repl, AppConfig, BrainPair, MemoryRag, ReActConfig, SeedBuilder,
+    SimpleRuleBrain, VERSION,
 };
 
 fn main() -> ExitCode {
@@ -59,7 +59,37 @@ fn main() -> ExitCode {
         return ExitCode::from(1);
     }
 
-    let brains = match BrainPair::from_cli(&app, use_llm, no_llm) {
+    let mut builder = match SeedBuilder::from_app(&app) {
+        Ok(b) => b,
+        Err(err) => {
+            eprintln!("failed to load prompt rules: {err}");
+            return ExitCode::from(1);
+        }
+    };
+    let agent_setup;
+    (builder, agent_setup) = match merge_cli_agent(&args, &cwd, builder) {
+        Ok(pair) => pair,
+        Err(err) => {
+            eprintln!("failed to load agent project: {err}");
+            return ExitCode::from(1);
+        }
+    };
+    if let Some(ref setup) = agent_setup {
+        log_agent_setup(setup);
+    }
+    if !builder.blocks_ref().rules.is_empty() {
+        eprintln!(
+            "prompt: loaded {} rule block(s)",
+            builder.blocks_ref().rules.len()
+        );
+    }
+
+    let brains = match BrainPair::from_cli_with_registry(
+        &app,
+        use_llm,
+        no_llm,
+        builder.task_registry_ref(),
+    ) {
         Ok(b) => b,
         Err(err) => {
             eprintln!("failed to initialize LLM brain: {err}");
@@ -89,70 +119,26 @@ fn main() -> ExitCode {
         eprintln!("context log: {}", path.display());
     }
 
-    if let Err(err) = prepare_cli_agent_workspace(&args, &cwd) {
-        eprintln!("failed to prepare agent workspace: {err}");
-        return ExitCode::from(1);
-    }
-
-    let blocks = match app.load_prompt_blocks() {
-        Ok(b) => b,
-        Err(err) => {
-            eprintln!("failed to load prompt rules: {err}");
-            return ExitCode::from(1);
-        }
-    };
-    let mut blocks = blocks;
-    let mut task_registry = TaskRegistry::load_default();
-    let agent_setup = match setup_cli_agent(&args, &cwd, &mut blocks, &mut task_registry) {
-        Ok(setup) => setup,
-        Err(err) => {
-            eprintln!("failed to load agent project: {err}");
-            return ExitCode::from(1);
-        }
-    };
-    if let Some(ref setup) = agent_setup {
-        log_agent_setup(setup);
-    }
-    if !blocks.rules.is_empty() {
-        eprintln!("prompt: loaded {} rule block(s)", blocks.rules.len());
-    }
-
-    let brave_search = app.resolved_brave_search();
-    let tool_packs = app.resolved_tool_packs();
     eprintln!(
         "tools: packs={}",
-        tool_packs
+        builder
+            .tool_packs_ref()
             .iter()
             .map(|p| p.id())
             .collect::<Vec<_>>()
             .join(",")
     );
-    if brave_search.is_some() {
+    if builder.brave_search_ref().is_some() {
         eprintln!("tools: web_search (Brave Search API)");
     }
-    let memory = app.memory_bridge();
     let memory_layers = app.memory_provider_name();
     if memory_layers != "noop" {
         eprintln!("memory.layers: {memory_layers}");
     }
     let memory_rag = build_memory_rag_for_app(&app, &react_config, no_llm);
-    let mut react = ReActLoop::with_blocks_and_tasks(
-        brains.exec,
-        brains.plan,
-        react_config,
-        blocks,
-        task_registry,
-        brave_search,
-        &tool_packs,
-        memory,
-    );
-    react.set_memory_rag(memory_rag);
-    if let Some(setup) = agent_setup {
-        for tool in setup.script_tools {
-            react.register_plugin(tool);
-        }
-        react.refresh_tool_catalog();
-    }
+    let mut react = builder
+        .memory_rag(memory_rag)
+        .build(brains.exec, brains.plan, react_config);
     eprintln!("runtime: {}", react.blocks.runtime.summary_line());
 
     let repl_result = if json_repl {
@@ -192,17 +178,16 @@ fn run_plan_zone_mode(
         return ExitCode::from(1);
     }
 
-    let blocks = match app.load_prompt_blocks() {
+    let mut builder = match SeedBuilder::from_app(app) {
         Ok(b) => b,
         Err(err) => {
             eprintln!("failed to load prompt rules: {err}");
             return ExitCode::from(1);
         }
     };
-    let mut blocks = blocks;
-    let mut task_registry = TaskRegistry::load_default();
-    let agent_setup = match setup_cli_agent(args, cwd, &mut blocks, &mut task_registry) {
-        Ok(setup) => setup,
+    let agent_setup;
+    (builder, agent_setup) = match merge_cli_agent(args, cwd, builder) {
+        Ok(pair) => pair,
         Err(err) => {
             eprintln!("failed to load agent project: {err}");
             return ExitCode::from(1);
@@ -215,9 +200,13 @@ fn run_plan_zone_mode(
     react_config.show_plan = false;
     react_config.show_context_metrics = false;
     react_config.monitor_plan_html = !no_monitor;
-    let tool_packs = app.resolved_tool_packs();
 
-    let brains = match BrainPair::from_cli(app, use_llm, no_llm) {
+    let brains = match BrainPair::from_cli_with_registry(
+        app,
+        use_llm,
+        no_llm,
+        builder.task_registry_ref(),
+    ) {
         Ok(b) => b,
         Err(err) => {
             eprintln!("failed to initialize plan brain: {err}");
@@ -227,23 +216,11 @@ fn run_plan_zone_mode(
     eprintln!("brain: {}", brains.label());
 
     let memory_rag = build_memory_rag_for_app(app, &react_config, no_llm);
-    let mut react = ReActLoop::with_blocks_and_tasks(
+    let mut react = builder.memory_rag(memory_rag).build(
         SimpleRuleBrain::new(),
         brains.plan,
         react_config,
-        blocks,
-        task_registry,
-        app.resolved_brave_search(),
-        &tool_packs,
-        app.memory_bridge(),
     );
-    react.set_memory_rag(memory_rag);
-    if let Some(setup) = agent_setup {
-        for tool in setup.script_tools {
-            react.register_plugin(tool);
-        }
-        react.refresh_tool_catalog();
-    }
 
     if full {
         if !no_monitor {

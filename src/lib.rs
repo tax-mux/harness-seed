@@ -21,6 +21,7 @@ pub mod plan;
 pub mod protocol;
 pub mod react;
 pub mod runtime;
+pub mod seed;
 pub mod session;
 pub mod text_match;
 pub mod tasks;
@@ -108,6 +109,7 @@ pub use lifecycle::{
 pub use react::{
     run_repl, PlanPreviewResult, ReActConfig, ReActError, ReActLoop, SubtaskExecResult, TurnResult,
 };
+pub use seed::SeedBuilder;
 pub use turn_observer::{
     emit_candidates, emit_llm_step, emit_observation_step, emit_phase_started, emit_plan_artifact,
     AgentStepDto, TurnObserver, TurnStepEvent,

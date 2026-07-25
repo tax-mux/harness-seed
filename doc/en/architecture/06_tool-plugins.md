@@ -58,11 +58,19 @@ Details: [config/README.md](../../../config/README.md)
 
 ## Host extension
 
+Session bootstrap goes through [`SeedBuilder`](../../../src/seed.rs). Load packs and config with `from_app`, add domain tools with `plugin`, then `build`.
+
 ```rust
-let mut rt = ToolRuntime::with_packs(env, brave, &[ToolPack::Basic, ToolPack::Coding]);
-rt.register_plugin(Box::new(MyCustomTool));
-blocks.tool_catalog = rt.catalog();
+use harness_seed::{AppConfig, BrainPair, SeedBuilder};
+
+let app = AppConfig::load_default()?;
+let builder = SeedBuilder::from_app(&app)?
+    .plugin(Box::new(MyCustomTool));
+let brains = BrainPair::from_cli_with_registry(&app, false, false, builder.task_registry_ref())?;
+let mut react = builder.build(brains.exec, brains.plan, app.react_config(false, false));
 ```
+
+CLI / declarative tools under `.agent` flow through `merge_agent_project` (or `merge_cli_agent`) into the same builder. For mid-session adds only, use `ReActLoop::register_plugin`.
 
 If a task’s required `method` is missing from the registry, plan resolve demotes it to freeform ([05_task-registry.md](05_task-registry.md)).
 

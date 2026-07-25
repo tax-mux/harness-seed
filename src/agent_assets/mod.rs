@@ -11,4 +11,5 @@ pub use config_agent::{
     AgentProjectConfig, CliAgentSource, DEFAULT_FILENAME,
 };
 pub use loader::{apply_agent_project, load_agent_assets, AgentLoadError, AgentLoadReport};
+// `apply_agent_project` remains for gather-only / tests; hosts should prefer `SeedBuilder`.
 pub use script_tool::{ScriptTool, ScriptToolDefinition};
