@@ -1,27 +1,11 @@
 # HarnessSeed ReAct implementation (current)
 
-## What this is
 
-How the “think → (optionally) call a tool → observe → think again” loop is **implemented in this repository** (snapshot based on source as of 2026-05).
+A snapshot of how the think → (optionally) tool → observe loop is implemented in this repository (source as of 2026-05). Layer docs alone do not explain limits and step kinds; this page shares those boundaries. It is not product-domain procedure.
 
-Glossary: [glossary.md](glossary.md)
+One user input is one turn. Thought / Action / Observation repeat until `Answer`.
 
-## When to use / not use
-
-- Use: loop limits, step kinds, implementation files
-- Skip: product-level layer roles only → [00](00_harness-seed-structure.md) / [glossary](glossary.md)
-
-## Plain flow
-
-One user input = one turn. Repeat Thought / Action / Observation until `Answer`.
-
-Related:
-
-- Conceptual background: [10_agent-minimum-action-unit.md](10_agent-minimum-action-unit.md)
-- Architecture index: [README.md](README.md)
-- Context mapping: [09_context-memory-mapping.md](09_context-memory-mapping.md)
-- Built-in tools: [../builtin_tools/README.md](../builtin_tools/README.md)
-- Japanese: [08_ReAct実装.md](../../ja/architecture/08_ReAct実装.md)
+Glossary: [glossary.md](glossary.md) · Unit: [10_agent-minimum-action-unit.md](10_agent-minimum-action-unit.md) · Index: [README.md](README.md) · [JP](../../ja/architecture/08_ReAct実装.md)
 
 ## 1. Overview
 
@@ -35,6 +19,8 @@ HarnessSeed runs a ReAct loop where **one user input = one turn**, repeating `Th
 | CLI path | `BrainMode` → `ReActLoop` (`src/main.rs`) |
 | configuration | `config/config.json` + `AppConfig::react_config` |
 | tool specification docs | [../builtin_tools/README.md](../builtin_tools/README.md) (implementation in `src/tool/`) |
+
+The loop is the common runtime for both the command-line path and integration tests. It asks a brain for the next step and delegates any tool operation to the runtime.
 
 ```mermaid
 flowchart LR
@@ -53,6 +39,8 @@ flowchart LR
     LOOP --> TOOLS
 ```
 
+Both entry paths create the same loop. The loop consults a brain for decisions and consults the tool runtime only when that decision is an action.
+
 ## 2. Module layout
 
 | path | responsibility |
@@ -65,6 +53,8 @@ flowchart LR
 | `src/llm/parse.rs` | LLM output JSON → `AgentStep` |
 | `src/context_metrics.rs` | prompt / completion metrics |
 | `src/context_log.rs` | append JSON Lines to `logs/context.jsonl` |
+
+The loop module coordinates a turn, while the action module records each kind of step. Brain and LLM modules decide and parse the next response; tool and context modules execute operations and preserve diagnostics.
 
 ## 3. One-turn control flow
 
@@ -100,6 +90,10 @@ sequenceDiagram
     end
 ```
 
+The loop starts with the user's input and repeats one decision at a time. It records model usage after each decision, then handles the returned step.
+
+Thoughts change only the trace. Actions call a tool and record its observation; an answer finalizes metrics and returns the completed turn.
+
 ### 3.1 Handling `AgentStep`
 
 | variant | loop behavior | side effects on environment |
@@ -107,6 +101,8 @@ sequenceDiagram
 | `Thought(String)` | accumulate in `trace` only | none |
 | `Action(Action)` | run [built-in tool](../builtin_tools/README.md) → accumulate `Observation` in `trace` | **yes (minimum action unit)** |
 | `Answer(String)` | end turn; return `TurnResult` | none (final user-facing reply) |
+
+Only an action can change the environment. Thoughts preserve reasoning for the next decision, and an answer ends the turn without performing additional work.
 
 `steps_used` is the **loop iteration count** (number of `decide` calls), which may differ from the number of tool calls (`Thought` or immediate `Answer` also count as one step).
 
@@ -134,6 +130,8 @@ Used with `--no-llm` or when `config` has no `llm.provider`.
 | `echo <text>` | `Action(echo)` → `Answer` (2 steps) — [echo.md](../builtin_tools/echo.md) |
 | `time` | `Action(time)` → `Answer` (2 steps) — [time.md](../builtin_tools/time.md) |
 | other | `Thought` → `Action(echo)` → `Answer` (3 steps) |
+
+The rule brain follows fixed patterns and therefore does not produce model usage data. Each pattern still uses the same turn loop and action recording as an LLM-backed turn.
 
 Because no LLM is used, **`context_usages` is always empty** → no context log is written.
 
@@ -185,6 +183,8 @@ When `ReActLoop` receives an `Action`, it calls `ToolRuntime::execute`. Implemen
 | `write_file` | write file | [write_file.md](../builtin_tools/write_file.md) |
 | `run_cmd` | shell execution | [run_cmd.md](../builtin_tools/run_cmd.md) |
 
+The runtime exposes only registered tools. Each catalog row points to the human-readable contract for its operation, while the implementation under `src/tool/` performs the call.
+
 ### 5.2 Common behavior (see builtin_tools README)
 
 - **Workspace**: paths must stay under the crate root (`resolve_in_workspace`). Details in [../builtin_tools/README.md](../builtin_tools/README.md).
@@ -224,6 +224,8 @@ On each LLM call:
 | one line | one turn's JSON |
 | `steps[].prompt` | full prompt for that LLM call |
 
+Metrics are collected per model decision and summarized when the turn completes. The JSON Lines file stores one turn per line, including the prompt captured for each LLM step when logging is enabled.
+
 ## 7. Configuration and startup
 
 ### 7.1 Brain selection
@@ -238,6 +240,7 @@ want_llm = !no_llm && (use_llm || config has llm.provider or API key)
 | `--no-llm` | rule brain |
 | `--llm` | force LLM even without `provider` (API config required) |
 
+Configuration or explicit flags decide whether the loop uses rule-based behavior or an LLM. The forced LLM route still requires working API settings before a turn can complete.
 ### 7.2 ReAct-related config
 
 ```json
@@ -273,6 +276,7 @@ Integration tests share `config/config.json` from `tests/common/mod.rs`.
 | `context_metrics_test.rs` | metrics summary |
 | `list_files_test.rs` | listing via `list_dir` tool |
 
+The shared test configuration keeps integration paths comparable. LLM-dependent tests are conditional because their external model service may not be available in every environment.
 LLM tests **SKIP** when the host is down or the model is unavailable (they do not fail the suite).
 
 ## 9. Current limitations and gaps
@@ -288,6 +292,7 @@ LLM tests **SKIP** when the host is down or the model is unavailable (they do no
 | dynamic tool registration | `ToolPack` + `register_plugin` ([06_tool-plugins.md](06_tool-plugins.md)) |
 | `run_cmd` safety | see [run_cmd.md](../builtin_tools/run_cmd.md). cwd restricted to workspace; command content is unrestricted |
 
+The current loop intentionally keeps one action per step and does not stream responses. Memory and prompt size controls are partial safeguards, while tool registration and command-content policy remain important deployment boundaries.
 ## 10. Typical patterns
 
 ### LLM + list_dir (2 steps)
@@ -330,3 +335,5 @@ User: hello world
 | [../builtin_tools/echo.md](../builtin_tools/echo.md) and other `.md` files | per-tool arguments, behavior, failures, LLM call examples |
 | [10_agent-minimum-action-unit.md](10_agent-minimum-action-unit.md) | minimum action unit concept |
 | [../../config/README.md](../../../config/README.md) | configuration layout |
+
+The tool documentation explains individual operations. The surrounding architecture pages explain how the loop groups those operations into a turn and why one action is the audit boundary.

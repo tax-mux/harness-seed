@@ -1,26 +1,11 @@
 # Minimum action unit
 
-## What this is
 
-Treat the smallest real-world effect as **one tool call**. Reasoning text and plan JSON are not “actions”; tool execution and its Observation are the harness and logging unit.
+Treat the smallest real-world effect as one tool call. If “action” means different things per implementation, logs, audit, and UI diverge. Reasoning text and plan JSON are not actions; tool execution and Observation are the unit.
 
-Glossary: [glossary.md](glossary.md)
+Think → call one tool → observe → think again or answer.
 
-## When to use / not use
-
-- Use: align Action / Observation / Answer boundaries; design logs
-- Skip: only layer roles → [00](00_harness-seed-structure.md)
-
-## Plain flow
-
-Think → call one tool (action) → see result (observation) → think again or answer
-
-Related:
-
-- ReAct implementation (current): [08_react-implementation.md](08_react-implementation.md)
-- Architecture index: [README.md](README.md)
-- Context layers: [09_context-memory-mapping.md](09_context-memory-mapping.md)
-- Japanese: [10_最少行動単位.md](../../ja/architecture/10_最少行動単位.md)
+Glossary: [glossary.md](glossary.md) · ReAct: [08_react-implementation.md](08_react-implementation.md) · [JP](../../ja/architecture/10_最少行動単位.md)
 
 ## 1. Hierarchy overview
 
@@ -64,6 +49,10 @@ flowchart TB
     TH --> A2
 ```
 
+A session is a sequence of turns. Each turn first plans the work, then runs any needed subtasks in order. Planning itself does not change the outside world.
+
+Inside a subtask, the agent may think, call one tool, observe the result, and decide again. That single tool call—and the observation it produces—is the unit used for audit and logs.
+
 | Level | Example | Minimum unit? | HarnessSeed (`two_phase` on) |
 |-------|---------|---------------|------------------------------|
 | Session | Entire chat | × | `SessionMemory` (REPL short-term) |
@@ -96,11 +85,17 @@ sequenceDiagram
     M->>U: Answer (subtask complete)
 ```
 
+The brain first considers the mission without changing anything. It then performs one tool call and receives its observation.
+
+If more evidence or work is needed, it repeats with another action. Otherwise it returns an answer, which completes the subtask without a side effect.
+
 | Variant | Side effects on environment | HarnessSeed type |
 |---------|----------------------------|------------------|
 | `Thought` | None | `AgentStep::Thought` |
 | `Action` | **Yes** | `AgentStep::Action` → `execute_action` |
 | `Answer` | None (text response) | `AgentStep::Answer` |
+
+Thought and answer are control and communication steps. Only action enters the tool runtime, which is why it is the point recorded as the minimum real-world operation.
 
 ## 3. Planning layer · execution layer (`two_phase`, shared ReAct loop)
 
@@ -133,10 +128,16 @@ sequenceDiagram
     R-->>U: TurnResult
 ```
 
+Planning happens before any executable work and can only produce a structured work list. A request with sufficient knowledge takes the direct-reply branch; otherwise each planned item is handled in order.
+
+For an item with a fixed contract, the driver runs its steps directly. For other work, the execution brain chooses actions as it gathers evidence. Both branches finish by returning one combined turn result.
+
 | Layer | Brain | Loop | Tools | Termination |
 |-------|-------|------|-------|-------------|
 | Plan | `PlanBrainMode` | `run_plan_layer` | **none** | `Answer` → `PlanArtifact` |
 | Exec | exec `BrainMode` | `run_layer_loop` or **step driver** | **yes** | `Answer` → user-facing |
+
+The shared loop gives planning and execution a common control structure. The distinction is operational: planning has no tools and yields a plan, while execution has tools and yields user-facing work results.
 
 When a subtask has a registered task id (`tasks/*.json`) with a defined `steps[]`, and `react.use_step_driver` (default `true`) is on, **`src/tasks/driver.rs`** runs `execute_action` in contract order without an LLM. On failure it falls back to ReAct. `generic` (empty steps) uses ReAct as before.
 
@@ -152,6 +153,9 @@ Plan JSON schema (excerpt):
 }
 ```
 
+An action records the call identity, selected tool, and arguments before it reaches the runtime. The runtime applies its workspace constraint and produces one observation.
+
+That observation becomes the reproducible record for the next decision and for later audit.
 The mission passed to execution is built with `format_mission` (`Original request` / `Current subtask` / prior subtask results). Each execution loop's `TurnTrace` is **merged** at turn end so all `Action` / `Observation` remain in one trace.
 
 ## 4. Decomposing one Tool Call (for harness design)
@@ -171,6 +175,8 @@ flowchart LR
 
     ID --> NAME --> ARGS --> POL --> RUN --> RES
 ```
+
+Each action gets an id so the call and its result stay paired in logs. The tool name and arguments record what was attempted; workspace checks reject out-of-bounds paths before execution; the observation records success and what the agent learned.
 
 | Field | Meaning | Implementation |
 |-------|---------|----------------|
@@ -197,12 +203,18 @@ flowchart TB
     D --> D1["Each two_phase execution loop ≈ child turn. Not a parent Action"]
 ```
 
+Planning text is deliberately outside the action count because it changes no environment. A future batch operation would still need one recorded invocation per tool it executes.
+
+Likewise, separate execution loops for subtasks or sub-agents are larger orchestration units. Their internal tool calls remain the minimum action units.
+
 | Case | Treatment |
 |------|-----------|
 | Planning phase | Text / JSON. **Does not add Invokes** |
 | Parallel tools | **N Invokes** in logs (HarnessSeed current: 1 step 1 `Action`) |
 | Multiple subtasks in two_phase | **N execution loops**. Minimum unit is `Action` within each loop |
 | Text only | `Thought` / `Answer` / plan summary are not actions |
+
+The boundary stays consistent across these cases: count effects, not planning or response text. Parallelism changes how many operations occur at once, but it does not merge their audit records.
 
 ## 6. Summary
 
@@ -212,6 +224,8 @@ flowchart TB
 | Is planning an action? | **No** (`PlanArtifact` is an intermediate artifact) |
 | Can one turn have multiple Actions? | **Yes** (within one execution loop, or one loop per subtask) |
 | What does the harness log? | Execution: `invoke_id`, `tool`, `args`, `Observation`. Plan: `plan` + optional `[context plan]` |
+
+The unit is a tool call together with its recorded outcome. Plans can be logged for traceability, but they remain instructions rather than evidence that an external operation occurred.
 
 ## 7. HarnessSeed mapping (current)
 
@@ -229,6 +243,7 @@ flowchart TB
 | Subtask result | `SubtaskExecResult` | `src/react.rs` |
 | Config | `react.two_phase`, `react.max_steps`, `react.use_step_driver`, `react.show_prompt` | `config/config.json`, `ReActConfig` |
 
+The turn and plan types organize the larger lifecycle. Action, observation, and trace types preserve each concrete operation, while the task and audit modules verify that those operations satisfy a registered procedure.
 With `two_phase: false` (default), one turn is **one execution loop** only. With `true`, §3 planning → serial execution applies.
 
 The outer advance loop (phase split · `recalled` carry-over) is [07_advance-loop.md](07_advance-loop.md) (`react.advance.enabled`). REPL `SessionMemory` is thin short-term memory across turns ([09_context-memory-mapping.md §10](09_context-memory-mapping.md#10-short-term-memory-sessionmemory-implementation)).

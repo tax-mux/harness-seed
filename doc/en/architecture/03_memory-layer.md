@@ -1,28 +1,11 @@
 # Memory Layer
 
-## What this is
 
-How the agent **recalls past work or knowledge** and **persists a record** after a turn. Not “paste the whole chat history”: only what seems relevant goes into the prompt; a summary is saved when done.
+The memory layer recalls past work or knowledge and persists a record after a turn. Zero context breaks multi-turn work; dumping full history balloons the prompt. Only what this turn needs is loaded, then a diary is written. External stores are reached through `MemoryBridge`, never by calling product APIs from the core.
 
-External stores (local diary, mempalace, and so on) are reached only through a **bridge (`MemoryBridge`)**, never by calling product APIs from the core.
+Useful for continuous requests or searchable knowledge. Safe to disable for fully stateless one-shots.
 
-Glossary: [glossary.md](glossary.md)
-
-## When to use / not use
-
-- Use: continuous requests need context, or you want searchable knowledge in the prompt
-- Skip: fully stateless one-shot runs with memory disabled
-
-## Plain flow
-
-Turn start → choose work-log vs knowledge → fetch via bridge → fill the “recalled” prompt slot → (plan / exec) → write diary at end
-
-Principles: [development-principles.md](../development-principles.md)
-
-- Design history (stub): [ideas/memory-and-replan-architecture.md](../../ja/ideas/memory-and-replan-architecture.md)
-- mempalace adapter: [adapters/mempalace-adapter/README.md](../../../adapters/mempalace-adapter/README.md)
-- Config: `memory` section in [config/README.md](../../../config/README.md)
-- Japanese: [03_記憶層.md](../../ja/architecture/03_記憶層.md)
+Glossary: [glossary.md](glossary.md) · Principles: [development-principles.md](../development-principles.md) · Adapter: [adapters/mempalace-adapter/README.md](../../../adapters/mempalace-adapter/README.md) · Config: [config/README.md](../../../config/README.md) · [JP](../../ja/architecture/03_記憶層.md)
 
 ## 1. Roles
 
@@ -33,6 +16,8 @@ Principles: [development-principles.md](../development-principles.md)
 | **Plan / exec** | Do not know the Bridge; consume assembled recalled (and prior-turn summary if any) | planning / execution |
 
 Never call mempalace (etc.) directly from the core. Always go through `MemoryBridge` (e.g. factory-built `LayeredMemoryBridge`).
+
+The RAG component decides which kind of context this request needs and assembles it. The bridge only reads or writes storage; planning and execution consume the assembled result without knowing which backend supplied it.
 
 ## 2. In-turn flow
 
@@ -52,6 +37,10 @@ flowchart TB
     ANS --> DIARY["finish_turn\nMemoryBridge::diary"]
 ```
 
+At turn start, routing chooses either recent work or knowledge search and places the result in the recalled context. Only continued-work requests also receive prior turns.
+
+Planning can request another knowledge lookup, but it does not use the work-log route for that step. After execution produces the final answer, the memory layer records a diary entry.
+
 ### 2.1 Routing
 
 The router (`memory.rag.router`: `llm` default / `rule`) returns a JSON-like branch.
@@ -62,6 +51,9 @@ The router (`memory.rag.router`: `llm` default / `rule`) returns a JSON-like bra
 | `knowledge` | Run knowledge search |
 | `queries` | Search terms for knowledge (1…`max_queries`) |
 
+The router first distinguishes a continuation from a request for information. If both interpretations are returned, knowledge wins so unrelated diary context is not mixed into a search answer.
+
+Previous turns follow only the continuation route. A greeting can take neither route and starts without recalled material.
 **If both are true, prefer knowledge and drop `work_log`** (mechanical guard against topic mixing).
 
 - Work log: continuation cues (“continue”, “earlier”, …)
@@ -76,6 +68,8 @@ The router (`memory.rag.router`: `llm` default / `rule`) returns a JSON-like bra
 |-------|----------------|------|
 | local | `LocalDiaryBridge` | In-process diary (recommended always-on) |
 | mempalace etc. | `MempalaceBridge` + adapter | Persistence / cross search (add via `backends`) |
+
+The local diary is the baseline layer and remains available even if an external backend cannot be reached. External adapters add persistence or search rather than replacing the local fallback.
 
 Do not replace `local` with an external backend. If externals fail, local still works.
 
@@ -99,6 +93,9 @@ Success log: `[memory] diary written: …`
 | Plan loop cap | `react.max_steps_plan` (default **4**). Do not explore for long |
 | Missing answer | Once force “emit a problem-solving answer”; if still missing → `single_subtask(user request)` |
 
+Planning may skip execution only when the assembled evidence is explicitly sufficient. If it is not, an empty plan becomes one general work item instead of a hardcoded procedure.
+
+The planner's extra recall is limited to the knowledge channel. Tool-based evidence gathering remains an execution responsibility.
 The planning layer has no tools (`recall` is the only exception). Gather missing evidence in the **execution layer**.
 
 ## 4. Code layout
@@ -113,6 +110,7 @@ The planning layer has no tools (`recall` is the only exception). Gather missing
 | `src/action.rs` | Observation char cap (avoid blowing context on huge files) |
 | `src/tool/builtin.rs` | If `read_file` gets a directory, suggest `list_dir` |
 
+The memory modules own routing, storage composition, and bridge construction. The action and tool references are supporting safeguards that keep recalled material and observations from growing without bound.
 ## 5. Config example
 
 ```json

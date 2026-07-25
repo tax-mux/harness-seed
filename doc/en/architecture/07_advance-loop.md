@@ -1,23 +1,11 @@
 # Advance Loop
 
-## What this is
 
-**Outer progress for long requests**: split work into phases, put a summary of each finished phase into the next prompt so context does not balloon.
+Outer progress that splits long requests into phases and carries summaries forward so one huge context does not dominate cost and quality. Not required for short jobs—standard two_phase is enough then.
 
-Glossary: [glossary.md](glossary.md)
+Similar to two_phase, with thicker hand-off: recalled injection and optional session clear between phases.
 
-## When to use / not use
-
-- Use: long work in multiple phases; keep each LLM call’s context small
-- Skip: short requests where standard plan-then-execute (`two_phase`) is enough
-
-Similar to `two_phase`, but also does **recalled injection** and optional **session clear** between phases.
-
-## Plain flow
-
-Overall plan → run phase 1 → carry summary → phase 2… → final answer
-
-Japanese version: [07_推進ループ.md](../../ja/architecture/07_推進ループ.md)
+Glossary: [glossary.md](glossary.md) · [JP](../../ja/architecture/07_推進ループ.md)
 
 ## Config (`config.json`)
 
@@ -40,6 +28,8 @@ Japanese version: [07_推進ループ.md](../../ja/architecture/07_推進ルー�
 | `clear_session_each_phase` | Clear `SessionMemory` before each phase | `true` |
 | `max_note_chars` | Cap for one phase summary in `recalled` | `1500` |
 | `show_phases` | Print phase start to stdout | `true` |
+
+These settings bound how much long-running work a single request can perform and how much of each completed phase is carried forward. Clearing session memory prevents unrelated conversational history from accumulating between phases.
 
 ## Priority
 
@@ -69,11 +59,15 @@ sequenceDiagram
     A-->>U: TurnResult
 ```
 
+The advance loop makes one plan, then handles its subtasks as successive phases. Before each phase, it restores the accumulated phase notes into recalled context.
+
+The execution result becomes both the phase outcome and evidence for the following phase. When no phases remain, their work is returned as one turn result.
 ## Library
 
 - `AdvanceConfig`, `AdvanceProgress` — `harness_seed::advance`
 - `TurnResult::advance_phases` — per phase `id` / `goal` / `answer` / `steps_used`
 
+The configuration describes the limits and carry-forward policy. The progress record preserves each completed phase so hosts can inspect both the final answer and the intermediate work that led to it.
 Host apps keep content pushed via `blocks.push_recalled(...)` across phases (`prepare_phase_recalled` restores the base).
 
 ## Related

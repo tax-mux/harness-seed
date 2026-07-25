@@ -1,26 +1,11 @@
 # Tool Selection (Execution Layer)
 
-## What this is
 
-Rules for **which tools may be used** during execution: catalog → per-subtask policy → runtime checks.
+Rules for which tools may run during execution. Leaving the full catalog open invites wrong picks and over-broad permissions, so availability is narrowed in stages: catalog → subtask policy → runtime checks. The planning layer does not execute tools.
 
-Glossary: [glossary.md](glossary.md)
+Read this when changing execution paths (step driver / ReAct), not when only following planning.
 
-## When to use / not use
-
-- Use: understand or change available tools per path (step driver / ReAct)
-- Skip: you only care about the planning layer (normally no tools)
-
-## Plain flow
-
-Catalog (what exists) → subtask policy narrows further → verify the actual call
-
-Related:
-
-- Execution layer: [02_execution-layer.md](02_execution-layer.md)
-- Task registry: [05_task-registry.md](05_task-registry.md)
-- Built-in tools: [builtin_tools/README.md](../builtin_tools/README.md)
-- Japanese: [02-01_ツールの選択.md](../../ja/architecture/02-01_ツールの選択.md)
+Glossary: [glossary.md](glossary.md) · Execution: [02_execution-layer.md](02_execution-layer.md) · Registry: [05_task-registry.md](05_task-registry.md) · Built-ins: [builtin_tools/README.md](../builtin_tools/README.md) · [JP](../../ja/architecture/02-01_ツールの選択.md)
 
 ## 1. Overview
 
@@ -50,11 +35,17 @@ flowchart TD
     REACT --> POL --> CAT --> MISSION --> LLM --> EXEC --> AUD
 ```
 
+First, configuration and the host establish which tools exist. Next, the task chooses whether its procedure is fixed or the agent must choose tools.
+
+Only the ReAct route needs further narrowing. It filters what the model can see, checks the selected tool again at execution, then audits the resulting trace.
+
 | Stage | Who decides | What is decided |
 |-------|-------------|-----------------|
 | ① Candidate set | Config + host | Tool names that exist at all |
 | ② Path | `use_step_driver` + task def | LLM choice vs fixed order |
 | ③ Constraints (ReAct) | `tool_policy` + LLM + runtime | Per-subtask allowed tools |
+
+The candidate set is only an upper bound on what exists. Path choice and ReAct policy decide what may be used for the current subtask.
 
 ## 2. Candidate Set (ToolRegistry)
 
@@ -69,6 +60,8 @@ Enabled via `tools.packs` in `config/config.json` (`src/tool/pack.rs`).
 | `basic` | `echo`, `time` |
 | `coding` | `list_dir`, `grep`, `read_file`, `write_file`, `run_cmd` |
 | `web_search` | `web_search` (when Brave API key is set) |
+
+The basic and coding packs supply the default candidate set. Search joins it only when its provider is configured, and hosts can add their own tools at registration time.
 
 Default: `basic` + `coding`. `web_search` is added when a Brave key is present.
 
@@ -86,6 +79,10 @@ Tool catalog:
 - list_dir: ...
 - read_file: ...
 ```
+
+When all driver conditions hold, the task contract already names the operation to run. The driver expands the provided parameters and invokes that operation directly.
+
+There is no model-level choice on this branch. A `react_only` task keeps the contract for guidance and audit but moves to the ReAct branch for argument selection.
 
 If the LLM returns a name not in the registry, execution fails.
 
@@ -105,6 +102,8 @@ flowchart LR
     JSON["tasks/list_dir.json<br/>steps[0].method = list_dir"] --> DRV["run_subtask_driver"]
     DRV --> ACT["execute_action(list_dir)"]
 ```
+
+When a task has a fixed contract, the driver reads the prescribed methods and runs them in order. There is no model choice on this path; the contract itself is the selection.
 
 `steps[].method` **is the tool name**. Args are expanded from `params` templates (`{path}`, etc.).
 
@@ -144,11 +143,18 @@ tool_policy_for_subtask(subtask)
 | **freeform + goal hint** | **Single-tool allow** from marker in goal |
 | **plain freeform** | **No policy** → full catalog |
 
+A registered task derives its limit from its declared contract. A free-form task can either carry a single-tool hint or retain the available catalog.
+
+This decision happens before the model sees the execution prompt, so the policy shapes both the visible choices and runtime enforcement.
 Freeform hint format (in goal):
 
 ```text
 Execute with ReAct tools (not a registered task id): read_file ...
 ```
+
+The policy is applied twice for different purposes. Filtering the catalog prevents accidental selection in the prompt, while the runtime rejects an out-of-policy action even if the model produces one.
+
+The policy is cleared after this subtask so it cannot affect later work.
 
 ### 4.2 allow / deny semantics
 
@@ -200,6 +206,9 @@ Built by `TaskRegistry::render_mission`:
 | `## Task contract` | Required order (`format_required_execution`) + tool policy text |
 | `## Prior subtask results` | Prior subtask summaries |
 
+The catalog tells the model which calls it may make and how to form them. The mission then states the current subtask, its contract, and evidence from prior work.
+
+Together these instructions guide a choice without replacing the runtime check.
 Example required order:
 
 ```text
@@ -239,6 +248,9 @@ Contract tasks use `audit_trace`:
 | **Denied tools** | Implemented |
 | Args (expected ⊆ actual) | `react.arg_audit_mode`: `soft` (default, warn) / `hard` (fail) / `off` |
 
+Runtime checks stop a disallowed call immediately and place the failure in the trace. Post-execution audit then checks the completed trace for required order, denied tools, and—when enabled—arguments.
+
+Only a substantive audit failure triggers the bounded ReAct retry; a soft argument warning is retained without repeating work.
 On failure, ReAct retries with audit message in mission (max 2 attempts). Soft arg warnings alone do not trigger retry.
 
 `resolve_plan_with_tools` demotes registered tasks whose required methods are missing from the tool registry to freeform subtasks.
@@ -252,6 +264,9 @@ On failure, ReAct retries with audit message in mission (max 2 attempts). Soft a
 | ReAct + freeform | **LLM** | full or single-tool hint | optional | none |
 | ReAct + `react_only` | **LLM** | filtered | same as registered | yes (order) |
 
+The driver is deterministic because the task contract supplies its operation sequence. ReAct leaves selection to the model, but registered tasks still constrain the visible catalog and verify the completed work.
+
+Free-form ReAct has no registered contract unless its goal provides a narrow hint.
 ## 8. Configuration
 
 | Key | Effect on tool selection |
@@ -262,6 +277,7 @@ On failure, ReAct retries with audit message in mission (max 2 attempts). Soft a
 | `react.arg_audit_mode` | Arg audit: `off` / `soft` (default) / `hard` |
 | (host) `register_plugin` | Extra tools in catalog |
 
+Pack and plugin settings define the tool population. The driver flag selects whether eligible contract tasks run mechanically, and audit mode controls how strictly arguments are checked afterward.
 ## 9. Source Code Map
 
 | Concern | File / symbol |
@@ -278,6 +294,7 @@ On failure, ReAct retries with audit message in mission (max 2 attempts). Soft a
 | Audit | `src/tasks/audit.rs` — `audit_trace`, `audit_subtask` |
 | LLM system prompt | `src/context.rs` — `REACT_SYSTEM_CORE` |
 
+The registry and pack modules establish availability. Policy and runtime modules enforce the selected boundary during a subtask, while the driver and audit modules carry out and verify fixed contracts.
 ## 10. Summary
 
 - **Step driver**: tools are **fixed** by `steps[].method` in `tasks/*.json`.

@@ -11,3 +11,4 @@ Follow `doc/ja/development-principles.md`.
 - **Do not** add logic that only fixes one user utterance or one product domain (e.g. hardcoding `README.md` / `list_dir` as the only recovery path for “explain this project”).
 - Reproduction logs are **validation scenarios**, not feature specs to embed in code.
 - Prefer domain-agnostic wording in prompts and defaults (“gather evidence with available tools”), not product-specific recipes.
+- When writing docs: after every figure/table, explain in plain stages what happens and where it branches. Do not leave decoding to the reader, and do not recite box/type names in one breath.

@@ -1,30 +1,11 @@
 # Planning Layer
 
-## What this is
 
-Reads the user request and decides **what to do in what order** (a list of small work items / subtasks). No tools; no environment changes. Closest analogy: writing a work order sheet.
+The planning layer reads the user request and decides what to do in what order (a list of subtasks). Jumping straight into execution makes tool use vague, so work units and done-when are fixed first. No tools and no environment changes here.
 
-Glossary: [glossary.md](glossary.md)
+Standard two_phase always goes through this layer. If the host already supplies the full plan, the engine’s planning LLM can stay thin. Output is a subtask list plus summary for execution (or skip execution when knowledge alone is enough). Implementation: `run_plan_layer` → `PlanArtifact`.
 
-## When to use / not use
-
-- Use: you want to fix a procedure before acting (standard two_phase)
-- Thinner planning LLM is fine if the host already supplies the full plan
-
-## Plain flow
-
-Request → (think without tools) → subtask list + summary → hand off to execution (or skip execution when knowledge alone is enough)
-
-Implementation: ReAct-derived loop (`run_plan_layer`); output is `PlanArtifact`.
-
-Related:
-
-- Overall structure: [00_harness-seed-structure.md](00_harness-seed-structure.md)
-- Execution layer: [02_execution-layer.md](02_execution-layer.md)
-- Overview (SVG): [full_agent_architecture_v2.svg](../../ja/architecture/full_agent_architecture_v2.svg)
-- Minimum action unit: [10_agent-minimum-action-unit.md](10_agent-minimum-action-unit.md)
-- Task registry: [05_task-registry.md](05_task-registry.md)
-- Japanese: [01_計画層.md](../../ja/architecture/01_計画層.md)
+Glossary: [glossary.md](glossary.md) · Structure: [00_harness-seed-structure.md](00_harness-seed-structure.md) · Execution: [02_execution-layer.md](02_execution-layer.md) · [JP](../../ja/architecture/01_計画層.md)
 
 ## 1. Role of the Planning Layer
 
@@ -36,6 +17,10 @@ flowchart LR
     HS --> EXEC["To execution layer"]
 ```
 
+The request first enters a tool-free planning loop. Its raw response is then validated and turned into a structured work description before anything executes.
+
+That boundary keeps planning output separate from a reply to the user. The parsed work description is stored in `HarnessState` as a `PlanArtifact`.
+
 | Aspect | Planning layer | Execution layer |
 |--------|----------------|-----------------|
 | Brain | `PlanBrainMode` | exec `BrainMode` |
@@ -43,6 +28,10 @@ flowchart LR
 | Tools | **disabled** | **enabled** |
 | Output | `PlanArtifact` | User-facing `Answer` |
 | Side effects | **none** | **yes** |
+
+Planning cannot call tools or make changes, so its product is a work description. Execution can use tools and turns its result into the user-facing answer.
+
+The different brain and loop names identify implementation seams. The behavioral boundary is the availability of tools and side effects.
 
 **Principle**: the planning layer designs **PROCEDURE only**. INPUT (read sources) and OUTPUT (write targets) are fixed by the host; the LLM must not change them.
 
@@ -63,6 +52,10 @@ flowchart TD
     APPLY --> OUT["PlanArtifact → execution layer or direct reply"]
 ```
 
+The turn may bypass the planning model only when the host explicitly marks the request as trivial. In that case, the engine creates a direct-answer plan without calling an LLM.
+
+Otherwise, the planner may reason but cannot operate tools. Its answer is parsed, resolved against the task registry, and copied into the execution context. A tool attempt is rejected and returns to the planner as an observation.
+
 ### 2.1 Entry Points
 
 | API | Purpose |
@@ -70,6 +63,8 @@ flowchart TD
 | `run_plan_layer` | Planning loop + Harness parse (`layer.rs`) |
 | `run_plan_preview` | Plan only; does not enter execution layer (`react.rs`) |
 | `run_turn_two_phase` / `run_turn_advance` | Serial plan → execution |
+
+Use the first entry point when the caller needs planning itself. Use preview to inspect a plan without executing it; the turn entries continue from the plan into execution.
 
 ### 2.2 Skipping the Planning Layer
 
@@ -94,6 +89,8 @@ The planning layer also uses `run_layer_loop`, but is distinguished from executi
 | `max_thoughts` | 1 |
 | `max_steps` | `react.max_steps_plan` (default 4) |
 
+These settings make planning deliberately brief and non-invasive. The loop can record one thought at a time, but tool use remains disabled throughout.
+
 ```mermaid
 sequenceDiagram
     participant U as User input
@@ -115,6 +112,10 @@ sequenceDiagram
     L->>H: Answer body
     H-->>L: HarnessState
 ```
+
+The loop gives the planner repeated chances to return a thought or an answer. A thought only updates internal trace state; an answer is the only form sent to the parser.
+
+If the planner attempts an action, the loop records that tools are unavailable rather than running it. Once an answer arrives, parsing produces the state used by the following stage.
 
 LLM step format (`PlanBrainMode` / `PLAN_REACT_SYSTEM_CORE`):
 
@@ -149,6 +150,10 @@ flowchart TB
     user --> LLM
 ```
 
+The system portion supplies boundaries, available capabilities, and retained reference material. The user portion supplies the current goal, recent conversation when applicable, and the planner's own trace.
+
+Together they tell the planner what is fixed and what it may design. The catalog is descriptive at this stage: it does not grant tool execution.
+
 Main blocks the host app sets on `PromptBlocks`:
 
 | Block | Role |
@@ -159,6 +164,8 @@ Main blocks the host app sets on `PromptBlocks`:
 | `recalled` | Long context such as referenced emails |
 | `rules` | Additional rules |
 
+The host supplies these blocks before planning begins. The planner can use the task and tool descriptions to choose a procedure, but the data contract remains the authority on what may be read or written.
+
 ## 5. Data Contract (INPUT / PROCEDURE / OUTPUT)
 
 `PlanDataContract` (`plan/contract.rs`) prevents the LLM from guessing read/write targets for a turn.
@@ -168,6 +175,10 @@ flowchart LR
     IN["INPUT (read)<br/>host-fixed"] --> PROC["PROCEDURE<br/>PlanArtifact.subtasks<br/>LLM designs"]
     PROC --> OUT["OUTPUT (write)<br/>host-fixed"]
 ```
+
+The host establishes the input source before planning starts. The planner fills in only the procedure that connects that input to the fixed output destination.
+
+This avoids asking the model to infer permissions or invent storage targets. The named contract represents those fixed boundaries.
 
 | Layer | Examples | Decided by |
 |-------|----------|------------|
@@ -193,6 +204,10 @@ flowchart TD
     PA --> HS["HarnessState"]
     PASS --> HS
 ```
+
+Parsing first accepts a structured plan because it preserves explicit work items. If that is unavailable, a numbered list is converted into work; ordinary text becomes a direct-answer plan.
+
+Only content that fits none of these forms is reported as a parse failure. Both successful branches end in the same internal state for later orchestration.
 
 ### 6.1 Accepted Plan JSON Formats
 
@@ -231,6 +246,8 @@ On parse failure, JSON repair and multi-object extraction (`extract_json_objects
 | `skip_execution` | If `true`, skip execution layer and reply directly |
 | `subtasks` | Serial subtasks (ids start at 1, must be unique) |
 
+The summary describes the intended work, while the subtask list determines whether there is work to run. Marking execution as skipped routes the request to a direct reply instead of the subtask executor.
+
 `needs_execution()` = `!skip_execution && !subtasks.is_empty()`
 
 ### 6.3 HarnessState
@@ -245,6 +262,8 @@ Internal state after parsing; used by execution layer and prompt injection.
 | `tool_set` | Tool restriction for current step |
 | `references` | Reference documents (emails, etc.) |
 | `status` | `Ready` / `Executing` / `Completed` / `Aborted` |
+
+The parsed text is retained for transparency, and the parsed plan carries the executable structure. As execution begins, the state also tracks the current item, permitted tools, references, and progress.
 
 ## 7. Applying the Plan
 
@@ -280,7 +299,9 @@ flowchart LR
     SINGLE --> END["TurnResult"]
 ```
 
-The subtask list is not used; **only the execution brain** replies to the original prompt (greetings, self-intro, plain-text passthrough, etc.).
+When the plan says no separate work items are needed, the normal subtask path ends. The execution brain receives the original request and produces the reply directly.
+
+This still keeps the final response in the execution-facing path rather than returning the planner's raw text.
 
 ## 10. Configuration
 
@@ -291,6 +312,8 @@ The subtask list is not used; **only the execution brain** replies to the origin
 | `react.show_plan` | `true` | Print `PlanArtifact` to stdout |
 | `react.show_prompt` | `false` | Print planning prompt to stderr |
 | `llm.*` | — | Connector settings for `PlanLlmBrain` |
+
+The step limit bounds planning effort. The remaining settings decide whether planning participates in a turn and how much planning information is shown or connected to an LLM.
 
 ## 11. Source Code Map
 
@@ -308,6 +331,7 @@ The subtask list is not used; **only the execution brain** replies to the origin
 | Orchestration | `src/react.rs` — `run_turn_two_phase`, `apply_harness_from_plan`, `run_plan_preview` |
 | Task resolution | `src/tasks/registry.rs` — `resolve_plan`, `catalog_for_planner` |
 
+The loop and orchestration files own the planning lifecycle. The plan, parse, and contract modules define what a valid plan means, while the registry connects task ids to available work contracts.
 ## 12. Summary
 
 - The planning layer **designs subtasks (work instructions) only**; it never uses tools.

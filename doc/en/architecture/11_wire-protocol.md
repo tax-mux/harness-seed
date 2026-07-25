@@ -1,21 +1,11 @@
 # Wire Protocol (JSON)
 
-## What this is
 
-How CUI / GUI / other-language hosts talk to the engine (`ReActLoop`) as **one JSON object per line**. Protocol version: **1** (`WIRE_VERSION`).
+How CUI / GUI / other-language hosts talk to `ReActLoop` as one JSON object per line (protocol version 1). Divergent call shapes raise embed cost; one contract serves many fronts. It does not replace the human text REPL (`--json` off).
 
-Glossary: [glossary.md](glossary.md)
+Host sends a line, the engine runs, one line comes back.
 
-## When to use / not use
-
-- Use: `--json` machine integration, or the same contract from another process/language
-- Skip: human text REPL only
-
-## Plain flow
-
-Host sends one JSON line → engine runs → one JSON line back
-
-Japanese version: [11_ワイヤプロトコル.md](../../ja/architecture/11_ワイヤプロトコル.md)
+Glossary: [glossary.md](glossary.md) · [JP](../../ja/architecture/11_ワイヤプロトコル.md)
 
 ## Transport
 

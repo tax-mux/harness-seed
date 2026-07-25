@@ -1,8 +1,8 @@
 # Glossary
 
-Plain-language definitions for terms used in HarnessSeed architecture docs. Type and function names are listed under “Typical symbols.” Details live in each chapter.
+Plain definitions for terms in the architecture docs, before type names. Chapters that open on insider symbols leave first-time readers without a map; this page is the shared vocabulary door.
 
-Audience: people embedding HarnessSeed in a host app, or reading this repository for the first time.
+Audience: people embedding HarnessSeed, or reading the repository for the first time. Details live in each chapter; typical symbols sit at the end of each entry.
 
 Index: [README.md](README.md) · Japanese: [用語集.md](../../ja/architecture/用語集.md)
 

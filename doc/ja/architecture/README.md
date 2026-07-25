@@ -7,7 +7,7 @@ HarnessSeed は、既存アプリに埋め込む **エージェント実行エ�
 3. ツールを使いながら作業し、回答する（実行）
 4. 記録を残し、ホストへ進捗を通知できる（日記・hook）
 
-開発方針: [development-principles.md](../development-principles.md) · 未実装案: [ideas/](../ideas/README.md) · English: [en/architecture/README.md](../../en/architecture/README.md)
+開発方針: [development-principles.md](../development-principles.md)（概要は文章で「何か／なぜあるか」を先に） · 未実装案: [ideas/](../ideas/README.md) · English: [en/architecture/README.md](../../en/architecture/README.md)
 
 ## 初めて読む人向け
 
