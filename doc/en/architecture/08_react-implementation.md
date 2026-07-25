@@ -1,12 +1,27 @@
 # HarnessSeed ReAct implementation (current)
 
-This document is an implementation snapshot of the ReAct loop in HarnessSeed, based on **source code as of 2026-05**.
+## What this is
+
+How the “think → (optionally) call a tool → observe → think again” loop is **implemented in this repository** (snapshot based on source as of 2026-05).
+
+Glossary: [glossary.md](glossary.md)
+
+## When to use / not use
+
+- Use: loop limits, step kinds, implementation files
+- Skip: product-level layer roles only → [00](00_harness-seed-structure.md) / [glossary](glossary.md)
+
+## Plain flow
+
+One user input = one turn. Repeat Thought / Action / Observation until `Answer`.
+
+Related:
 
 - Conceptual background: [10_agent-minimum-action-unit.md](10_agent-minimum-action-unit.md)
-- **Architecture (planning / execution layers)**: [README.md](README.md)
-- **Context mapping by horizon (short / mid / long term)**: [09_context-memory-mapping.md](09_context-memory-mapping.md)
-- **Built-in tool specs (arguments, behavior, failure conditions)**: [../builtin_tools/README.md](../builtin_tools/README.md)
-- Japanese version: [08_ReAct実装.md](../../ja/architecture/08_ReAct実装.md)
+- Architecture index: [README.md](README.md)
+- Context mapping: [09_context-memory-mapping.md](09_context-memory-mapping.md)
+- Built-in tools: [../builtin_tools/README.md](../builtin_tools/README.md)
+- Japanese: [08_ReAct実装.md](../../ja/architecture/08_ReAct実装.md)
 
 ## 1. Overview
 

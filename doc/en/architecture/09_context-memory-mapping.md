@@ -1,11 +1,26 @@
 # Context memory mapping
 
-A diagrammatic view of **one Chat Completions request** sent to the LLM (in HarnessSeed: `TurnPromptContext::render`), organized by **purpose, memory layer, and storage location**.
+## What this is
+
+A map of **what goes into one LLM request, why, and at what length**—so short chat, recalled snippets, and long knowledge are not confused.
+
+Glossary: [glossary.md](glossary.md)
+
+## When to use / not use
+
+- Use: prompts grew too large; you need to see what the LLM sees
+- Skip: only the memory fetch path → [03_memory-layer.md](03_memory-layer.md)
+
+## Plain flow
+
+Break one Chat request into purpose-based sections (mainly `TurnPromptContext::render`).
+
+Related:
 
 - ReAct implementation: [08_react-implementation.md](08_react-implementation.md)
 - Minimum action unit: [10_agent-minimum-action-unit.md](10_agent-minimum-action-unit.md)
 - Built-in tools: [../builtin_tools/README.md](../builtin_tools/README.md)
-- Japanese version: [09_コンテキストマッピング.md](../../ja/architecture/09_コンテキストマッピング.md)
+- Japanese: [09_コンテキストマッピング.md](../../ja/architecture/09_コンテキストマッピング.md)
 
 **Status (as of 2026-07)**
 

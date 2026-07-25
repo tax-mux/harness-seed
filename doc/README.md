@@ -1,5 +1,7 @@
 # HarnessSeed documentation
 
+First read: [ja glossary](ja/architecture/用語集.md) / [en glossary](en/architecture/glossary.md), then chapter 00.
+
 | Language | Entry |
 |----------|--------|
 | **日本語** | [ja/README.md](ja/README.md) |

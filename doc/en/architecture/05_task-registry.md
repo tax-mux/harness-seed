@@ -1,6 +1,21 @@
 # Task Registry
 
-Feature-block tasks are defined with **`steps[]` (required `method` + `order`)**. Planning and execution layers both share the ReAct-derived loop (`src/layer.rs`).
+## What this is
+
+A place to store **repeatable work as JSON contracts**. When a plan points at a contract, execution can run a fixed step driver instead of letting the LLM pick tools every time.
+
+Glossary: [glossary.md](glossary.md)
+
+## When to use / not use
+
+- Use: you have reproducible procedures and want mechanical argument/step audit
+- Skip: only freeform one-off work; registry-less freeform execution is enough
+
+## Plain flow
+
+Write `tasks/*.json` → plan references a task id → step driver or ReAct runs → audit
+
+Feature-block tasks are defined with **`steps[]` (required `method` + `order`)**. Planning and execution share the ReAct-derived loop (`src/layer.rs`).
 
 | Area | Location |
 |------|----------|
@@ -9,9 +24,7 @@ Feature-block tasks are defined with **`steps[]` (required `method` + `order`)**
 | Planning | `PlanBrainMode` + `run_plan_layer` |
 | Execution | `ReActLoop` + `run_layer_loop` or `run_subtask_driver` |
 
-Tool selection and audit detail: [02-01_tool-selection.md](02-01_tool-selection.md)
-
-Japanese version: [05_タスクレジストリ.md](../../ja/architecture/05_タスクレジストリ.md)
+Tool selection / audit: [02-01_tool-selection.md](02-01_tool-selection.md) · Japanese: [05_タスクレジストリ.md](../../ja/architecture/05_タスクレジストリ.md)
 
 ## Two layers + shared primitives
 

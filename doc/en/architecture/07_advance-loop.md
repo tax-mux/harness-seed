@@ -1,13 +1,23 @@
 # Advance Loop
 
-HarnessSeed’s **outer orchestration**. One user request is split into planning phases; each phase runs execution-layer ReAct. Completed-phase summaries go into `PromptBlocks::recalled` for the next phase.
+## What this is
+
+**Outer progress for long requests**: split work into phases, put a summary of each finished phase into the next prompt so context does not balloon.
+
+Glossary: [glossary.md](glossary.md)
+
+## When to use / not use
+
+- Use: long work in multiple phases; keep each LLM call’s context small
+- Skip: short requests where standard plan-then-execute (`two_phase`) is enough
+
+Similar to `two_phase`, but also does **recalled injection** and optional **session clear** between phases.
+
+## Plain flow
+
+Overall plan → run phase 1 → carry summary → phase 2… → final answer
 
 Japanese version: [07_推進ループ.md](../../ja/architecture/07_推進ループ.md)
-
-## When to use
-
-- Long work split into **multiple phases** to keep each LLM call’s context small
-- Similar to `two_phase`, but also does **`recalled` injection** and optional **session clear** between phases
 
 ## Config (`config.json`)
 

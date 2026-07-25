@@ -1,11 +1,27 @@
 # HarnessSeed ReAct 実装状態（現行）
 
-本ドキュメントは **2026-05 時点のソースコード**に基づく、HarnessSeed における ReAct ループの実装スナップショットである。
+## これは何か
 
-- 概念の背景: [agent-minimum-action-unit.md](10_最少行動単位.md)
-- **アーキテクチャ（計画層・実行層）**: [architecture/README.md](README.md) / [en/architecture/README.md](../../en/architecture/README.md)
-- **コンテキストの用途別マッピング（短期/中期/長期）**: [context-memory-mapping.md](09_コンテキストマッピング.md)
-- **組み込みツールの仕様（引数・挙動・失敗条件）**: [builtin_tools/README.md](../builtin_tools/README.md)
+「考えて →（必要なら）ツールを呼んで → 結果を見てまた考える」ループが、**このリポジトリのコードでどう実装されているか**のスナップショット（2026-05 時点のソースに基づく）。
+
+用語: [用語集.md](用語集.md)
+
+## いつ使う／使わない
+
+- 使う: ループの制限、ステップ種別、実装ファイルを追いたいとき
+- 使わない: 製品としての層の役割だけ知りたいとき → [00](00_harness-seedの構造.md) / [用語集](用語集.md)
+
+## 平易な流れ
+
+1 ユーザー入力 = 1 ターン。`Answer` が返るまで Thought / Action / Observation を繰り返す。
+
+関連:
+
+- 概念の背景: [10_最少行動単位.md](10_最少行動単位.md)
+- アーキテクチャ索引: [README.md](README.md) / [EN](../../en/architecture/README.md)
+- コンテキストの用途別マッピング: [09_コンテキストマッピング.md](09_コンテキストマッピング.md)
+- 組み込みツール: [builtin_tools/README.md](../builtin_tools/README.md)
+- English: [08_react-implementation.md](../../en/architecture/08_react-implementation.md)
 
 ## 1. 概要
 

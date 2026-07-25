@@ -1,28 +1,70 @@
-# harness-seed Structure (Planning Layer & Execution Layer)
+# harness-seed Structure
 
-HarnessSeed is a ReAct harness built around a **serial pipeline: prompt intake → planning layer → execution layer → end**. Both layers share the same ReAct loop primitive (`run_layer_loop`), but differ in **whether tools are enabled** and **what type of output they produce**.
+## What this is
 
-- Full overview (SVG): [full_agent_architecture_v2.svg](../../ja/architecture/full_agent_architecture_v2.svg)
-- Index: [README.md](README.md)
-- Minimum action unit: [agent-minimum-action-unit.md](10_agent-minimum-action-unit.md)
-- ReAct implementation details: [react-implementation.md](08_react-implementation.md)
-- Outer advance loop: [advance-loop.md](07_advance-loop.md)
-- Task registry: [task-registry.md](05_task-registry.md)
-- Planning layer: [01_planning-layer.md](01_planning-layer.md) ([JP](../../ja/architecture/01_計画層.md))
-- Execution layer: [02_execution-layer.md](02_execution-layer.md) ([JP](../../ja/architecture/02_実行層.md))
-- Japanese version: [00_harness-seedの構造.md](../../ja/architecture/00_harness-seedの構造.md)
+HarnessSeed is an **embeddable agent execution engine** for host apps. One user request roughly goes:
 
-## 1. Overall Flow
+1. (Optional) recall past work or knowledge  
+2. **Plan**: decide what to do in what order (no tools here)  
+3. **Execute**: work through the plan, use tools if needed, return a final answer  
+4. Persist a record; the host may attach side effects such as ticket updates
+
+Planning and execution share the same “think → (optionally) act” loop primitive, but differ in **whether tools are enabled** and **output shape** (a plan vs a user-facing answer).
+
+Glossary: [glossary.md](glossary.md) · Principles: [development-principles.md](../development-principles.md)
+
+## When to read this
+
+- You want a map of the whole repository (start here)
+- You need to explain why planning and execution are separate
+
+Contracts and settings live in the linked chapters below.
+
+## Plain flow
 
 ```mermaid
 flowchart TB
-    A["Prompt intake<br/>run_turn(user_input)"] --> B["Planning layer<br/>run_plan_layer"]
-    B --> C{"skip_execution?"}
-    C -->|yes| D["Single ReAct response"]
-    C -->|no| E["Execution layer<br/>per subtask:<br/>run_layer_loop or step-driver"]
-    D --> F["End<br/>TurnResult"]
+    A["User request"] --> M["Load memory"]
+    M --> B["Make a plan"]
+    B --> C{"Answer without tools?"}
+    C -->|yes| D["Final answer"]
+    C -->|no| E["Run work items"]
+    D --> F["Record and host notify"]
     E --> F
 ```
+
+The same flow with implementation symbols is in the next section.
+
+Related:
+
+- Memory: [03_memory-layer.md](03_memory-layer.md)
+- Host side effects: [04_host-extensions.md](04_host-extensions.md)
+- Overview (SVG): [full_agent_architecture_v2.svg](../../ja/architecture/full_agent_architecture_v2.svg)
+- Index: [README.md](README.md)
+- Minimum action unit: [10_agent-minimum-action-unit.md](10_agent-minimum-action-unit.md)
+- ReAct implementation: [08_react-implementation.md](08_react-implementation.md)
+- Advance loop: [07_advance-loop.md](07_advance-loop.md)
+- Task registry: [05_task-registry.md](05_task-registry.md)
+- Planning: [01_planning-layer.md](01_planning-layer.md) ([JP](../../ja/architecture/01_計画層.md))
+- Execution: [02_execution-layer.md](02_execution-layer.md) ([JP](../../ja/architecture/02_実行層.md))
+- Japanese: [00_harness-seedの構造.md](../../ja/architecture/00_harness-seedの構造.md)
+
+## 1. Overall flow (implementation)
+
+```mermaid
+flowchart TB
+    A["Prompt intake<br/>run_turn(user_input)"] --> H0["on_turn_started<br/>HostScratch"]
+    H0 --> M["Memory RAG<br/>work_log / knowledge"]
+    M --> B["Planning layer<br/>run_plan_layer"]
+    B --> H1["on_plan_finished"]
+    H1 --> C{"skip_execution?"}
+    C -->|yes| D["Final answer<br/>(skip execution)"]
+    C -->|no| E["Execution layer<br/>per subtask:<br/>on_subtask_* + run"]
+    D --> F["End<br/>TurnResult + diary<br/>on_turn_finished"]
+    E --> F
+```
+
+Memory details: [03_memory-layer.md](03_memory-layer.md). Host side effects: [04_host-extensions.md](04_host-extensions.md).
 
 Opening comment in `src/plan.rs`:
 

@@ -1,5 +1,20 @@
 # Tool Plugins and Packaging
 
+## What this is
+
+How execution-layer tools register as **in-process plugins** and are enabled in groups via pack names in config.
+
+Glossary: [glossary.md](glossary.md)
+
+## When to use / not use
+
+- Use: change the built-in tool set or add a custom tool
+- Skip: default packs are enough and you only need per-tool args → [builtin_tools](../builtin_tools/README.md)
+
+## Plain flow
+
+Pack config → register `Tool`s → catalog appears in prompts / execution
+
 HarnessSeed ReAct tools register as **in-process plugins**. Built-ins are enabled via **tool packs** (`tools.packs`).
 
 Per-tool args and failure rules: [builtin_tools/README.md](../builtin_tools/README.md)
