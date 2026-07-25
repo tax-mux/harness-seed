@@ -159,6 +159,10 @@ pub struct AdvanceSection {
     pub clear_session_each_phase: Option<bool>,
     pub max_note_chars: Option<usize>,
     pub show_phases: Option<bool>,
+    /// 判定前に必要な実質証拠（read/grep 等）成功 observation 数。
+    pub min_substantive_obs: Option<usize>,
+    /// 最終合成後にパス引用を証拠 Paths と照合する。
+    pub citation_check: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -436,6 +440,13 @@ impl AppConfig {
                     .unwrap_or(1500)
                     .clamp(200, 16_000),
                 show_phases: self.react.advance.show_phases.unwrap_or(true),
+                min_substantive_obs: self
+                    .react
+                    .advance
+                    .min_substantive_obs
+                    .unwrap_or(3)
+                    .max(1),
+                citation_check: self.react.advance.citation_check.unwrap_or(true),
             },
             monitor_plan_html: false,
             memory: self.memory_runtime_config(),

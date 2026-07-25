@@ -37,10 +37,13 @@ pub use agent_assets::{
     ScriptToolDefinition, DEFAULT_FILENAME,
 };
 pub use advance::{
-    count_ok_tool_observations, evidence_deepening_subtask, evidence_grounding_rules,
-    format_recalled_progress, prepare_phase_recalled, prior_evidence_is_thin,
-    restore_base_recalled, AdvanceConfig, AdvancePhaseNote, AdvancePhaseSummary, AdvanceProgress,
-    MIN_OK_TOOL_OBSERVATIONS_BEFORE_JUDGMENT,
+    apply_citation_gate, build_phase_note, count_ok_tool_observations,
+    count_substantive_ok_observations, evidence_deepening_subtask, evidence_grounding_rules,
+    evidence_paths_from_notes, evidence_paths_from_texts, format_recalled_progress,
+    is_substantive_evidence_tool, prepare_phase_recalled, prior_evidence_is_thin,
+    restore_base_recalled, unverified_cited_paths, AdvanceConfig, AdvancePhaseNote,
+    AdvancePhaseSummary, AdvanceProgress, MIN_OK_TOOL_OBSERVATIONS_BEFORE_JUDGMENT,
+    MIN_SUBSTANTIVE_OK_OBSERVATIONS_BEFORE_JUDGMENT, SUBSTANTIVE_EVIDENCE_TOOLS,
 };
 pub use brain::{AgentBrain, BrainMode, BrainPair, SimpleRuleBrain};
 pub use brave_search::{BraveSearchConfig, BraveSearchError, WebSearchHit};
