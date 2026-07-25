@@ -100,7 +100,9 @@ pub use protocol::{
     WireErrorBody, WireRequest, WireResponse, WIRE_VERSION,
 };
 pub use lifecycle::{
-    invoke_lifecycle, CompositeLifecycle, HostScratch, HostView, NoopLifecycle, TurnLifecycle,
+    invoke_lifecycle, lifecycle_from_tracking, CompositeLifecycle, HostScratch, HostView,
+    NoopLifecycle, RunStatus, SubtaskOutcome, TaskTracking, TaskTrackingLifecycle,
+    TurnFinishedEvent, TurnLifecycle, TurnOutcome, WorkFinishedEvent, WorkStartedEvent,
     WriteScope,
 };
 pub use react::{

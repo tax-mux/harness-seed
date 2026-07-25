@@ -2,23 +2,45 @@
 
 Extension surface for host applications (triage-mail, development agents, etc.) to integrate externally **without changing the core ReAct loop**.
 
-- Implementation: `src/lifecycle.rs`
-- Registration: `ReActLoop::set_lifecycle` / `seed_host_scratch` / `host_scratch`
+- Implementation: `src/lifecycle.rs`, task-tracking API: `src/lifecycle/tracking.rs`
+- Registration: `ReActLoop::set_lifecycle` / `lifecycle_from_tracking` / `seed_host_scratch` / `host_scratch`
 - Development principles: [development-principles.md](../development-principles.md) (domain vocabulary lives on the host side)
 - Japanese version: [04_ホスト拡張.md](../../ja/architecture/04_ホスト拡張.md)
 
-## 1. Responsibility split
+## 1. What is a hook?
+
+A **lifecycle hook** is a host-facing callback that the engine invokes at **fixed points** while advancing a turn.
+
+- The engine notifies **facts** such as “the plan is fixed” or “a subtask is starting / finished”
+- The host reacts with **external side effects** (create tickets, update progress, send notifications, and so on)
+- Hooks must **not** steer or rewrite the core path (planning, tool execution, final Answer). The engine remains in control
+
+Analogy: the factory line itself does not change; a clerk writes paperwork whenever a station bell rings. The bell (timing) and the paperwork (external API) are hooks / host code; the line design is the ReAct core.
+
+Related but different:
+
+| | lifecycle hook | tool (`run_cmd`, etc.) | `TurnObserver` |
+|--|----------------|------------------------|----------------|
+| who calls it | engine, aligned with turn progress | LLM / driver chooses and runs it | engine, for step display |
+| purpose | host business side effects | the work itself (observation returns to the LLM) | UI / debugging |
+| LLM context | not included (`HostScratch` only) | included as Observation | not included |
+
+Hosts implement “what to do when called,” not “which tool to run next.”
+
+## 2. Responsibility split
 
 | Side | Owns |
 |------|------|
-| **Engine (harness-seed)** | Plan / execution loop, **when** hooks are invoked, per-turn bag `HostScratch` |
-| **Host** | Hook implementations (tickets, notifications, billing, etc.), bag key design, external APIs |
+| **Engine (harness-seed)** | Plan / execution loop, **when** hooks run, `RunStatus` / outcomes, per-turn bag `HostScratch` |
+| **Host** | [`TaskTracking`] (preferred) or raw `TurnLifecycle`, bag key design, external APIs |
 
 The engine does **not** know about Redmine / Paperclip / LINE WORKS / Stripe, and so on. The host mounts those on the same surface.
 
 ```mermaid
 flowchart TB
-    HOST["Host app"] --> SET["set_lifecycle / seed_host_scratch"]
+    HOST["Host app"] --> API["TaskTracking<br/>host API"]
+    API --> BRIDGE["lifecycle_from_tracking"]
+    BRIDGE --> SET["set_lifecycle / seed_host_scratch"]
     SET --> ENG["ReActLoop::run_turn"]
     ENG --> CORE["Core: plan → execute → Answer<br/>PromptBlocks / trace"]
     ENG --> HOOK["TurnLifecycle hooks<br/>side effects only"]
@@ -27,7 +49,7 @@ flowchart TB
     CORE -.->|does not use| SCR
 ```
 
-## 2. Prohibited actions (do not break the core path)
+## 3. Prohibited actions (do not break the core path)
 
 Hooks must **not** do the following.
 
@@ -38,7 +60,7 @@ Hooks are limited to **observation and side effects** (plus writes to `HostScrat
 
 External API failures should ideally be handled inside the hook. If a hook panics anyway, the engine catches it via `invoke_lifecycle` (`catch_unwind`), logs to stderr, and continues the core path. Partial `HostScratch` writes from a panicking hook are **not** rolled back.
 
-## 3. Invocation timing
+## 4. Invocation timing
 
 For `two_phase` / `advance` turns that have a plan:
 
@@ -51,37 +73,75 @@ begin_host_scratch_for_turn  (clear bag → merge seed)
   for each subtask:
     on_subtask_started
     … execution …
-    on_subtask_finished
-  finish_turn（session / diary）
-  on_turn_finished
+    on_subtask_finished      (status=Completed on success)
+  finish_turn (session / diary)
+  on_turn_finished           (status=Completed)
 ```
 
 For single-phase execution (no plan), only `on_turn_started` and `on_turn_finished` run.
 
-If a turn aborts with an error, any pending `on_subtask_finished` / `on_turn_finished` calls are **not** invoked.
+If a turn aborts with an error or cancel, **started but unfinished subtasks** and the **turn** still receive `on_subtask_finished` / `on_turn_finished` with `Failed` or `Cancelled` (so external work items are not left open).
 
-## 4. Payloads (full context is not passed)
+## 5. Structured outcomes and TaskTracking API
 
-The engine does **not** pass full rules / recalled / tool catalog / observation text from the core path. Only structured fragments usable for ticket descriptions and similar are passed.
+### 5.1 `RunStatus` / outcome
+
+| Type | Meaning |
+|------|---------|
+| `RunStatus` | `Completed` / `Failed` / `Cancelled` |
+| `SubtaskOutcome` | `status` + `message` (answer on success, reason otherwise) + `steps_used` |
+| `TurnOutcome` | `status` + `answer` + `steps_used` |
+
+`on_subtask_finished` / `on_turn_finished` always receive these outcomes.
+
+### 5.2 Preferred: `TaskTracking`
+
+For PM integration, implement [`TaskTracking`] instead of wiring raw `TurnLifecycle`.
+
+| TaskTracking | Maps from TurnLifecycle | Typical use |
+|--------------|-------------------------|-------------|
+| `on_turn_started` | same | inspect seeded ids |
+| `on_plan_ready` | `on_plan_finished` | create parent work item |
+| `on_work_started` | `on_subtask_started` | create / start child work item |
+| `on_work_finished` | `on_subtask_finished` | close child (ok / fail / cancel) |
+| `on_turn_finished` | same | close parent |
+
+```rust
+use harness_seed::{lifecycle_from_tracking, HostView, PlanArtifact, TaskTracking, WorkFinishedEvent, WorkStartedEvent};
+use std::sync::Arc;
+
+struct PmSync;
+impl TaskTracking for PmSync {
+    fn on_plan_ready(&self, _user_input: &str, plan: &PlanArtifact, mut host: HostView<'_>) {
+        host.insert("parent_ticket_id", 42);
+        let _ = plan;
+    }
+    fn on_work_started(&self, event: WorkStartedEvent<'_>, mut host: HostView<'_>) {
+        host.insert("child_ticket_id", 7);
+        let _ = event.subtask;
+    }
+    fn on_work_finished(&self, event: WorkFinishedEvent<'_>, host: HostView<'_>) {
+        let child = host.get_i64("child_ticket_id");
+        let _ = (event.outcome.status, event.outcome.message, child);
+    }
+}
+
+react.set_lifecycle(Some(lifecycle_from_tracking(Arc::new(PmSync))));
+```
+
+### 5.3 Hook arguments and write scope
+
+The engine does **not** pass full rules / recalled / tool catalog / observation text.
 
 | hook | arguments | write scope |
 |------|-----------|-------------|
-| `on_turn_started` | `user_input`, `host: HostView` | `turn` |
+| `on_turn_started` | `user_input`, `host` | `turn` |
 | `on_plan_finished` | `user_input`, `plan`, `host` | `turn` |
-| `on_subtask_started` | `user_input`, `plan`, `subtask`, `index` (0-based), `host` | `subtasks.{subtask.id}` |
-| `on_subtask_finished` | above + `answer`, `steps_used`, `host` | `subtasks.{subtask.id}` |
-| `on_turn_finished` | `user_input`, `answer`, `plan?`, `steps_used`, `host` | `turn` |
+| `on_subtask_started` | `user_input`, `plan`, `subtask`, `index`, `host` | `subtasks.{subtask.id}` |
+| `on_subtask_finished` | above + `outcome: SubtaskOutcome`, `host` | `subtasks.{subtask.id}` |
+| `on_turn_finished` | `user_input`, `plan?`, `outcome: TurnOutcome`, `host` | `turn` |
 
-Guidance for external ticket description text:
-
-| timing | available material |
-|--------|-------------------|
-| parent ticket creation (`on_plan_finished`) | `plan.summary`, each subtask's `goal` / `done_when` |
-| child ticket creation (`on_subtask_started`) | `subtask.goal` |
-| child result (`on_subtask_finished`) | that subtask's `answer` |
-| parent completion comment (`on_turn_finished`) | final `answer` |
-
-## 5. HostScratch (per-turn nested bag)
+## 6. HostScratch (per-turn nested bag)
 
 Nested JSON scoped to one turn. **Never used for prompt assembly or LLM input.**
 
@@ -106,14 +166,14 @@ Nested JSON scoped to one turn. **Never used for prompt assembly or LLM input.**
 
 **Reads use the whole bag** (`host.to_value()` / `turn_get_*` / `subtask_get_*`). **Writes are limited to the caller's node** (`HostView::insert`). Under parallelism, sibling subtasks use different branches, so contention is unlikely.
 
-### 5.1 Lifetime
+### 6.1 Lifetime
 
 1. At the start of `run_turn`, the bag is **cleared**
 2. If `seed_host_scratch` is set, **only `turn` is merged** (`subtasks` are not seeded)
 3. Each hook reads and writes via `HostView`
 4. After the turn, the bag is readable via `react.host_scratch()` (**cleared again at the next `run_turn` start**)
 
-### 5.2 How to supply identifiers
+### 6.2 How to supply identifiers
 
 **IDs chosen in the UI (recommended; seed goes into `turn`)**
 
@@ -129,7 +189,7 @@ react.run_turn(&user_input)?;
 
 In `on_turn_started`, parse `user_input` and call `host.insert(...)` (write scope is `turn`).
 
-### 5.3 HostView
+### 6.3 HostView
 
 | operation | API |
 |-----------|-----|
@@ -137,10 +197,10 @@ In `on_turn_started`, parse `user_input` and call `host.insert(...)` (write scop
 | write own node | `insert` / `remove` / `get` / `get_i64` (own node only) |
 | write scope | `WriteScope::Turn` or `WriteScope::Subtask(id)` (assigned by the engine) |
 
-## 6. Registration and example implementation
+## 7. Registration and example implementation
 
 ```rust
-use harness_seed::{HostScratch, HostView, PlanArtifact, Subtask, TurnLifecycle};
+use harness_seed::{HostScratch, HostView, PlanArtifact, Subtask, SubtaskOutcome, TurnLifecycle, TurnOutcome};
 
 struct PmSync;
 
@@ -174,31 +234,29 @@ impl TurnLifecycle for PmSync {
         _user_input: &str,
         _plan: &PlanArtifact,
         subtask: &Subtask,
-        answer: &str,
-        _steps_used: usize,
+        outcome: &SubtaskOutcome,
         host: HostView<'_>,
     ) {
         let child = host.get_i64("child_ticket_id");
-        let _ = (subtask, answer, child);
+        let _ = (subtask, outcome.status, outcome.message, child);
     }
 
     fn on_turn_finished(
         &self,
         _user_input: &str,
-        answer: &str,
         _plan: Option<&PlanArtifact>,
-        _steps_used: usize,
+        outcome: &TurnOutcome,
         host: HostView<'_>,
     ) {
         // Aggregate child nodes and update parent
-        let _ = (answer, host.subtask_get_i64(1, "child_ticket_id"));
+        let _ = (outcome.status, outcome.answer, host.subtask_get_i64(1, "child_ticket_id"));
     }
 }
 ```
 
 Multiple integrations can be chained with `CompositeLifecycle` (same bag, same write scopes).
 
-## 7. Difference from TurnObserver
+## 8. Difference from TurnObserver
 
 | | `TurnLifecycle` | `TurnObserver` |
 |--|-----------------|----------------|
@@ -209,7 +267,7 @@ Multiple integrations can be chained with `CompositeLifecycle` (same bag, same w
 
 Both may be registered.
 
-## 8. Subtask dependencies and parallelism (`two_phase`)
+## 9. Subtask dependencies and parallelism (`two_phase`)
 
 Each subtask in a plan may optionally carry `depends_on: [id, …]`. The engine splits work into dependency waves (`execution_waves`).
 
@@ -232,7 +290,7 @@ Each subtask in a plan may optionally carry `depends_on: [id, …]`. The engine 
 
 In the example above, ids 1 and 2 form wave 0 (may run in parallel); id 3 is wave 1.
 
-## 9. Related
+## 10. Related
 
 - Planning data contract (host fixes INPUT/OUTPUT): [01_planning-layer.md](01_planning-layer.md)
 - Memory layer (recalled content shown to the LLM): [03_memory-layer.md](03_memory-layer.md)

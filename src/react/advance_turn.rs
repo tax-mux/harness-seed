@@ -12,6 +12,7 @@ use crate::plan::{
 };
 use crate::tasks::TaskRegistry;
 
+use crate::lifecycle::SubtaskOutcome;
 use super::{append_trace, ReActError, ReActLoop, SubtaskExecResult, TurnResult};
 
 impl<E: AgentBrain> ReActLoop<E> {
@@ -131,8 +132,7 @@ impl<E: AgentBrain> ReActLoop<E> {
                     user_input,
                     &plan,
                     &subtask,
-                    &note,
-                    replan_steps,
+                    &SubtaskOutcome::completed(&note, replan_steps),
                 );
                 advance_progress.push(subtask.id, subtask.goal.clone(), note.clone());
                 plan_progress.push(subtask.id, note.clone());
@@ -180,8 +180,7 @@ impl<E: AgentBrain> ReActLoop<E> {
                 user_input,
                 &plan,
                 &subtask,
-                &exec.answer,
-                exec.steps_used,
+                &SubtaskOutcome::completed(&exec.answer, exec.steps_used),
             );
             advance_progress.push(subtask.id, subtask.goal.clone(), exec.answer.clone());
             plan_progress.push(subtask.id, exec.answer.clone());
