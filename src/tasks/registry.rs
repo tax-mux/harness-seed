@@ -11,7 +11,7 @@ use crate::tool::workspace_root;
 
 use super::audit::{audit_trace_with_mode, ArgAuditMode, TaskExecutionAudit};
 use super::policy::SubtaskToolPolicy;
-use super::spec::{apply_template, apply_template_value, TaskDefinition, TaskError};
+use super::spec::{apply_template, TaskDefinition, TaskError};
 
 /// 組み込みタスク JSON（`tasks/` ディレクトリと同期すること）。
 const BUILTIN_LIST_DIR: &str = include_str!("../../tasks/list_dir.json");
@@ -448,7 +448,7 @@ impl TaskRegistry {
         subtask: &Subtask,
         trace: &TurnTrace,
     ) -> Option<TaskExecutionAudit> {
-        self.audit_subtask_with_mode(subtask, trace, ArgAuditMode::Off)
+        self.audit_subtask_with_mode(subtask, trace, ArgAuditMode::Soft)
     }
 
     pub fn audit_subtask_with_mode(
@@ -463,11 +463,40 @@ impl TaskRegistry {
         Some(audit_trace_with_mode(def, &params, trace, arg_mode))
     }
 
+    /// 必須ステップの method が利用可能ツールに無いタスクを列挙する。
+    pub fn tasks_missing_tools(
+        &self,
+        available_tools: &HashSet<String>,
+    ) -> Vec<(String, Vec<String>)> {
+        let mut out = Vec::new();
+        let mut ids: Vec<_> = self.tasks.keys().cloned().collect();
+        ids.sort();
+        for id in ids {
+            let def = &self.tasks[&id];
+            let missing = missing_required_tools(def, available_tools);
+            if !missing.is_empty() {
+                out.push((id, missing));
+            }
+        }
+        out
+    }
+
     pub fn resolve_plan(
+        &self,
+        plan: &mut PlanArtifact,
+        user_input: &str,
+        contract: Option<&crate::plan::PlanDataContract>,
+    ) {
+        self.resolve_plan_with_tools(plan, user_input, contract, None);
+    }
+
+    /// `available_tools` があるとき、必須 method が欠ける登録タスクは自由記述へ落とす。
+    pub fn resolve_plan_with_tools(
         &self,
         plan: &mut PlanArtifact,
         _user_input: &str,
         contract: Option<&crate::plan::PlanDataContract>,
+        available_tools: Option<&HashSet<String>>,
     ) {
         let ref_uid = contract.and_then(|c| {
             if c.blocks_reference_fetch {
@@ -488,19 +517,18 @@ impl TaskRegistry {
             };
             let Some(def) = self.get(&task_id) else {
                 // 未登録 task id（実行層ツール名の誤認など）→ 自由記述サブタスクへ
-                let hint = format!(
-                    "Execute with ReAct tools (not a registered task id): {task_id}"
-                );
-                st.goal = if st.goal.is_empty() {
-                    hint
-                } else {
-                    format!("{hint}. {}", st.goal)
-                };
-                st.task = None;
-                st.params = Value::Object(Default::default());
+                demote_to_freeform_unknown_task(st, &task_id);
                 inject_reference_id_freeform(st, ref_uid);
                 continue;
             };
+            if let Some(available) = available_tools {
+                let missing = missing_required_tools(def, available);
+                if !missing.is_empty() {
+                    demote_to_freeform_missing_tools(st, &task_id, &missing);
+                    inject_reference_id_freeform(st, ref_uid);
+                    continue;
+                }
+            }
             if st.goal.is_empty() {
                 st.goal = def.summary.clone();
             }
@@ -613,13 +641,42 @@ fn inject_reference_id_params(subtask: &mut Subtask, ref_id: Option<i64>) {
 }
 
 fn task_available_with_tools(def: &TaskDefinition, available: &HashSet<String>) -> bool {
-    let steps = def.ordered_required_steps();
-    if steps.is_empty() {
-        return true;
+    missing_required_tools(def, available).is_empty()
+}
+
+fn missing_required_tools(def: &TaskDefinition, available: &HashSet<String>) -> Vec<String> {
+    let mut missing = Vec::new();
+    for step in def.ordered_required_steps() {
+        if !available.contains(step.method.as_str()) && !missing.contains(&step.method) {
+            missing.push(step.method.clone());
+        }
     }
-    steps
-        .iter()
-        .all(|step| available.contains(step.method.as_str()))
+    missing
+}
+
+fn demote_to_freeform_unknown_task(subtask: &mut Subtask, task_id: &str) {
+    let hint = format!("Execute with ReAct tools (not a registered task id): {task_id}");
+    subtask.goal = if subtask.goal.is_empty() {
+        hint
+    } else {
+        format!("{hint}. {}", subtask.goal)
+    };
+    subtask.task = None;
+    subtask.params = Value::Object(Default::default());
+}
+
+fn demote_to_freeform_missing_tools(subtask: &mut Subtask, task_id: &str, missing: &[String]) {
+    let hint = format!(
+        "Task '{task_id}' requires unavailable tools: {}. Execute with available ReAct tools.",
+        missing.join(", ")
+    );
+    subtask.goal = if subtask.goal.is_empty() {
+        hint
+    } else {
+        format!("{hint} {}", subtask.goal)
+    };
+    subtask.task = None;
+    subtask.params = Value::Object(Default::default());
 }
 
 fn inject_reference_id_freeform(subtask: &mut Subtask, ref_id: Option<i64>) {
@@ -681,6 +738,7 @@ fn strip_leading_system_block(text: &str) -> &str {
 mod tests {
     use super::*;
     use crate::plan::{PlanArtifact, PlanProgress, Subtask};
+    use std::collections::HashSet;
 
     #[test]
     fn catalog_hides_web_research_when_disabled() {
@@ -821,6 +879,44 @@ mod tests {
 
         let policy = reg.tool_policy_for_subtask(st).expect("freeform hinted policy");
         assert_eq!(policy.allow, vec!["not_a_registered_task".to_string()]);
+    }
+
+    #[test]
+    fn resolve_plan_demotes_task_with_unavailable_tools() {
+        let reg = TaskRegistry::builtin();
+        let available: HashSet<_> = ["list_dir".into()].into_iter().collect();
+        let mut plan = PlanArtifact {
+            summary: "research".into(),
+            skip_execution: false,
+            subtasks: vec![Subtask {
+                id: 1,
+                task: Some("web_research".into()),
+                params: serde_json::json!({}),
+                goal: String::new(),
+                done_when: String::new(),
+                depends_on: vec![],
+            }],
+            knowledge_sufficient: None,
+            user_reply: None,
+        };
+        reg.resolve_plan_with_tools(&mut plan, "user", None, Some(&available));
+        let st = &plan.subtasks[0];
+        assert!(st.task.is_none(), "expected demotion, got {:?}", st.task);
+        assert!(st.goal.contains("unavailable tools"));
+        assert!(st.goal.contains("web_search"));
+    }
+
+    #[test]
+    fn tasks_missing_tools_reports_gaps() {
+        let reg = TaskRegistry::builtin();
+        let available: HashSet<_> = ["list_dir".into()].into_iter().collect();
+        let gaps = reg.tasks_missing_tools(&available);
+        assert!(
+            gaps.iter().any(|(id, missing)| {
+                id == "web_research" && missing.iter().any(|m| m == "web_search")
+            }),
+            "gaps={gaps:?}"
+        );
     }
 
     #[test]

@@ -3,7 +3,7 @@
 use crate::context_metrics::estimated_tokens_from_chars;
 use crate::llm::ChatMessage;
 
-/// プロンプト内の論理ブロック（[context-memory-mapping.md](../doc/context-memory-mapping.md) 対応）。
+/// プロンプト内の論理ブロック（[context-memory-mapping.md](../doc/ja/architecture/09_コンテキストマッピング.md) 対応）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ContextSectionKind {
     SystemCore,

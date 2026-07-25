@@ -47,6 +47,7 @@
 { "id": 1, "task": "list_dir", "params": { "path": "src" } }
 ```
 
-実行後、`TaskRegistry::audit_subtask` が trace 上の **ツール名の順序** を照合する。
+実行後、`TaskRegistry::audit_subtask` が trace 上の **ツール名の順序**と（設定に応じて）**引数**を照合する。  
+必須 method が実行ツールに無いタスクは、計画解決時に自由記述へ落とされる。
 
 実装: `src/tasks/spec.rs`（定義）, `src/tasks/audit.rs`（照合）, `src/tasks/registry.rs`（読み込み・mission 生成）, `src/plan/candidates.rs`（候補選定）。

@@ -1,4 +1,4 @@
-//! 計画フェーズ（Phase 1）の `--plan-zone` 表示 — 図 [`doc/full_agent_architecture_v2.svg`] の用語で枠囲む。
+//! 計画フェーズ（Phase 1）の `--plan-zone` 表示 — 図 [`doc/ja/architecture/full_agent_architecture_v2.svg`] の用語で枠囲む。
 
 use crate::action::TurnTrace;
 use crate::harness::HarnessState;

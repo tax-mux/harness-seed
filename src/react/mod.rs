@@ -112,7 +112,7 @@ impl Default for ReActConfig {
             plan_candidate_selection: true,
             plan_catalog_max_entries: 40,
             plan_catalog_max_chars: 8_000,
-            arg_audit_mode: crate::tasks::ArgAuditMode::Off,
+            arg_audit_mode: crate::tasks::ArgAuditMode::Soft,
             show_prompt: false,
             show_plan: true,
             show_task_execution: true,
@@ -363,6 +363,14 @@ impl<E: AgentBrain> ReActLoop<E> {
             .as_ref()
             .map(|c| c.excluded_task_ids.iter().map(String::as_str).collect())
             .unwrap_or_default();
+        if self.config.verbose {
+            for (task_id, missing) in self.task_registry.tasks_missing_tools(&available) {
+                eprintln!(
+                    "[tasks] task '{task_id}' requires unavailable tools: {} (excluded from planner catalog when filtering)",
+                    missing.join(", ")
+                );
+            }
+        }
         self.blocks.plan_task_catalog = Some(
             self.task_registry.catalog_for_planner_filtered(
                 &available,
@@ -456,10 +464,13 @@ impl<E: AgentBrain> ReActLoop<E> {
     }
 
     fn resolve_plan_for_turn(&self, plan: &mut PlanArtifact, user_input: &str) {
-        self.task_registry.resolve_plan(
+        use std::collections::HashSet;
+        let available: HashSet<String> = self.registered_tool_names().into_iter().collect();
+        self.task_registry.resolve_plan_with_tools(
             plan,
             user_input,
             self.blocks.plan_data_contract.as_ref(),
+            Some(&available),
         );
     }
 

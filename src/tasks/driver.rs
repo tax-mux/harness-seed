@@ -5,7 +5,7 @@ use crate::plan::Subtask;
 use crate::tool::{execute_action, ToolRuntime};
 use crate::tool_display::eprintln_tool_execution;
 
-use super::audit::{audit_trace, TaskExecutionAudit};
+use super::audit::{audit_trace_with_mode, ArgAuditMode, TaskExecutionAudit};
 use super::registry::TaskRegistry;
 use super::spec::{apply_template_value, TaskDefinition};
 
@@ -59,6 +59,7 @@ impl TaskRegistry {
         tools: &mut ToolRuntime,
         verbose: bool,
         show_tool_output: bool,
+        arg_mode: ArgAuditMode,
     ) -> Result<StepDriverResult, StepDriverError> {
         let task_id = subtask
             .task
@@ -74,7 +75,7 @@ impl TaskRegistry {
             return Err(StepDriverError::NoContract { id: task_id });
         }
         let params = super::registry::merge_params(&def.default_params, &subtask.params);
-        run_task_steps(def, &params, tools, verbose, show_tool_output)
+        run_task_steps(def, &params, tools, verbose, show_tool_output, arg_mode)
     }
 }
 
@@ -84,6 +85,7 @@ fn run_task_steps(
     tools: &mut ToolRuntime,
     verbose: bool,
     show_tool_output: bool,
+    arg_mode: ArgAuditMode,
 ) -> Result<StepDriverResult, StepDriverError> {
     let mut trace = TurnTrace::default();
     if verbose {
@@ -118,7 +120,7 @@ fn run_task_steps(
         trace.push_observation(observation);
     }
 
-    let audit = audit_trace(def, params, &trace);
+    let audit = audit_trace_with_mode(def, params, &trace, arg_mode);
     let answer = format_driver_answer(def, &trace, &audit);
     let steps_used = trace.actions.len();
     Ok(StepDriverResult {
@@ -167,6 +169,7 @@ fn summarize_observation(obs: &Observation) -> String {
 mod tests {
     use super::*;
     use crate::plan::Subtask;
+    use crate::tasks::ArgAuditMode;
     use serde_json::json;
 
     #[test]
@@ -198,7 +201,9 @@ mod tests {
                     depends_on: vec![],
 };
         let mut tools = ToolRuntime::new();
-        let r = reg.run_subtask_driver(&sub, &mut tools, false, false).unwrap();
+        let r = reg
+            .run_subtask_driver(&sub, &mut tools, false, false, ArgAuditMode::Soft)
+            .unwrap();
         assert_eq!(r.steps_used, 1);
         assert_eq!(r.trace.actions[0].tool, "list_dir");
         assert!(r.audit.complete);
@@ -222,7 +227,9 @@ mod tests {
                     depends_on: vec![],
 };
         let mut tools = ToolRuntime::new();
-        let r = reg.run_subtask_driver(&sub, &mut tools, false, false).unwrap();
+        let r = reg
+            .run_subtask_driver(&sub, &mut tools, false, false, ArgAuditMode::Hard)
+            .unwrap();
         assert_eq!(r.steps_used, 2);
         assert_eq!(
             r.trace.actions.iter().map(|a| a.tool.as_str()).collect::<Vec<_>>(),

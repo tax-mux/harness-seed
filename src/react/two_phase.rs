@@ -234,6 +234,7 @@ Prefer {{\"step\":\"answer\",\"content\":\"...\"}} with no tools if evidence is 
             let registry = self.task_registry.clone();
             let verbose = self.config.verbose;
             let show_tool_output = self.config.show_tool_output;
+            let arg_mode = self.config.arg_audit_mode;
             let env = self.tools.environment().clone();
             let brave = self.brave_search.clone();
             let packs = self.tool_packs.clone();
@@ -260,6 +261,7 @@ Prefer {{\"step\":\"answer\",\"content\":\"...\"}} with no tools if evidence is 
                                             &mut tools,
                                             verbose,
                                             show_tool_output,
+                                            arg_mode,
                                         )
                                         .map(|drv| {
                                             (
@@ -531,6 +533,7 @@ Prefer {{\"step\":\"answer\",\"content\":\"...\"}} with no tools if evidence is 
                     &mut self.tools,
                     self.config.verbose,
                     self.config.show_tool_output,
+                    self.config.arg_audit_mode,
                 )
             {
                 Ok(drv) => {

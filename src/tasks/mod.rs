@@ -7,7 +7,8 @@ mod registry;
 mod spec;
 
 pub use audit::{
-    audit_trace, audit_trace_with_mode, expected_args, ArgAuditMode, StepAudit, TaskExecutionAudit,
+    args_satisfy_contract, audit_trace, audit_trace_with_mode, expected_args, ArgAuditMode,
+    StepAudit, TaskExecutionAudit,
 };
 pub use driver::{StepDriverError, StepDriverResult};
 pub use policy::{SubtaskToolPolicy, ToolPolicySpec};

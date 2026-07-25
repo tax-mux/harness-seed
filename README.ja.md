@@ -21,10 +21,10 @@ harness-seed/
 │   ├── config.json       # 実行時の正本（編集・上書きする）
 │   ├── samples/          # コネクタ別ひな形（config.*.json）
 │   └── README.md
-├── doc/             # ドキュメント（現行仕様 + ideas/）
-│   ├── architecture/    # 二層モデル（計画層・実行層）— 日本語
-│   ├── architecture-en/ # 同上 — 英語
-│   └── ideas/       # 未実装の設計メモ
+├── doc/             # ドキュメント
+│   ├── README.md    # 言語索引
+│   ├── ja/          # 日本語（architecture / tools / ideas / 方針）
+│   └── en/          # 英語（architecture / 方針。tools・ideas は索引）
 ├── src/
 │   ├── main.rs      # CLI エントリポイント
 │   └── lib.rs       # ライブラリ本体・公開 API
@@ -34,20 +34,17 @@ harness-seed/
 
 ### ドキュメント
 
+索引: [doc/README.md](doc/README.md)
+
 | ファイル | 内容 |
 |----------|------|
-| [doc/development-principles.md](doc/development-principles.md) | **開発方針** — 汎用解を優先、個別事例だけのロジックは価値が低い |
-| [doc/memory.md](doc/memory.md) | **記憶層** — Memory RAG、MemoryBridge、diary / search（local + mempalace） |
-| [doc/lifecycle.md](doc/lifecycle.md) | **ライフサイクル hook** — `TurnLifecycle`、`HostScratch`（ホスト副作用。LLM コンテキストには出さない） |
-| [doc/architecture/README.md](doc/architecture/README.md) | **アーキテクチャ索引（日本語）** — 計画層・実行層・ツール選択 |
-| [doc/architecture-en/README.md](doc/architecture-en/README.md) | **Architecture index (English)** |
-| [doc/agent-minimum-action-unit.md](doc/agent-minimum-action-unit.md) | AIエージェントの最少行動単位（図解） |
-| [doc/react-implementation.md](doc/react-implementation.md) | 現行 ReAct 実装の構成・フロー・制限 |
-| [doc/advance-loop.md](doc/advance-loop.md) | 外側推進ループ（ロングコンテキスト分割） |
-| [doc/wire-protocol.md](doc/wire-protocol.md) | JSON Lines ワイヤプロトコル（`--json`） |
-| [doc/builtin_tools/README.md](doc/builtin_tools/README.md) | 組み込みツール仕様（1 ツール 1 ファイル） |
-| [doc/context-memory-mapping.md](doc/context-memory-mapping.md) | コンテキストの用途別マッピング（図解） |
-| [doc/ideas/README.md](doc/ideas/README.md) | 設計メモ一覧（実装済みは正本へ誘導、未実装は ideas 内） |
+| [doc/README.md](doc/README.md) | 言語索引（ja / en） |
+| [doc/ja/README.md](doc/ja/README.md) | 日本語ドキュメントホーム |
+| [doc/en/README.md](doc/en/README.md) | English docs home |
+| [doc/ja/development-principles.md](doc/ja/development-principles.md) | 開発方針（JA） |
+| [doc/en/development-principles.md](doc/en/development-principles.md) | Development principles (EN) |
+| [doc/ja/architecture/README.md](doc/ja/architecture/README.md) | アーキテクチャ（JA） |
+| [doc/en/architecture/README.md](doc/en/architecture/README.md) | Architecture (EN) |
 
 ## 使い方
 
@@ -71,7 +68,7 @@ cargo build --release
 cargo run
 # 例: help / echo hello / time / 任意の文（Thought→echo→Answer）
 # 詳細ログ: cargo run -- -v
-# JSON Lines REPL: cargo run -- --json  （doc/wire-protocol.md）
+# JSON Lines REPL: cargo run -- --json  （doc/ja/architecture/11_ワイヤプロトコル.md）
 
 # 初回セットアップ（config/config.json は gitignore）
 cp config/config.json.sample config/config.json
