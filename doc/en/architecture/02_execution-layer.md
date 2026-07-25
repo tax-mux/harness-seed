@@ -99,7 +99,7 @@ id / task / params / goal / done_when
 ## Prior subtask results
 (summaries from PlanProgress)
 
-Complete ONLY this subtask. Do not replan or work ahead to other subtasks.
+Complete ONLY this subtask. Do not invent control-plane actions (e.g. a replan tool) or work ahead to other subtasks.
 ```
 
 Prior subtask results accumulate in `PlanProgress` and carry forward (max 500 chars per summary).
@@ -240,7 +240,7 @@ The answer is the last response produced for the turn. The remaining fields pres
 
 | Key | Default | Effect on execution layer |
 |-----|---------|---------------------------|
-| `react.max_steps` | `16` | ReAct limit per subtask |
+| `react.max_steps` | `16` | ReAct limit per subtask. On reach, force one answer (trace fallback if needed) instead of hard-failing |
 | `react.use_step_driver` | `true` | Run contract tasks without LLM (`react_only: false`) |
 | `react.arg_audit_mode` | `soft` | Arg audit: `off` / `soft` / `hard` |
 | `react.show_task_execution` | `true` | Print subtask start/complete to stdout |

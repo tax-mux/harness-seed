@@ -1,8 +1,35 @@
 //! 外側の推進ループ — 計画フェーズを順次実行し、要約を `recalled` に載せてロングコンテキストを分割する。
 
+use crate::action::TurnTrace;
 use crate::context::PromptBlocks;
-use crate::plan::{PlanArtifact, Subtask};
+use crate::plan::{PlanArtifact, Subtask, EVIDENCE_ORIENTED_DONE_WHEN};
 use serde_json::json;
+
+/// 判定・まとめ系へ進む前に欲しがる成功ツール observation の下限。
+pub const MIN_OK_TOOL_OBSERVATIONS_BEFORE_JUDGMENT: usize = 4;
+
+/// 成功したツール observation 数（薄い証拠ゲート用）。
+pub fn count_ok_tool_observations(trace: &TurnTrace) -> usize {
+    trace.observations.iter().filter(|o| o.ok).count()
+}
+
+pub fn prior_evidence_is_thin(ok_tool_observations: usize) -> bool {
+    ok_tool_observations < MIN_OK_TOOL_OBSERVATIONS_BEFORE_JUDGMENT
+}
+
+/// 先行証拠が薄いときに差し込む自由記述サブタスク。
+pub fn evidence_deepening_subtask(id: u32) -> Subtask {
+    Subtask {
+        id,
+        task: None,
+        params: json!({}),
+        goal: "Prior phase evidence is thin. Gather more concrete evidence with available tools \
+(list, read, grep, search, etc. as needed). Prefer specific paths and findings over high-level summaries."
+            .into(),
+        done_when: EVIDENCE_ORIENTED_DONE_WHEN.into(),
+        depends_on: vec![],
+    }
+}
 
 /// 推進ループの設定（`config.json` の `react.advance`）。
 #[derive(Debug, Clone)]
@@ -84,6 +111,17 @@ fn truncate_note(text: &str, max_chars: usize) -> String {
     format!("{snippet}…")
 }
 
+/// 先行フェーズ結果があるときの根拠拘束（判定・列挙・まとめ系で汎用）。
+pub fn evidence_grounding_rules() -> &'static str {
+    "## Evidence grounding (required)\n\
+- Tie every substantive claim to evidence in Recalled / prior phase results \
+(cite paths, observations, quotes, or prior answers from this turn).\n\
+- If a point is not supported by that evidence, label it as an unverified candidate \
+or gather more evidence with tools before asserting it.\n\
+- Do not answer with generic advice that could apply to any unrelated project \
+without citing this turn's evidence.\n"
+}
+
 /// 完了フェーズの要約を `recalled` 用テキストにする。
 pub fn format_recalled_progress(
     progress: &AdvanceProgress,
@@ -114,12 +152,13 @@ pub fn format_recalled_progress(
         ));
     }
     out.push_str(
-        "Use the above as ground truth. Do not redo completed phases unless the current goal requires it.\n",
+        "Use the above as ground truth. Do not redo completed phases unless the current goal requires it.\n\n",
     );
+    out.push_str(evidence_grounding_rules());
     out
 }
 
-fn format_phase_directive(plan: &PlanArtifact, current: &Subtask) -> String {
+fn format_phase_directive(plan: &PlanArtifact, current: &Subtask, has_prior_phases: bool) -> String {
     let mut out = String::from("## Current phase (execute ONLY this)\n\n");
     out.push_str(&format!(
         "Phase {} / {}\nGoal: {}\nDone when: {}\n\n",
@@ -134,6 +173,10 @@ fn format_phase_directive(plan: &PlanArtifact, current: &Subtask) -> String {
     out.push_str(
         "Complete only this phase. Prior phase results are in Recalled context above.\n",
     );
+    if has_prior_phases {
+        out.push('\n');
+        out.push_str(evidence_grounding_rules());
+    }
     out
 }
 
@@ -150,14 +193,15 @@ pub fn prepare_phase_recalled(
     for chunk in base_recalled {
         blocks.push_recalled(chunk.as_str());
     }
-    if !progress.steps.is_empty() {
+    let has_prior = !progress.steps.is_empty();
+    if has_prior {
         blocks.push_recalled(format_recalled_progress(
             progress,
             plan,
             config.max_note_chars,
         ));
     }
-    blocks.push_recalled(format_phase_directive(plan, current));
+    blocks.push_recalled(format_phase_directive(plan, current, has_prior));
 }
 
 /// 推進ループ終了後にホストの `recalled` を復元する。
@@ -215,6 +259,7 @@ mod tests {
         let text = format_recalled_progress(&progress, &plan, 500);
         assert!(text.contains("answer one"));
         assert!(text.contains("Phase 1 — done"));
+        assert!(text.contains("Evidence grounding"));
     }
 
     #[test]
@@ -236,5 +281,74 @@ mod tests {
         // base was cleared and re-pushed; should have host + directive
         assert!(blocks.recalled.iter().any(|c| c.contains("host note")));
         assert!(blocks.recalled.iter().any(|c| c.contains("Current phase")));
+        assert!(!blocks
+            .recalled
+            .iter()
+            .any(|c| c.contains("Evidence grounding")));
+    }
+
+    #[test]
+    fn prepare_later_phase_includes_evidence_grounding() {
+        let plan = PlanArtifact {
+            summary: "two".into(),
+            skip_execution: false,
+            subtasks: vec![
+                Subtask {
+                    id: 1,
+                    task: None,
+                    params: json!({}),
+                    goal: "gather".into(),
+                    done_when: "done".into(),
+                    depends_on: vec![],
+                },
+                Subtask {
+                    id: 2,
+                    task: None,
+                    params: json!({}),
+                    goal: "judge".into(),
+                    done_when: "done".into(),
+                    depends_on: vec![],
+                },
+            ],
+            knowledge_sufficient: None,
+            user_reply: None,
+        };
+        let mut progress = AdvanceProgress::new("mission", "two");
+        progress.push(1, "gather", "saw src/lib.rs and a replan bug");
+        let mut blocks = PromptBlocks::new();
+        let base = Vec::new();
+        prepare_phase_recalled(
+            &mut blocks,
+            &base,
+            &progress,
+            &plan,
+            &plan.subtasks[1],
+            &AdvanceConfig::default(),
+        );
+        let joined = blocks.recalled.join("\n");
+        assert!(joined.contains("Evidence grounding"));
+        assert!(joined.contains("saw src/lib.rs"));
+        assert!(joined.contains("unverified candidate"));
+    }
+
+    #[test]
+    fn prior_evidence_thinness_threshold() {
+        assert!(prior_evidence_is_thin(0));
+        assert!(prior_evidence_is_thin(3));
+        assert!(!prior_evidence_is_thin(MIN_OK_TOOL_OBSERVATIONS_BEFORE_JUDGMENT));
+        assert!(!prior_evidence_is_thin(10));
+        let boost = evidence_deepening_subtask(99);
+        assert!(boost.goal.contains("thin"));
+        assert!(boost.done_when.contains("concrete evidence"));
+    }
+
+    #[test]
+    fn count_ok_tool_observations_ignores_failures() {
+        use crate::action::{Observation, TurnTrace};
+        let mut trace = TurnTrace::default();
+        trace.push_observation(Observation::success(1, "ok"));
+        trace.push_observation(Observation::failure(2, "err"));
+        trace.push_observation(Observation::success(3, "ok2"));
+        assert_eq!(count_ok_tool_observations(&trace), 2);
     }
 }

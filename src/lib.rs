@@ -37,8 +37,10 @@ pub use agent_assets::{
     ScriptToolDefinition, DEFAULT_FILENAME,
 };
 pub use advance::{
-    format_recalled_progress, prepare_phase_recalled, restore_base_recalled, AdvanceConfig,
-    AdvancePhaseNote, AdvancePhaseSummary, AdvanceProgress,
+    count_ok_tool_observations, evidence_deepening_subtask, evidence_grounding_rules,
+    format_recalled_progress, prepare_phase_recalled, prior_evidence_is_thin,
+    restore_base_recalled, AdvanceConfig, AdvancePhaseNote, AdvancePhaseSummary, AdvanceProgress,
+    MIN_OK_TOOL_OBSERVATIONS_BEFORE_JUDGMENT,
 };
 pub use brain::{AgentBrain, BrainMode, BrainPair, SimpleRuleBrain};
 pub use brave_search::{BraveSearchConfig, BraveSearchError, WebSearchHit};
@@ -92,8 +94,9 @@ pub use plan::{
     PLAN_CATALOG_SUMMARY_MAX_ENTRIES, PLAN_REACT_SYSTEM_CORE, PLAN_SYSTEM_CORE,
     build_plan_layer_messages, format_plan_fixed_zone_system, format_plan_layer_prompt,
     format_plan_zone_after_preview, format_plan_zone_prompt_preview,
-    format_planner_fixed_zone_html, execution_waves, is_replan_subtask, PlanQueue, PlanQueueError,
-    REPLAN_TASK_ID, ScheduleError,
+    format_planner_fixed_zone_html, execution_waves, is_replan_subtask, is_reserved_control_task,
+    is_weak_done_when, strengthen_weak_done_when, EVIDENCE_ORIENTED_DONE_WHEN, PlanQueue,
+    PlanQueueError, REPLAN_TASK_ID, ScheduleError,
 };
 pub use protocol::{
     protocol_error_response, run_json_repl, ActionDto, ContextSummaryDto, ObservationDto,

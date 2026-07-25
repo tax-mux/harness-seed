@@ -6,7 +6,10 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use crate::action::TurnTrace;
-use crate::plan::{PlanArtifact, PlanProgress, Subtask};
+use crate::plan::{
+    control_plane_catalog_footer, is_reserved_control_task, strengthen_weak_done_when,
+    PlanArtifact, PlanProgress, Subtask,
+};
 use crate::tool::workspace_root;
 
 use super::audit::{audit_trace_with_mode, ArgAuditMode, TaskExecutionAudit};
@@ -152,7 +155,9 @@ impl TaskRegistry {
         if lines.len() <= 1 {
             lines.push("- generic: (free execution)".into());
         }
-        lines.join("\n")
+        let mut out = lines.join("\n");
+        out.push_str(control_plane_catalog_footer());
+        out
     }
 
     /// 計画候補選定用: id + planner_summary のみ（手順の詳細は載せない）。
@@ -221,7 +226,9 @@ impl TaskRegistry {
         if lines.len() <= 1 {
             lines.push("- generic: Freeform ReAct when no specialized task fits.".into());
         }
-        lines.join("\n")
+        let mut out = lines.join("\n");
+        out.push_str(control_plane_catalog_footer());
+        out
     }
 
     /// 選ばれた候補 id だけの詳細カタログ（手順・required tools）。
@@ -253,7 +260,8 @@ impl TaskRegistry {
             require_all_tools,
         );
         catalog.push_str(
-            "\n\nOnly use task ids listed above (selected for this turn). Prefer them over inventing freeform steps.",
+            "\n\nOnly use registered task ids listed above (selected for this turn), \
+plus control-plane ids from the footer when needed. Prefer them over inventing freeform steps.",
         );
         catalog
     }
@@ -315,6 +323,17 @@ impl TaskRegistry {
     pub fn format_subtask_execution_for_display(&self, subtask: &Subtask) -> String {
         let mut out = String::new();
         if let Some(task_id) = &subtask.task {
+            if is_reserved_control_task(task_id) {
+                out.push_str(&format!(
+                    "task: {task_id} — control-plane (harness restarts planning)\n"
+                ));
+                out.push_str(&format!("goal: {}\n", subtask.goal));
+                if !subtask.done_when.is_empty() {
+                    out.push_str(&format!("done_when: {}\n", subtask.done_when));
+                }
+                out.push_str("run: plan-layer replan (not an exec tool)\n");
+                return out;
+            }
             let Some(def) = self.get(task_id) else {
                 return format!("task: {task_id} (unknown — not in registry)\n");
             };
@@ -415,8 +434,12 @@ impl TaskRegistry {
 
         mission.push_str(
             "\nComplete ONLY this subtask. Execute required methods in order, then answer. \
-             Do not replan or work ahead to other subtasks.",
+             Do not invent control-plane actions (e.g. a replan tool) or work ahead to other subtasks.",
         );
+        if !progress.results.is_empty() {
+            mission.push('\n');
+            mission.push_str(crate::advance::evidence_grounding_rules());
+        }
 
         Ok(mission)
     }
@@ -428,14 +451,35 @@ impl TaskRegistry {
         Some(merge_params(&def.default_params, &subtask.params))
     }
 
-    /// サブタスク用の解決済みツールポリシー（`task` id があるときのみ）。
+    /// サブタスク用の解決済みツールポリシー。
+    ///
+    /// 自由記述 goal から取り出したヒントは、実在するツール名のときだけ allow に使う。
+    /// 制御プレーン id や未知トークンを単独 allow にするとカタログが空になるため拒否する。
     pub fn tool_policy_for_subtask(&self, subtask: &Subtask) -> Option<SubtaskToolPolicy> {
+        self.tool_policy_for_subtask_with_tools(subtask, None)
+    }
+
+    pub fn tool_policy_for_subtask_with_tools(
+        &self,
+        subtask: &Subtask,
+        available_tools: Option<&HashSet<String>>,
+    ) -> Option<SubtaskToolPolicy> {
         if let Some(task_id) = subtask.task.as_ref() {
+            if is_reserved_control_task(task_id) {
+                return None;
+            }
             let def = self.get(task_id)?;
             return Some(def.resolved_tool_policy());
         }
 
         let hinted_tool = hinted_tool_from_freeform_goal(&subtask.goal)?;
+        let Some(available) = available_tools else {
+            // ツール集合が無いときは phantom allow を作らない（全カタログ）。
+            return None;
+        };
+        if !available.contains(&hinted_tool) {
+            return None;
+        }
         Some(SubtaskToolPolicy {
             allow: vec![hinted_tool],
             deny: Vec::new(),
@@ -513,12 +557,20 @@ impl TaskRegistry {
         for st in &mut plan.subtasks {
             let Some(task_id) = st.task.clone() else {
                 inject_reference_id_freeform(st, ref_uid);
+                strengthen_weak_done_when(st);
                 continue;
             };
             let Some(def) = self.get(&task_id) else {
+                if is_reserved_control_task(&task_id) {
+                    if st.goal.trim().is_empty() {
+                        st.goal = "Revise remaining work based on completed phases.".into();
+                    }
+                    continue;
+                }
                 // 未登録 task id（実行層ツール名の誤認など）→ 自由記述サブタスクへ
                 demote_to_freeform_unknown_task(st, &task_id);
                 inject_reference_id_freeform(st, ref_uid);
+                strengthen_weak_done_when(st);
                 continue;
             };
             if let Some(available) = available_tools {
@@ -526,6 +578,7 @@ impl TaskRegistry {
                 if !missing.is_empty() {
                     demote_to_freeform_missing_tools(st, &task_id, &missing);
                     inject_reference_id_freeform(st, ref_uid);
+                    strengthen_weak_done_when(st);
                     continue;
                 }
             }
@@ -539,6 +592,7 @@ impl TaskRegistry {
             if task_needs_reference_id(def) {
                 inject_reference_id_params(st, ref_uid);
             }
+            strengthen_weak_done_when(st);
         }
     }
 
@@ -826,6 +880,43 @@ mod tests {
     }
 
     #[test]
+    fn render_mission_adds_evidence_grounding_when_prior_results() {
+        let reg = TaskRegistry::builtin();
+        let plan = PlanArtifact {
+            summary: "work".into(),
+            skip_execution: false,
+            subtasks: vec![
+                Subtask {
+                    id: 1,
+                    task: Some("list_dir".into()),
+                    params: serde_json::json!({}),
+                    goal: "list".into(),
+                    done_when: "listed".into(),
+                    depends_on: vec![],
+                },
+                Subtask {
+                    id: 2,
+                    task: None,
+                    params: serde_json::json!({}),
+                    goal: "judge from evidence".into(),
+                    done_when: "judged".into(),
+                    depends_on: vec![],
+                },
+            ],
+            knowledge_sufficient: None,
+            user_reply: None,
+        };
+        let mut progress = PlanProgress::default();
+        progress.push(1, "listed src/ and Cargo.toml");
+        let m = reg
+            .render_mission("user goal", &plan, &plan.subtasks[1], &progress)
+            .unwrap();
+        assert!(m.contains("Evidence grounding"));
+        assert!(m.contains("listed src/"));
+        assert!(m.contains("unverified candidate"));
+    }
+
+    #[test]
     fn format_subtask_execution_shows_steps() {
         let reg = TaskRegistry::builtin();
         let sub = Subtask {
@@ -855,6 +946,31 @@ mod tests {
     }
 
     #[test]
+    fn resolve_plan_strengthens_weak_freeform_done_when() {
+        let reg = TaskRegistry::builtin();
+        let mut plan = PlanArtifact {
+            summary: "work".into(),
+            skip_execution: false,
+            subtasks: vec![Subtask {
+                id: 1,
+                task: None,
+                params: serde_json::json!({}),
+                goal: "explore then judge".into(),
+                done_when: "step completed".into(),
+                depends_on: vec![],
+            }],
+            knowledge_sufficient: None,
+            user_reply: None,
+        };
+        reg.resolve_plan(&mut plan, "user", None);
+        assert!(
+            plan.subtasks[0].done_when.contains("concrete evidence"),
+            "got: {}",
+            plan.subtasks[0].done_when
+        );
+    }
+
+    #[test]
     fn resolve_plan_strips_unknown_task_id_as_freeform() {
         let reg = TaskRegistry::builtin();
         let mut plan = PlanArtifact {
@@ -877,8 +993,73 @@ mod tests {
         assert!(st.goal.contains("not_a_registered_task"));
         assert!(st.goal.contains("do it"));
 
-        let policy = reg.tool_policy_for_subtask(st).expect("freeform hinted policy");
-        assert_eq!(policy.allow, vec!["not_a_registered_task".to_string()]);
+        // Unknown demoted id must not become a phantom allow-list tool.
+        assert!(reg.tool_policy_for_subtask(st).is_none());
+        let available: HashSet<_> = ["list_dir".into()].into_iter().collect();
+        assert!(reg
+            .tool_policy_for_subtask_with_tools(st, Some(&available))
+            .is_none());
+    }
+
+    #[test]
+    fn resolve_plan_keeps_reserved_replan_task() {
+        let reg = TaskRegistry::builtin();
+        let mut plan = PlanArtifact {
+            summary: "work".into(),
+            skip_execution: false,
+            subtasks: vec![
+                Subtask {
+                    id: 1,
+                    task: Some("web_research".into()),
+                    params: serde_json::json!({}),
+                    goal: "gather".into(),
+                    done_when: "have hits".into(),
+                    depends_on: vec![],
+                },
+                Subtask {
+                    id: 2,
+                    task: Some("replan".into()),
+                    params: serde_json::json!({}),
+                    goal: "decide next from evidence".into(),
+                    done_when: "revised plan".into(),
+                    depends_on: vec![],
+                },
+            ],
+            knowledge_sufficient: None,
+            user_reply: None,
+        };
+        reg.resolve_plan(&mut plan, "user input", None);
+        let st = &plan.subtasks[1];
+        assert_eq!(st.task.as_deref(), Some("replan"));
+        assert!(crate::plan::is_replan_subtask(st));
+        assert!(!st.goal.contains("not a registered task"));
+        assert!(reg.tool_policy_for_subtask(st).is_none());
+    }
+
+    #[test]
+    fn freeform_hint_allows_only_real_tools() {
+        let reg = TaskRegistry::builtin();
+        let st = Subtask {
+            id: 1,
+            task: None,
+            params: serde_json::json!({}),
+            goal: "Execute with ReAct tools (not a registered task id): list_dir. list root".into(),
+            done_when: "done".into(),
+            depends_on: vec![],
+        };
+        let available: HashSet<_> = ["list_dir".into(), "read_file".into()].into_iter().collect();
+        let policy = reg
+            .tool_policy_for_subtask_with_tools(&st, Some(&available))
+            .expect("real tool hint");
+        assert_eq!(policy.allow, vec!["list_dir".to_string()]);
+    }
+
+    #[test]
+    fn catalog_includes_control_plane_footer() {
+        let reg = TaskRegistry::builtin();
+        let cat = reg.catalog_for_planner();
+        assert!(cat.contains("Control-plane tasks"));
+        assert!(cat.contains("replan:"));
     }
 
     #[test]

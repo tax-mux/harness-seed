@@ -40,7 +40,10 @@ pub use display::{
     format_plan_zone_after_preview, format_plan_zone_prompt_preview,
     format_planner_fixed_zone_html,
 };
-pub use queue::{is_replan_subtask, PlanQueue, PlanQueueError, REPLAN_TASK_ID};
+pub use queue::{
+    control_plane_catalog_footer, is_replan_subtask, is_reserved_control_task, PlanQueue,
+    PlanQueueError, REPLAN_TASK_ID,
+};
 
 /// 計画フェーズ用 system 指示（ツールカタログなし）。
 pub const PLAN_SYSTEM_CORE: &str = r#"You are a planning agent. Reply with ONE JSON object only (no markdown).
@@ -83,6 +86,42 @@ pub struct Subtask {
     /// 同一波内（互いに依存しない集合）は `parallel_subtasks` 時に並列実行できる。
     #[serde(default)]
     pub depends_on: Vec<u32>,
+}
+
+/// 弱すぎる `done_when`（番号付き計画の既定など）を証拠志向の完了条件へ置き換えるときの本文。
+pub const EVIDENCE_ORIENTED_DONE_WHEN: &str =
+    "goal met with concrete evidence from tools (cite paths, findings, or observations)";
+
+/// `step completed` / `done` など、実質なんでも通る完了条件か。
+pub fn is_weak_done_when(done_when: &str) -> bool {
+    let t = done_when.trim().to_ascii_lowercase();
+    t.is_empty()
+        || matches!(
+            t.as_str(),
+            "step completed"
+                | "step complete"
+                | "done"
+                | "ok"
+                | "finished"
+                | "complete"
+                | "completed"
+                | "完了"
+                | "終了"
+        )
+}
+
+/// 弱い `done_when` を証拠志向の文言へ上げる（制御プレーン以外）。
+pub fn strengthen_weak_done_when(subtask: &mut Subtask) {
+    if subtask
+        .task
+        .as_deref()
+        .is_some_and(queue::is_reserved_control_task)
+    {
+        return;
+    }
+    if is_weak_done_when(&subtask.done_when) {
+        subtask.done_when = EVIDENCE_ORIENTED_DONE_WHEN.into();
+    }
 }
 
 /// 計画フェーズの成果物。
@@ -412,7 +451,8 @@ fn format_mission_freeform(
         mission.push('\n');
     }
     mission.push_str(
-        "\nComplete ONLY this subtask. Do not replan or work ahead to other subtasks.",
+        "\nComplete ONLY this subtask. Do not invent control-plane actions \
+         (e.g. a replan tool) or work ahead to other subtasks.",
     );
     mission
 }

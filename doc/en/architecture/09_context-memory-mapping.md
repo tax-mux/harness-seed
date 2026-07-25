@@ -11,14 +11,14 @@ Glossary: [glossary.md](glossary.md) · ReAct: [08_react-implementation.md](08_r
 
 | Area | Status |
 |------|--------|
-| In-turn `TurnTrace` | Implemented |
+| In-turn `TurnTrace` | Implemented (older observations clipped when injected into prompts) |
 | Session short-term `SessionMemory` → `Previous turns` | **Implemented** (§10). Injected **only on the work-log path (`work_log`)** |
 | Context metrics / `logs/context.jsonl` | Implemented (Observation has a character cap) |
 | External memory (search / diary) | **Implemented** — [03_memory-layer.md](03_memory-layer.md) (memory RAG + `MemoryBridge`) |
 | Rules file injection (`prompt.rules_paths`) | **Implemented** (`PromptBlocks`) |
-| trace / session summarization | Not implemented |
+| trace / session summarization | Trace uses **windowed clipping**; semantic session summary not yet |
 
-The current implementation keeps in-turn trace, selected previous turns, metrics, external recall, and rules injection. It does not yet compress a long trace or session into a summary, so those inputs still need their existing limits.
+The current implementation keeps in-turn trace (with prompt-side clipping of older observations), selected previous turns, metrics, external recall, and rules injection. Semantic session summaries are still future work.
 
 ---
 
@@ -441,10 +441,11 @@ The retention count limits how many completed turns remain available. The per-fi
 
 | Item | Description |
 |------|-------------|
-| trace summarization | Token control when one turn has many steps |
 | session summarization | Compress meaning beyond N turns to shorten Previous turns |
 | Persistence | `SessionMemory` is lost on process exit (file / external store not wired) |
 | Rule brain | `SimpleRuleBrain` responses that reference session (demo · optional) |
+
+In-turn trace uses windowed clipping via `format_trace` (recent observations kept fuller; older ones shortened). That is not semantic summarization.
 
 These are future compression and persistence improvements. Current behavior retains a bounded in-process history only for the LLM path, then loses it when the process exits.
 ---

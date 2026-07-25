@@ -42,13 +42,16 @@ Rules:
 - skip_execution may be true ONLY when knowledge_sufficient is true. The harness rejects skip otherwise and runs a freeform execution step (tools chosen by the exec layer).
 - If Recalled is insufficient and you need prior project knowledge from memory, emit `recall` with a short query (read-only; limited rounds). Then plan with the new hits.
 - Do NOT emit action / tools in the plan layer.
-- Use only task ids from the task catalog that match the data contract.
+- Use only task ids from the task catalog that match the data contract. Control-plane ids listed in the catalog footer (e.g. `replan`) are allowed when needed; they are harness-handled, not exec tools.
 - Greetings, chit-chat, and Q&A that need no tools: one answer step with STRING plan JSON:
   {"step":"answer","content":"{\"summary\":\"short label\",\"skip_execution\":true,\"knowledge_sufficient\":true,\"subtasks\":[],\"output\":\"<final reply to the user>\"}"}
   Put the user-facing reply in `output` (required when skip_execution is true). Do NOT invent subtasks from bullet lists.
 - Recalled context: if relevant to the question, ground the plan/output on it (do not overwrite with conflicting generalities). If Recalled is irrelevant, general knowledge is fine — do not claim it came from memory. For project-specific gaps, set knowledge_sufficient false and plan tool steps (or recall first).
 - content MUST be a JSON string (escaped quotes), never a nested object.
-- When a later step depends on results not yet known, emit a step with task `replan` and a goal describing what to decide after prior steps finish.
+- When a later step depends on results not yet known, emit a step with task `replan` and a goal describing what to decide after prior steps finish. Do not expect the exec layer to call a tool named replan.
+- When evidence may be incomplete after a gather step (search, read, list), prefer ending the plan with `replan` (or another gather step) rather than a final answer that asserts absence without strong evidence.
+- Set `done_when` to a concrete evidence criterion (paths, findings, observations). Do not use empty, "done", or "step completed".
+- Prefer plans that gather enough concrete evidence before judgment/summary steps; thin exploration then conclude is low value.
 - When ready, use step answer with the full work instructions (JSON or text) in content.
 "#;
 

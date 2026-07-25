@@ -79,6 +79,28 @@ pub(super) fn build_synthesis_evidence(
     out
 }
 
+/// 複数フェーズ完了後の最終回答を、フェーズ証拠だけで再合成すべきか。
+pub(super) fn needs_advance_answer_synthesis(results: &[SubtaskExecResult]) -> bool {
+    results.len() >= 2
+}
+
+pub(super) fn build_advance_phase_evidence(
+    results: &[SubtaskExecResult],
+    item_max_chars: usize,
+    total_max_chars: usize,
+) -> String {
+    let mut out = String::new();
+    let mut budget = total_max_chars.max(1);
+    for r in results {
+        let body = truncate_evidence_chars(&r.answer, item_max_chars.min(budget));
+        let piece = format!("### Phase / subtask {}\n{body}\n\n", r.id);
+        if !append_evidence_budget(&mut out, &mut budget, &piece) {
+            break;
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod ready_tests {
     use super::*;
@@ -96,5 +118,52 @@ mod ready_tests {
         assert!(!answer_looks_user_ready(r#"{"step":"answer"}"#));
         assert!(!answer_looks_user_ready("a\tb"));
         assert!(!answer_looks_user_ready("[a, b]"));
+    }
+
+    #[test]
+    fn needs_advance_synthesis_for_multi_phase() {
+        assert!(!needs_advance_answer_synthesis(&[]));
+        assert!(!needs_advance_answer_synthesis(&[SubtaskExecResult {
+            id: 1,
+            answer: "only".into(),
+            steps_used: 1,
+            used_step_driver: false,
+        }]));
+        assert!(needs_advance_answer_synthesis(&[
+            SubtaskExecResult {
+                id: 1,
+                answer: "a".into(),
+                steps_used: 1,
+                used_step_driver: false,
+            },
+            SubtaskExecResult {
+                id: 2,
+                answer: "b".into(),
+                steps_used: 1,
+                used_step_driver: false,
+            },
+        ]));
+    }
+
+    #[test]
+    fn build_advance_phase_evidence_includes_ids() {
+        let results = vec![
+            SubtaskExecResult {
+                id: 1,
+                answer: "found bug in resolve_plan".into(),
+                steps_used: 2,
+                used_step_driver: false,
+            },
+            SubtaskExecResult {
+                id: 2,
+                answer: "generic unwrap advice".into(),
+                steps_used: 1,
+                used_step_driver: false,
+            },
+        ];
+        let text = build_advance_phase_evidence(&results, 600, 4000);
+        assert!(text.contains("subtask 1"));
+        assert!(text.contains("resolve_plan"));
+        assert!(text.contains("subtask 2"));
     }
 }
