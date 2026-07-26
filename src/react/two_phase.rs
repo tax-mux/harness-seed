@@ -234,13 +234,16 @@ impl<E: AgentBrain> ReActLoop<E> {
         };
 
         let grounding = crate::advance::evidence_grounding_rules();
+        let claim_audit = crate::advance::claim_audit_rules();
         let mission = if advance_style {
             format!(
                 "User request:\n{user_input}\n\nPlan summary: {}\n\n\
 Evidence from completed phases (structured Paths / Claims / Open questions when available; do not invent beyond this):\n{evidence}\n\n\
 {grounding}\n\
+{claim_audit}\n\
 Produce the final user-facing reply in clear language based only on the evidence. \
 Prefer claims that cite paths or prior-phase findings. \
+If a claim-falsification phase labeled items falsified, omit or demote those claims. \
 Mark anything not supported as an unverified candidate. \
 Prefer {{\"step\":\"answer\",\"content\":\"...\"}} with no tools.",
                 plan.summary
@@ -256,14 +259,19 @@ Prefer {{\"step\":\"answer\",\"content\":\"...\"}} with no tools if evidence is 
         };
 
         let synth = self.run_turn_single(&mission, false, None, vec![])?;
-        *final_answer = if advance_style && self.config.advance.citation_check {
-            let evidence_paths = crate::advance::evidence_paths_from_texts(
-                results.iter().map(|r| r.answer.as_str()),
-            );
-            crate::advance::apply_citation_gate(&synth.answer, &evidence_paths)
-        } else {
-            synth.answer
-        };
+        let mut answer = synth.answer;
+        if advance_style {
+            if self.config.advance.citation_check {
+                let evidence_paths = crate::advance::evidence_paths_from_texts(
+                    results.iter().map(|r| r.answer.as_str()),
+                );
+                answer = crate::advance::apply_citation_gate(&answer, &evidence_paths);
+            }
+            if self.config.advance.absence_check {
+                answer = crate::advance::apply_absence_gate(&answer, combined_trace);
+            }
+        }
+        *final_answer = answer;
         *total_steps += synth.steps_used;
         append_trace(combined_trace, &synth.trace);
         Ok(())

@@ -11,7 +11,12 @@ enum PlanStepJson {
         #[serde(deserialize_with = "deserialize_flex_text")]
         content: String,
     },
-    Action { tool: String, #[serde(default)] args: Value },
+    Action {
+        #[serde(deserialize_with = "deserialize_flex_text")]
+        tool: String,
+        #[serde(default)]
+        args: Value,
+    },
     Answer {
         /// 文字列、または計画 JSON オブジェクト（オブジェクトは文字列化して Harness へ渡す）。
         #[serde(deserialize_with = "deserialize_flex_text")]

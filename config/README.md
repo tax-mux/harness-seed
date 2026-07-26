@@ -212,6 +212,8 @@ ReAct の `web_search` ツールが有効になるのは API キーが解決で�
 | `advance.show_phases` | 各フェーズ開始を stdout に表示 | `true` |
 | `advance.min_substantive_obs` | 判定前に必要な実質証拠（read/grep 等）成功 observation 数。浅い `list_dir` は数えない | `3` |
 | `advance.citation_check` | 最終合成後にパス引用を先行 Paths と照合し、無いものを未検証注記 | `true` |
+| `advance.claim_check` | 結論・合成前に先行 Claims の否定証拠を一度探す | `true` |
+| `advance.absence_check` | 最終回答の不在主張を trace と照合し、未検証・矛盾を注記 | `true` |
 | `show_context_metrics` | ターン終了時に `[context turn]` を stderr に出す | `true` |
 | `arg_audit_mode` | タスク契約の引数監査: `off` / `soft`（既定・警告のみ）/ `hard`（不一致で失敗） | `soft` |
 

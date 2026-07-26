@@ -64,6 +64,50 @@ Cite specific paths and findings."
     }
 }
 
+/// 主張の否定証拠を一度探す監査サブタスク（ドメイン非依存）。
+pub fn claim_falsification_subtask(id: u32) -> Subtask {
+    Subtask {
+        id,
+        task: None,
+        params: json!({}),
+        goal: "Audit prior-phase Claims before concluding. \
+For each substantive claim — especially absence claims (does not exist / none / 無い) — \
+try once to find contradictory evidence with tools (prefer grep or read_file on cited Paths). \
+Label each claim as still supported, falsified (with counter-evidence path/finding), or unverified. \
+Do not invent new recommendations in this phase — only stress-test existing claims. \
+You must run at least one substantive tool (grep/read_file) before answering."
+            .into(),
+        done_when: "Each audited claim is labeled supported, falsified, or unverified with a concrete path or tool finding; at least one grep or read_file was used."
+            .into(),
+        depends_on: vec![],
+    }
+}
+
+/// 主張監査がツール無しで終わったときの再試行。
+pub fn claim_falsification_retry_subtask(id: u32) -> Subtask {
+    Subtask {
+        id,
+        task: None,
+        params: json!({}),
+        goal: "Previous claim audit used no substantive tools. Retry: pick the strongest \
+prior-phase Claims (especially absences) and run grep/read_file to seek counter-evidence. \
+Label supported / falsified / unverified. No new recommendations."
+            .into(),
+        done_when: "At least one successful grep or read_file observation exists, and claims are labeled."
+            .into(),
+        depends_on: vec![],
+    }
+}
+
+/// 主張監査フェーズの結果を後続・合成が優先するための拘束。
+pub fn claim_audit_rules() -> &'static str {
+    "## Claim audit (required when present)\n\
+- If a prior phase audited claims (supported / falsified / unverified), treat falsified claims as rejected.\n\
+- Do not repeat falsified claims as facts or high-confidence proposals.\n\
+- Prefer still-supported claims; keep unverified items explicitly marked.\n\
+- Absence claims (X does not exist / none found) require a tool search in evidence; otherwise treat as unverified.\n"
+}
+
 /// 推進ループの設定（`config.json` の `react.advance`）。
 #[derive(Debug, Clone)]
 pub struct AdvanceConfig {
@@ -81,6 +125,10 @@ pub struct AdvanceConfig {
     pub min_substantive_obs: usize,
     /// 最終回答のパス引用を先行 Paths と照合し、無いものを未検証注記する。
     pub citation_check: bool,
+    /// 結論・合成の前に、先行 Claims の否定証拠を一度探す。
+    pub claim_check: bool,
+    /// 最終回答の不在主張を trace と照合し、未検証・矛盾を注記する。
+    pub absence_check: bool,
 }
 
 impl Default for AdvanceConfig {
@@ -93,6 +141,8 @@ impl Default for AdvanceConfig {
             show_phases: true,
             min_substantive_obs: MIN_SUBSTANTIVE_OK_OBSERVATIONS_BEFORE_JUDGMENT,
             citation_check: true,
+            claim_check: true,
+            absence_check: true,
         }
     }
 }
@@ -222,24 +272,70 @@ fn push_unique(out: &mut Vec<String>, item: &str) {
 
 fn extract_path_like_tokens(text: &str) -> Vec<String> {
     let mut out = Vec::new();
-    for raw in text.split(|c: char| c.is_whitespace() || matches!(c, '`' | '"' | '\'' | ',' | ';' | ')' | '(' | '[' | ']' | '{' | '}' | '、' | '。')) {
+    for raw in text.split(|c: char| {
+        c.is_whitespace()
+            || matches!(
+                c,
+                '`' | '"'
+                    | '\''
+                    | ','
+                    | ';'
+                    | ')'
+                    | '('
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
+                    | '、'
+                    | '。'
+                    | '（'
+                    | '）'
+                    | '「'
+                    | '」'
+            )
+    }) {
         let t = raw
             .trim()
-            .trim_matches(|c: char| matches!(c, '*' | '#' | ':' | '：' | '.' | '!' | '?'));
-        if t.is_empty() || t.chars().count() > 200 {
-            continue;
-        }
-        let looks_path = t.contains('/')
-            || [
-                ".rs", ".md", ".toml", ".json", ".txt", ".html", ".yaml", ".yml", ".lock",
-            ]
-            .iter()
-            .any(|ext| t.ends_with(ext));
-        if looks_path {
+            .trim_matches(|c: char| matches!(c, '*' | '#' | ':' | '：' | '.' | '!' | '?' | '・'));
+        if is_plausible_path_token(t) {
             push_unique(&mut out, t);
         }
     }
     out
+}
+
+/// パス風トークンとして引用照合に載せてよいものか（日本語見出しの誤検知を避ける）。
+fn is_plausible_path_token(t: &str) -> bool {
+    if t.is_empty() || t.chars().count() > 200 {
+        return false;
+    }
+    let chars: Vec<char> = t.chars().collect();
+    let ascii = chars.iter().filter(|c| c.is_ascii()).count();
+    // 半分以上が非 ASCII ならパス扱いしない（「CI/CDの整備」等）
+    if ascii * 2 < chars.len() {
+        return false;
+    }
+    let path_ok = |c: char| {
+        c.is_ascii_alphanumeric() || matches!(c, '/' | '\\' | '.' | '_' | '-' | '*' | '+')
+    };
+    if !chars.iter().all(|c| path_ok(*c)) {
+        return false;
+    }
+    if t.contains('/') || t.contains('\\') {
+        // セグメントが空や記号だけは落とす
+        return t
+            .split(['/', '\\'])
+            .filter(|s| !s.is_empty())
+            .all(|seg| {
+                seg.chars()
+                    .any(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+            });
+    }
+    [
+        ".rs", ".md", ".toml", ".json", ".txt", ".html", ".yaml", ".yml", ".lock",
+    ]
+    .iter()
+    .any(|ext| t.ends_with(ext))
 }
 
 fn strip_bullet_prefix(line: &str) -> &str {
@@ -388,6 +484,219 @@ treat them as unverified until re-checked:\n",
     out
 }
 
+/// 不在・欠如を断定している文か（ドメイン非依存の表層パターン）。
+pub fn looks_like_absence_claim(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    text.contains("無い")
+        || text.contains("ない") && (text.contains("存在") || text.contains("一切") || text.contains("見当"))
+        || text.contains("存在しない")
+        || text.contains("存在せず")
+        || text.contains("見当たらない")
+        || text.contains("含まれていない")
+        || text.contains("未実装")
+        || text.contains("ゼロ")
+        || lower.contains("does not exist")
+        || lower.contains("do not exist")
+        || lower.contains("doesn't exist")
+        || lower.contains("not found")
+        || lower.contains("no such")
+        || lower.contains("there are no")
+        || lower.contains("there is no")
+        || lower.contains("without any")
+        || lower.contains("never implemented")
+        || lower.contains("not present")
+        || lower.contains("absent")
+        || lower.contains("zero tests")
+        || (lower.contains("no ") && (lower.contains("test") || lower.contains("file") || lower.contains("support")))
+        || (lower.contains("none") && lower.contains("found"))
+}
+
+/// 回答から不在主張行を抽出する。
+pub fn extract_absence_claims(text: &str, max_items: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        if out.len() >= max_items {
+            break;
+        }
+        let body = strip_bullet_prefix(line);
+        if body.chars().count() < 10 {
+            continue;
+        }
+        if looks_like_absence_claim(body) {
+            out.push(truncate_note(body, 200));
+        }
+    }
+    out
+}
+
+/// 不在主張から、trace 照合用のアンカー（パス・コード片）を取る。
+pub fn absence_claim_anchors(claim: &str) -> Vec<String> {
+    let mut anchors = extract_path_like_tokens(claim);
+    let mut parts = claim.split('`');
+    while let Some(_before) = parts.next() {
+        if let Some(code) = parts.next() {
+            let code = code.trim();
+            if (2..100).contains(&code.chars().count()) {
+                push_unique(&mut anchors, code);
+            }
+        }
+    }
+    // #[...] 属性風
+    let mut rest = claim;
+    while let Some(start) = rest.find("#[") {
+        let slice = &rest[start..];
+        if let Some(end) = slice.find(']') {
+            let attr = &slice[..=end];
+            if attr.chars().count() <= 80 {
+                push_unique(&mut anchors, attr);
+            }
+            rest = &slice[end + 1..];
+        } else {
+            break;
+        }
+    }
+    anchors
+}
+
+fn observation_looks_nonempty(output: &str) -> bool {
+    let t = output.trim();
+    if t.is_empty() {
+        return false;
+    }
+    let lower = t.to_ascii_lowercase();
+    if lower.contains("0 matches")
+        || lower.contains("no matches")
+        || lower.contains("not found")
+        || lower.contains("no such file")
+        || lower == "[]"
+        || lower == "(empty)"
+    {
+        return false;
+    }
+    t.chars().count() >= 8
+}
+
+fn action_blob(action: &crate::action::Action, obs: &crate::action::Observation) -> String {
+    format!("{} {} {}", action.tool, action.args, obs.output)
+}
+
+fn anchor_matched_in_trace(trace: &TurnTrace, anchor: &str) -> Option<bool> {
+    let anchor_l = anchor.to_ascii_lowercase();
+    let mut any = false;
+    let mut nonempty = false;
+    for (action, obs) in trace.actions.iter().zip(trace.observations.iter()) {
+        if !obs.ok {
+            continue;
+        }
+        if !is_substantive_evidence_tool(&action.tool)
+            && !action.tool.eq_ignore_ascii_case("list_dir")
+        {
+            continue;
+        }
+        let blob = action_blob(action, obs).to_ascii_lowercase();
+        if blob.contains(&anchor_l) {
+            any = true;
+            if observation_looks_nonempty(&obs.output) {
+                nonempty = true;
+            }
+        }
+    }
+    if any {
+        Some(nonempty)
+    } else {
+        None
+    }
+}
+
+/// 不在主張の機械分類。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AbsenceClaimVerdict {
+    /// 関連する検索が trace に無い。
+    Unverified,
+    /// 関連検索があり、出力が空っぽくない（不在断定と矛盾しうる）。
+    Contradicted,
+}
+
+/// 不在主張を trace と照合する。
+pub fn classify_absence_claims(
+    answer: &str,
+    trace: &TurnTrace,
+) -> Vec<(String, AbsenceClaimVerdict)> {
+    let mut out = Vec::new();
+    for claim in extract_absence_claims(answer, 12) {
+        let anchors = absence_claim_anchors(&claim);
+        if anchors.is_empty() {
+            // アンカーが取れない不在断定は、実質ツールが一度も無いなら未検証
+            if count_substantive_ok_observations(trace) == 0
+                && count_ok_tool_observations(trace) == 0
+            {
+                out.push((claim, AbsenceClaimVerdict::Unverified));
+            } else {
+                // 何かは調べているが対象不明 → 未検証寄り
+                out.push((claim, AbsenceClaimVerdict::Unverified));
+            }
+            continue;
+        }
+        let mut saw_related = false;
+        let mut saw_nonempty = false;
+        for a in &anchors {
+            if let Some(nonempty) = anchor_matched_in_trace(trace, a) {
+                saw_related = true;
+                if nonempty {
+                    saw_nonempty = true;
+                }
+            }
+        }
+        if !saw_related {
+            out.push((claim, AbsenceClaimVerdict::Unverified));
+        } else if saw_nonempty {
+            out.push((claim, AbsenceClaimVerdict::Contradicted));
+        }
+        // related + empty → 不在を支持しうるので注記しない
+    }
+    out
+}
+
+/// 不在主張ゲート（機械的注記）。
+pub fn apply_absence_gate(answer: &str, trace: &TurnTrace) -> String {
+    let classified = classify_absence_claims(answer, trace);
+    let unverified: Vec<_> = classified
+        .iter()
+        .filter(|(_, v)| *v == AbsenceClaimVerdict::Unverified)
+        .map(|(c, _)| c.clone())
+        .collect();
+    let contradicted: Vec<_> = classified
+        .iter()
+        .filter(|(_, v)| *v == AbsenceClaimVerdict::Contradicted)
+        .map(|(c, _)| c.clone())
+        .collect();
+    if unverified.is_empty() && contradicted.is_empty() {
+        return answer.to_string();
+    }
+    let mut out = answer.trim_end().to_string();
+    if !unverified.is_empty() {
+        out.push_str(
+            "\n\n## Unverified absence\n\
+The following absence claims have no matching search/read in this turn's tool trace; \
+treat them as unverified:\n",
+        );
+        for u in unverified {
+            out.push_str(&format!("- {u}\n"));
+        }
+    }
+    if !contradicted.is_empty() {
+        out.push_str(
+            "\n\n## Contradicted absence\n\
+The following absence claims conflict with non-empty tool observations that mention the same anchors; \
+do not treat them as established facts:\n",
+        );
+        for c in contradicted {
+            out.push_str(&format!("- {c}\n"));
+        }
+    }
+    out
+}
+
 impl AdvanceProgress {
     pub fn new(mission: impl Into<String>, plan_summary: impl Into<String>) -> Self {
         Self {
@@ -408,6 +717,18 @@ impl AdvanceProgress {
     pub fn evidence_paths(&self) -> HashSet<String> {
         evidence_paths_from_notes(&self.steps)
     }
+
+    /// Claims または Paths が先行メモにあれば監査対象あり。
+    pub fn has_auditable_claims(&self) -> bool {
+        self.steps
+            .iter()
+            .any(|n| !n.claims.is_empty() || !n.paths.is_empty())
+    }
+}
+
+/// [`AdvanceProgress::has_auditable_claims`] の関数形。
+pub fn prior_has_auditable_claims(progress: &AdvanceProgress) -> bool {
+    progress.has_auditable_claims()
 }
 
 /// 推進ループ 1 フェーズの実行サマリ（`TurnResult.advance_phases` 用）。
@@ -472,6 +793,8 @@ pub fn format_recalled_progress(
         "Use the above as ground truth. Do not redo completed phases unless the current goal requires it.\n\n",
     );
     out.push_str(evidence_grounding_rules());
+    out.push('\n');
+    out.push_str(claim_audit_rules());
     out
 }
 
@@ -493,6 +816,8 @@ fn format_phase_directive(plan: &PlanArtifact, current: &Subtask, has_prior_phas
     if has_prior_phases {
         out.push('\n');
         out.push_str(evidence_grounding_rules());
+        out.push('\n');
+        out.push_str(claim_audit_rules());
     }
     out
 }
@@ -645,6 +970,7 @@ mod tests {
         );
         let joined = blocks.recalled.join("\n");
         assert!(joined.contains("Evidence grounding"));
+        assert!(joined.contains("Claim audit"));
         assert!(joined.contains("saw src/lib.rs"));
         assert!(joined.contains("unverified candidate"));
     }
@@ -662,6 +988,27 @@ mod tests {
         assert!(boost.goal.contains("thin"));
         assert!(boost.done_when.contains("concrete evidence"));
         assert!(boost.goal.contains("list_dir"));
+        let audit = claim_falsification_subtask(42);
+        assert!(audit.goal.contains("contradictory"));
+        assert!(audit.goal.contains("falsified"));
+        assert!(claim_audit_rules().contains("falsified"));
+    }
+
+    #[test]
+    fn prior_has_auditable_claims_detects_paths_or_claims() {
+        let mut progress = AdvanceProgress::new("m", "p");
+        assert!(!prior_has_auditable_claims(&progress));
+        progress.push(1, "g", "no paths here just words");
+        // from_answer may still extract nothing path-like
+        let emptyish = !progress.steps[0].claims.is_empty() || !progress.steps[0].paths.is_empty();
+        if !emptyish {
+            assert!(!prior_has_auditable_claims(&progress));
+        }
+        progress.steps[0].paths.push("src/lib.rs".into());
+        assert!(prior_has_auditable_claims(&progress));
+        progress.steps[0].paths.clear();
+        progress.steps[0].claims.push("something happened".into());
+        assert!(prior_has_auditable_claims(&progress));
     }
 
     #[test]
@@ -711,6 +1058,51 @@ mod tests {
         assert!(unverified.iter().any(|p| p == "src/config.rs"));
         let clean = apply_citation_gate("Only src/lib.rs matters.", &evidence);
         assert!(!clean.contains("Citation check"));
+    }
+
+    #[test]
+    fn path_tokens_ignore_japanese_headings() {
+        let answer = "### 3. CI/CDの整備\n- Actionsの設定ファイルが見当たらない（.github/\n- see src/lib.rs";
+        let paths = extract_path_like_tokens(answer);
+        assert!(
+            !paths.iter().any(|p| p.contains("整備") || p.contains("見当")),
+            "paths={paths:?}"
+        );
+        assert!(paths.iter().any(|p| p == "src/lib.rs"));
+        // bare `.github/` fragment without plausible segments may or may not pass;
+        // Japanese-majority tokens must not.
+    }
+
+    #[test]
+    fn absence_gate_marks_unverified_and_contradicted() {
+        use crate::action::{Action, Observation, TurnTrace};
+        use serde_json::json;
+
+        let answer = "\
+- `src/` 配下には `#[test]` が一切存在しない
+- CONTRIBUTING.md は存在しない
+";
+        let empty_trace = TurnTrace::default();
+        let gated = apply_absence_gate(answer, &empty_trace);
+        assert!(gated.contains("## Unverified absence"));
+        assert!(gated.contains("#[test]"));
+
+        let mut hit = TurnTrace::default();
+        hit.push_action(Action::new(
+            1,
+            "grep",
+            json!({ "pattern": "#[test]", "path": "src" }),
+        ));
+        hit.push_observation(Observation::success(
+            1,
+            "src/advance.rs:900:    #[test]\nsrc/lib.rs:10:    #[test]\n",
+        ));
+        let contra = apply_absence_gate(
+            "- `src/` 配下には `#[test]` が一切存在しない\n",
+            &hit,
+        );
+        assert!(contra.contains("## Contradicted absence"));
+        assert!(!contra.contains("## Unverified absence"));
     }
 
     #[test]

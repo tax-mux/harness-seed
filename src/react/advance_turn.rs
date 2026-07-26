@@ -2,20 +2,26 @@
 
 use crate::action::TurnTrace;
 use crate::advance::{
-    build_phase_note, count_substantive_ok_observations, evidence_deepening_subtask,
-    prepare_phase_recalled, prior_evidence_is_thin, restore_base_recalled, AdvancePhaseSummary,
-    AdvanceProgress,
+    build_phase_note, claim_falsification_retry_subtask, claim_falsification_subtask,
+    count_substantive_ok_observations, evidence_deepening_subtask, prepare_phase_recalled,
+    prior_evidence_is_thin, prior_has_auditable_claims, restore_base_recalled, AdvanceConfig,
+    AdvancePhaseSummary, AdvanceProgress,
 };
 use crate::brain::AgentBrain;
 use crate::context_metrics::TurnContextSummary;
+use crate::harness::HarnessState;
 use crate::layer::run_plan_layer;
 use crate::plan::{
-    format_plan_for_display, is_replan_subtask, PlanProgress, PlanQueue, Subtask,
+    format_plan_for_display, is_replan_subtask, PlanArtifact, PlanProgress, PlanQueue, Subtask,
 };
 use crate::tasks::TaskRegistry;
 
 use crate::lifecycle::SubtaskOutcome;
 use super::{append_trace, ReActError, ReActLoop, SubtaskExecResult, TurnResult};
+
+fn advance_budget_allows_inject(queue: &PlanQueue) -> bool {
+    queue.consumed_count() + queue.pending_len() + 1 <= queue.total_budget()
+}
 
 impl<E: AgentBrain> ReActLoop<E> {
     /// 計画層 → フェーズ逐次実行。各フェーズ前に `recalled` へ進捗を載せ、必要なら session をクリア。
@@ -81,6 +87,8 @@ impl<E: AgentBrain> ReActLoop<E> {
         let mut phase_index = 0usize;
         let mut substantive_ok_obs = 0usize;
         let mut evidence_boost_used = false;
+        let mut claim_check_used = false;
+        let mut claim_check_retry_used = false;
         let min_substantive = advance.min_substantive_obs;
 
         while let Some(subtask) = plan_queue.pop_next() {
@@ -124,8 +132,7 @@ impl<E: AgentBrain> ReActLoop<E> {
                 let note = if new_subs.is_empty()
                     && prior_evidence_is_thin(substantive_ok_obs, min_substantive)
                     && !evidence_boost_used
-                    && plan_queue.consumed_count() + plan_queue.pending_len() + 1
-                        <= plan_queue.total_budget()
+                    && advance_budget_allows_inject(&plan_queue)
                 {
                     evidence_boost_used = true;
                     match plan_queue.splice_from_replan(
@@ -141,6 +148,28 @@ impl<E: AgentBrain> ReActLoop<E> {
                         Err(err) => {
                             eprintln!("[advance] evidence-deepening splice failed: {err}");
                             format!("replan: inserted 0 subtask(s); deepen failed: {err}")
+                        }
+                    }
+                } else if new_subs.is_empty()
+                    && advance.claim_check
+                    && !claim_check_used
+                    && prior_has_auditable_claims(&advance_progress)
+                    && advance_budget_allows_inject(&plan_queue)
+                {
+                    claim_check_used = true;
+                    match plan_queue.splice_from_replan(
+                        vec![claim_falsification_subtask(0)],
+                        subtask.id,
+                    ) {
+                        Ok(n) => {
+                            eprintln!(
+                                "[advance] replan returned empty — inserted claim-falsification ({n})"
+                            );
+                            format!("replan empty; inserted claim-falsification ({n})")
+                        }
+                        Err(err) => {
+                            eprintln!("[advance] claim-falsification splice failed: {err}");
+                            format!("replan: inserted 0 subtask(s); claim-check failed: {err}")
                         }
                     }
                 } else {
@@ -182,88 +211,88 @@ impl<E: AgentBrain> ReActLoop<E> {
                 continue;
             }
 
-            // 先行フェーズがあり実質証拠が薄いとき、結論フェーズの前に一度だけ証拠深化を差し込む。
-            if !advance_progress.steps.is_empty()
+            // 注入ゲート: 薄い証拠の深化を優先し、次に主張の否定探索を一度だけ。
+            let inject = if !advance_progress.steps.is_empty()
                 && prior_evidence_is_thin(substantive_ok_obs, min_substantive)
                 && !evidence_boost_used
-                && plan_queue.consumed_count() + plan_queue.pending_len() + 1
-                    <= plan_queue.total_budget()
+                && advance_budget_allows_inject(&plan_queue)
             {
                 evidence_boost_used = true;
-                let boost = evidence_deepening_subtask(subtask.id.saturating_add(1000));
+                Some((
+                    evidence_deepening_subtask(subtask.id.saturating_add(1000)),
+                    "evidence-deepening",
+                ))
+            } else if advance.claim_check
+                && !claim_check_used
+                && prior_has_auditable_claims(&advance_progress)
+                && advance_budget_allows_inject(&plan_queue)
+            {
+                claim_check_used = true;
+                Some((
+                    claim_falsification_subtask(subtask.id.saturating_add(2000)),
+                    "claim-falsification",
+                ))
+            } else {
+                None
+            };
+
+            if let Some((boost, label)) = inject {
                 if advance.show_phases || self.config.show_task_execution {
                     eprintln!(
-                        "[advance] thin prior evidence ({substantive_ok_obs} substantive ok obs, min {min_substantive}) — running evidence-deepening before phase {}",
+                        "[advance] running {label} before phase {} (substantive_ok={substantive_ok_obs})",
                         subtask.id
                     );
                 }
-                prepare_phase_recalled(
-                    &mut self.blocks,
-                    &base_recalled,
-                    &advance_progress,
-                    &plan,
-                    &boost,
-                    &advance,
-                );
-                if advance.show_phases {
-                    println!(
-                        "--- Advance phase {} (evidence-deepening) ---",
-                        boost.id
-                    );
-                    println!("  goal: {}", boost.goal);
-                }
-                self.emit_subtask_started(user_input, &plan, &boost, phase_index);
-                if self.config.show_task_execution {
-                    println!("--- Exec subtask {} (evidence-deepening) ---", boost.id);
-                    println!(
-                        "{}",
-                        self.task_registry
-                            .format_subtask_execution_for_display(&boost)
-                    );
-                }
-                self.prepare_harness_for_subtask(&mut harness, &boost);
-                let (boost_exec, boost_driver) =
-                    self.run_subtask_exec_audited(user_input, &plan, &boost, &plan_progress)?;
-                harness.advance_after_subtask(boost.id);
-                self.sync_harness_step_to_blocks(&harness);
-                substantive_ok_obs += count_substantive_ok_observations(&boost_exec.trace);
-                if self.config.show_task_execution {
-                    let mode = if boost_driver { "step-driver" } else { "ReAct" };
-                    println!(
-                        "  completed via {mode}: {}",
-                        TaskRegistry::format_trace_tools_used(&boost_exec.trace)
-                    );
-                }
-                self.emit_subtask_finished(
+                let gained = self.run_injected_advance_phase(
                     user_input,
                     &plan,
+                    &mut harness,
+                    &advance,
+                    &base_recalled,
+                    &mut advance_progress,
+                    &mut plan_progress,
+                    &mut subtask_results,
+                    &mut advance_phases,
+                    &mut combined_trace,
+                    &mut total_steps,
+                    &mut phase_index,
+                    &mut substantive_ok_obs,
                     &boost,
-                    &SubtaskOutcome::completed(&boost_exec.answer, boost_exec.steps_used),
-                );
-                let boost_note = build_phase_note(
-                    boost.id,
-                    boost.goal.clone(),
-                    boost_exec.answer.clone(),
-                    Some(&boost_exec.trace),
-                );
-                let boost_carry = boost_note.format_structured(advance.max_note_chars);
-                advance_progress.push_note(boost_note);
-                plan_progress.push(boost.id, boost_carry.clone());
-                subtask_results.push(SubtaskExecResult {
-                    id: boost.id,
-                    answer: boost_carry.clone(),
-                    steps_used: boost_exec.steps_used,
-                    used_step_driver: boost_driver,
-                });
-                advance_phases.push(AdvancePhaseSummary {
-                    id: boost.id,
-                    goal: boost.goal.clone(),
-                    answer: boost_carry,
-                    steps_used: boost_exec.steps_used,
-                });
-                total_steps += boost_exec.steps_used;
-                append_trace(&mut combined_trace, &boost_exec.trace);
-                phase_index += 1;
+                    label,
+                )?;
+                if label == "claim-falsification"
+                    && gained == 0
+                    && !claim_check_retry_used
+                    && advance_phases.len() < advance.max_phases
+                {
+                    claim_check_retry_used = true;
+                    let retry = claim_falsification_retry_subtask(boost.id.saturating_add(1));
+                    if advance.show_phases || self.config.show_task_execution {
+                        eprintln!(
+                            "[advance] claim-falsification used no substantive tools — retrying once"
+                        );
+                    }
+                    if advance.clear_session_each_phase {
+                        self.session.clear();
+                    }
+                    let _ = self.run_injected_advance_phase(
+                        user_input,
+                        &plan,
+                        &mut harness,
+                        &advance,
+                        &base_recalled,
+                        &mut advance_progress,
+                        &mut plan_progress,
+                        &mut subtask_results,
+                        &mut advance_phases,
+                        &mut combined_trace,
+                        &mut total_steps,
+                        &mut phase_index,
+                        &mut substantive_ok_obs,
+                        &retry,
+                        "claim-falsification-retry",
+                    )?;
+                }
                 // 本命サブタスク用に recalled を作り直す
                 if advance.clear_session_each_phase {
                     self.session.clear();
@@ -345,6 +374,75 @@ impl<E: AgentBrain> ReActLoop<E> {
             phase_index += 1;
         }
 
+        // 計画フェーズが尽きたあとも、合成前に一度だけ主張監査を走らせる。
+        if advance.claim_check
+            && !claim_check_used
+            && prior_has_auditable_claims(&advance_progress)
+            && advance_phases.len() < advance.max_phases
+        {
+            let boost = claim_falsification_subtask(
+                advance_progress
+                    .steps
+                    .last()
+                    .map(|s| s.id.saturating_add(2000))
+                    .unwrap_or(2000),
+            );
+            if advance.show_phases || self.config.show_task_execution {
+                eprintln!("[advance] running claim-falsification before final synthesis");
+            }
+            if advance.clear_session_each_phase && phase_index > 0 {
+                self.session.clear();
+            }
+            let gained = self.run_injected_advance_phase(
+                user_input,
+                &plan,
+                &mut harness,
+                &advance,
+                &base_recalled,
+                &mut advance_progress,
+                &mut plan_progress,
+                &mut subtask_results,
+                &mut advance_phases,
+                &mut combined_trace,
+                &mut total_steps,
+                &mut phase_index,
+                &mut substantive_ok_obs,
+                &boost,
+                "claim-falsification",
+            )?;
+            if gained == 0
+                && !claim_check_retry_used
+                && advance_phases.len() < advance.max_phases
+            {
+                let retry = claim_falsification_retry_subtask(boost.id.saturating_add(1));
+                if advance.show_phases || self.config.show_task_execution {
+                    eprintln!(
+                        "[advance] claim-falsification used no substantive tools — retrying once"
+                    );
+                }
+                if advance.clear_session_each_phase {
+                    self.session.clear();
+                }
+                let _ = self.run_injected_advance_phase(
+                    user_input,
+                    &plan,
+                    &mut harness,
+                    &advance,
+                    &base_recalled,
+                    &mut advance_progress,
+                    &mut plan_progress,
+                    &mut subtask_results,
+                    &mut advance_phases,
+                    &mut combined_trace,
+                    &mut total_steps,
+                    &mut phase_index,
+                    &mut substantive_ok_obs,
+                    &retry,
+                    "claim-falsification-retry",
+                )?;
+            }
+        }
+
         let multi_phase = subtask_results.len() >= 2;
         self.maybe_synthesize_advance_answer(
             user_input,
@@ -381,6 +479,94 @@ impl<E: AgentBrain> ReActLoop<E> {
         };
         self.finish_turn(user_input, &result);
         Ok(result)
+    }
+
+    /// 証拠深化・主張監査など、計画外の 1 フェーズを挿入実行する。
+    /// 戻り値はこのフェーズで増えた実質証拠 observation 数。
+    fn run_injected_advance_phase(
+        &mut self,
+        user_input: &str,
+        plan: &PlanArtifact,
+        harness: &mut HarnessState,
+        advance: &AdvanceConfig,
+        base_recalled: &[String],
+        advance_progress: &mut AdvanceProgress,
+        plan_progress: &mut PlanProgress,
+        subtask_results: &mut Vec<SubtaskExecResult>,
+        advance_phases: &mut Vec<AdvancePhaseSummary>,
+        combined_trace: &mut TurnTrace,
+        total_steps: &mut usize,
+        phase_index: &mut usize,
+        substantive_ok_obs: &mut usize,
+        boost: &Subtask,
+        label: &str,
+    ) -> Result<usize, ReActError> {
+        prepare_phase_recalled(
+            &mut self.blocks,
+            base_recalled,
+            advance_progress,
+            plan,
+            boost,
+            advance,
+        );
+        if advance.show_phases {
+            println!("--- Advance phase {} ({label}) ---", boost.id);
+            println!("  goal: {}", boost.goal);
+        }
+        self.emit_subtask_started(user_input, plan, boost, *phase_index);
+        if self.config.show_task_execution {
+            println!("--- Exec subtask {} ({label}) ---", boost.id);
+            println!(
+                "{}",
+                self.task_registry
+                    .format_subtask_execution_for_display(boost)
+            );
+        }
+        self.prepare_harness_for_subtask(harness, boost);
+        let (boost_exec, boost_driver) =
+            self.run_subtask_exec_audited(user_input, plan, boost, plan_progress)?;
+        harness.advance_after_subtask(boost.id);
+        self.sync_harness_step_to_blocks(harness);
+        let gained = count_substantive_ok_observations(&boost_exec.trace);
+        *substantive_ok_obs += gained;
+        if self.config.show_task_execution {
+            let mode = if boost_driver { "step-driver" } else { "ReAct" };
+            println!(
+                "  completed via {mode}: {}",
+                TaskRegistry::format_trace_tools_used(&boost_exec.trace)
+            );
+        }
+        self.emit_subtask_finished(
+            user_input,
+            plan,
+            boost,
+            &SubtaskOutcome::completed(&boost_exec.answer, boost_exec.steps_used),
+        );
+        let boost_note = build_phase_note(
+            boost.id,
+            boost.goal.clone(),
+            boost_exec.answer.clone(),
+            Some(&boost_exec.trace),
+        );
+        let boost_carry = boost_note.format_structured(advance.max_note_chars);
+        advance_progress.push_note(boost_note);
+        plan_progress.push(boost.id, boost_carry.clone());
+        subtask_results.push(SubtaskExecResult {
+            id: boost.id,
+            answer: boost_carry.clone(),
+            steps_used: boost_exec.steps_used,
+            used_step_driver: boost_driver,
+        });
+        advance_phases.push(AdvancePhaseSummary {
+            id: boost.id,
+            goal: boost.goal.clone(),
+            answer: boost_carry,
+            steps_used: boost_exec.steps_used,
+        });
+        *total_steps += boost_exec.steps_used;
+        append_trace(combined_trace, &boost_exec.trace);
+        *phase_index += 1;
+        Ok(gained)
     }
 
     /// `task: "replan"` — 計画層を再実行し、新しい subtask 列を返す（ネスト replan は落とす）。
@@ -425,5 +611,4 @@ impl<E: AgentBrain> ReActLoop<E> {
             .collect();
         Ok((new_subs, steps, trace))
     }
-
 }

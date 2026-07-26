@@ -246,7 +246,7 @@ The answer is the last response produced for the turn. The remaining fields pres
 | `react.show_task_execution` | `true` | Print subtask start/complete to stdout |
 | `react.show_tool_output` | `true` | Print tool I/O to stderr |
 | `react.two_phase` | `false` | Serial plan → execute when on |
-| `react.advance.enabled` | `false` | Phased execution + `recalled` carry-forward ([advance-loop.md](07_advance-loop.md)) |
+| `react.advance.enabled` | `false` | Phased execution + `recalled` carry-forward; deepening / claim falsification / citation checks in [07_advance-loop.md](07_advance-loop.md) |
 
 The first three settings control the amount and style of work within each subtask. The display settings affect diagnostics only, while the final two choose whether planning and phased execution wrap the work.
 
