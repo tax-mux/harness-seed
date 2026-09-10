@@ -1,7 +1,7 @@
 //! CUI とエージェントの間の JSON ワイヤプロトコル（ライブラリ埋め込み用）。
 
 use std::fmt;
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -9,6 +9,7 @@ use serde_json::Value;
 use crate::action::{Action, Observation, TurnTrace};
 use crate::brain::AgentBrain;
 use crate::context_metrics::{TokenSource, TurnContextSummary};
+use crate::line_io::read_line_lossy;
 use crate::plan::{PlanArtifact, Subtask};
 use crate::react::{ReActError, ReActLoop, SubtaskExecResult, TurnResult};
 use crate::runtime::RuntimeEnvironment;
@@ -400,16 +401,18 @@ pub fn run_json_repl<E: AgentBrain>(
 
     let stdin = io::stdin();
     let mut stdout = io::stdout();
-    let reader = stdin.lock();
+    let mut reader = stdin.lock();
 
     eprintln!("HarnessSeed JSON REPL — one JSON object per line (protocol v{WIRE_VERSION})");
     eprintln!("runtime: {}", loop_engine.blocks.runtime.summary_line());
     eprintln!("request types: turn | session_clear | ping");
 
-    for line in reader.lines() {
-        let line = line?;
+    while let Some((line, lossy)) = read_line_lossy(&mut reader)? {
+        if lossy {
+            eprintln!("warning: stdin line was not valid UTF-8; invalid bytes replaced");
+        }
         let trimmed = line.trim();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() || (lossy && trimmed.chars().all(|c| c == '\u{FFFD}')) {
             continue;
         }
 

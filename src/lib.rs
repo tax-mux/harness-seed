@@ -16,6 +16,7 @@ pub mod grep;
 pub mod harness;
 pub mod layer;
 pub mod lifecycle;
+pub mod line_io;
 pub mod llm;
 pub mod memory;
 pub mod plan;
