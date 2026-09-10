@@ -38,6 +38,15 @@ impl LayerLoopOptions {
             context_label: "step",
         }
     }
+
+    /// 計画前スカウト（ツール可・`ResearchArtifact` を返す）。
+    pub const fn scout(max_steps: usize) -> Self {
+        Self {
+            max_steps,
+            tools_enabled: true,
+            context_label: "scout",
+        }
+    }
 }
 
 /// 計画層・実行層共通の ReAct ループ。
@@ -107,6 +116,8 @@ pub fn run_layer_loop<B: AgentBrain>(
                     context,
                     plan,
                     subtask_results,
+                    advance_phases: vec![],
+                    scout: None,
                 });
             }
         }

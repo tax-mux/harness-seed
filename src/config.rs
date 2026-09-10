@@ -1,14 +1,19 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::de::Error as DeError;
+use serde::{Deserialize, Deserializer};
+use serde_json::Value;
 
 use crate::context::{ContextError, PromptBlocks};
 use crate::context_log::default_log_path;
 use crate::llm::{LlmConfig, LlmProvider};
 use crate::brave_search::BraveSearchConfig;
+use crate::advance::AdvanceConfig;
+use crate::scout::ScoutConfig;
 use crate::react::ReActConfig;
 use crate::session::SessionMemory;
+use crate::tool::{default_packs, packs_from_names, ToolPack};
 
 const DEFAULT_CONFIG_PATH: &str = "config/config.json";
 
@@ -58,6 +63,30 @@ pub struct ReactSection {
     pub show_task_execution: Option<bool>,
     /// 各ツールのコマンド・結果を stderr に表示する（`run_cmd` の `$ ...` など）。
     pub show_tool_output: Option<bool>,
+    /// 外側推進ループ（`react.advance`）。
+    #[serde(default)]
+    pub advance: AdvanceSection,
+    /// 計画前スカウト（`react.scout`）。
+    #[serde(default)]
+    pub scout: ScoutSection,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ScoutSection {
+    pub enabled: Option<bool>,
+    pub max_steps: Option<usize>,
+    pub skip_trivial: Option<bool>,
+    pub max_note_chars: Option<usize>,
+    pub show_scout: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct AdvanceSection {
+    pub enabled: Option<bool>,
+    pub max_phases: Option<usize>,
+    pub clear_session_each_phase: Option<bool>,
+    pub max_note_chars: Option<usize>,
+    pub show_phases: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -66,10 +95,85 @@ pub struct PromptSection {
     pub rules_paths: Option<Vec<String>>,
 }
 
+/// `tools.packs` のスイッチ形式（`{ "basic": true, "coding": true }`）。`"true"` 文字列も可。
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ToolPacksConfig {
+    #[serde(default, deserialize_with = "deserialize_opt_bool_switch")]
+    pub basic: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_opt_bool_switch")]
+    pub coding: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_opt_bool_switch",
+        alias = "web"
+    )]
+    pub web_search: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_opt_bool_switch")]
+    pub full: Option<bool>,
+}
+
+impl ToolPacksConfig {
+    pub fn is_unconfigured(&self) -> bool {
+        self.basic.is_none()
+            && self.coding.is_none()
+            && self.web_search.is_none()
+            && self.full.is_none()
+    }
+
+    /// 明示的に `true` のパックだけ返す（`full` が true なら `Full` のみ）。
+    pub fn enabled_packs(&self) -> Vec<ToolPack> {
+        if self.full == Some(true) {
+            return vec![ToolPack::Full];
+        }
+        let mut packs = Vec::new();
+        if self.basic == Some(true) {
+            packs.push(ToolPack::Basic);
+        }
+        if self.coding == Some(true) {
+            packs.push(ToolPack::Coding);
+        }
+        if self.web_search == Some(true) {
+            packs.push(ToolPack::WebSearch);
+        }
+        packs
+    }
+}
+
+/// 旧来の配列形式 `["basic", "coding"]` も読める。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum ToolPacksField {
+    Switches(ToolPacksConfig),
+    List(Vec<String>),
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ToolsSection {
+    /// ツールパックの ON/OFF。未設定・空オブジェクト時は basic+coding（+ Brave キー時 web_search）。
+    pub packs: Option<ToolPacksField>,
     #[serde(default)]
     pub brave_search: BraveSearchSection,
+}
+
+fn deserialize_opt_bool_switch<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(Value::Bool(b)) => Ok(Some(b)),
+        Some(Value::String(s)) => match s.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" | "on" => Ok(Some(true)),
+            "false" | "0" | "no" | "off" => Ok(Some(false)),
+            other => Err(DeError::custom(format!(
+                "expected boolean switch, got string \"{other}\""
+            ))),
+        },
+        Some(other) => Err(DeError::custom(format!(
+            "expected boolean switch, got {other}"
+        ))),
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -173,11 +277,68 @@ impl AppConfig {
             show_plan: self.react.show_plan.unwrap_or(true),
             show_task_execution: self.react.show_task_execution.unwrap_or(true),
             show_tool_output: self.react.show_tool_output.unwrap_or(true),
+            advance: AdvanceConfig {
+                enabled: self.react.advance.enabled.unwrap_or(false),
+                max_phases: self.react.advance.max_phases.unwrap_or(8).max(1),
+                clear_session_each_phase: self
+                    .react
+                    .advance
+                    .clear_session_each_phase
+                    .unwrap_or(true),
+                max_note_chars: self
+                    .react
+                    .advance
+                    .max_note_chars
+                    .unwrap_or(1500)
+                    .clamp(200, 16_000),
+                show_phases: self.react.advance.show_phases.unwrap_or(true),
+            },
+            scout: ScoutConfig {
+                enabled: self.react.scout.enabled.unwrap_or(false),
+                max_steps: self.react.scout.max_steps.unwrap_or(6).max(1),
+                skip_trivial: self.react.scout.skip_trivial.unwrap_or(true),
+                max_note_chars: self
+                    .react
+                    .scout
+                    .max_note_chars
+                    .unwrap_or(2000)
+                    .clamp(200, 16_000),
+                show_scout: self.react.scout.show_scout.unwrap_or(true),
+            },
         }
     }
 
     pub fn llm_provider(&self) -> LlmProvider {
         self.resolve_provider()
+    }
+
+    /// 有効なツールパック一覧。`tools.packs` 未設定時は basic + coding（+ Brave キー時 web_search）。
+    pub fn resolved_tool_packs(&self) -> Vec<ToolPack> {
+        let include_web = self.resolved_brave_search().is_some();
+        let mut packs = match &self.tools.packs {
+            None => default_packs(include_web),
+            Some(ToolPacksField::List(names)) if names.is_empty() => default_packs(include_web),
+            Some(ToolPacksField::List(names)) => packs_from_names(names),
+            Some(ToolPacksField::Switches(cfg)) if cfg.is_unconfigured() => {
+                default_packs(include_web)
+            }
+            Some(ToolPacksField::Switches(cfg)) => cfg.enabled_packs(),
+        };
+        if packs.is_empty() {
+            return packs;
+        }
+        let web_explicit = match &self.tools.packs {
+            Some(ToolPacksField::Switches(cfg)) => cfg.web_search,
+            _ => None,
+        };
+        if include_web
+            && web_explicit != Some(false)
+            && !packs.contains(&ToolPack::Full)
+            && !packs.contains(&ToolPack::WebSearch)
+        {
+            packs.push(ToolPack::WebSearch);
+        }
+        packs
     }
 
     /// Brave Web Search 用設定。API キーが無いときは `None`（`web_search` ツールは失敗応答）。
@@ -556,6 +717,65 @@ mod tests {
         assert_eq!(cfg.react.max_steps, Some(16));
         assert_eq!(cfg.tools.brave_search.max_results, Some(5));
         assert_eq!(cfg.tools.brave_search.fetch_content, Some(false));
+    }
+
+    #[test]
+    fn resolves_scout_config_defaults() {
+        let cfg: AppConfig = serde_json::from_str(r#"{}"#).unwrap();
+        let react = cfg.react_config(false, false);
+        assert!(!react.scout.enabled);
+        assert_eq!(react.scout.max_steps, 6);
+        assert!(react.scout.skip_trivial);
+    }
+
+    #[test]
+    fn resolves_tool_packs_default_without_brave() {
+        let cfg: AppConfig = serde_json::from_str(r#"{}"#).unwrap();
+        let packs = cfg.resolved_tool_packs();
+        assert!(packs.contains(&ToolPack::Basic));
+        assert!(packs.contains(&ToolPack::Coding));
+        assert!(!packs.contains(&ToolPack::WebSearch));
+    }
+
+    #[test]
+    fn resolves_tool_packs_from_switch_object() {
+        let json = r#"{"tools":{"packs":{"basic":true,"coding":false}}}"#;
+        let cfg: AppConfig = serde_json::from_str(json).unwrap();
+        let packs = cfg.resolved_tool_packs();
+        assert_eq!(packs, vec![ToolPack::Basic]);
+    }
+
+    #[test]
+    fn resolves_tool_packs_from_string_switches() {
+        let json = r#"{"tools":{"packs":{"basic":"true","coding":"true"}}}"#;
+        let cfg: AppConfig = serde_json::from_str(json).unwrap();
+        let packs = cfg.resolved_tool_packs();
+        assert!(packs.contains(&ToolPack::Basic));
+        assert!(packs.contains(&ToolPack::Coding));
+    }
+
+    #[test]
+    fn resolves_tool_packs_from_legacy_list() {
+        let json = r#"{"tools":{"packs":["basic"]}}"#;
+        let cfg: AppConfig = serde_json::from_str(json).unwrap();
+        let packs = cfg.resolved_tool_packs();
+        assert_eq!(packs, vec![ToolPack::Basic]);
+    }
+
+    #[test]
+    fn auto_appends_web_pack_when_brave_key_set() {
+        let json = r#"{"tools":{"packs":{"basic":true,"coding":true},"brave_search":{"api_key":"k"}}}"#;
+        let cfg: AppConfig = serde_json::from_str(json).unwrap();
+        let packs = cfg.resolved_tool_packs();
+        assert!(packs.contains(&ToolPack::WebSearch));
+    }
+
+    #[test]
+    fn web_switch_false_blocks_auto_append() {
+        let json = r#"{"tools":{"packs":{"basic":true,"web_search":false},"brave_search":{"api_key":"k"}}}"#;
+        let cfg: AppConfig = serde_json::from_str(json).unwrap();
+        let packs = cfg.resolved_tool_packs();
+        assert!(!packs.contains(&ToolPack::WebSearch));
     }
 
     #[test]
