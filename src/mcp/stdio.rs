@@ -75,7 +75,7 @@ impl Session {
             json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": { "name": "harness-seed", "version": "0.1.0" }
+                "clientInfo": { "name": "harness-seed", "version": crate::VERSION }
             }),
             timeout,
         )?;
