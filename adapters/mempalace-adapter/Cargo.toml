@@ -1,6 +1,6 @@
 [package]
 name = "mempalace-adapter"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "HTTP client adapter for mempalace (search / diary) — used by harness-seed MemoryBridge"

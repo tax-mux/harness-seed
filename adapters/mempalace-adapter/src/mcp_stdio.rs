@@ -87,7 +87,7 @@ impl McpSession {
                 "capabilities": {},
                 "clientInfo": {
                     "name": "harness-seed",
-                    "version": "0.1.0"
+                     "version": env!("CARGO_PKG_VERSION")
                 }
             }
         });

@@ -90,7 +90,7 @@ All `options` are optional (default: include trace / plan / context).
   "type": "ping",
   "version": 1,
   "runtime": { "os": "windows", "arch": "x86_64", "shell_label": "...", "shell_program": "pwsh" },
-  "harness_version": "0.1.0"
+  "harness_version": "0.2.0"
 }
 ```
 
