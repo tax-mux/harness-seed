@@ -7,6 +7,7 @@ mod parse;
 mod parse_step;
 mod prompt;
 mod queue;
+mod schedule;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -20,6 +21,7 @@ pub use brain::{
 };
 pub use contract::{PlanDataContract, PlanEnforceFn};
 pub use parse::{parse_plan, PlanParseError};
+pub use schedule::{execution_waves, ScheduleError};
 pub use parse_step::{
     harness_state_from_plan_answer as harness_state_from_plan_turn, parse_plan_agent_step,
     plan_artifact_from_answer, PlanStepParseError,
@@ -71,6 +73,10 @@ pub struct Subtask {
     pub params: Value,
     pub goal: String,
     pub done_when: String,
+    /// このサブタスクより先に完了しているべき id（空なら依存なし）。
+    /// 同一波内（互いに依存しない集合）は `parallel_subtasks` 時に並列実行できる。
+    #[serde(default)]
+    pub depends_on: Vec<u32>,
 }
 
 /// 計画フェーズの成果物。
@@ -107,6 +113,7 @@ impl PlanArtifact {
                 params: json!({}),
                 goal: user_input.to_string(),
                 done_when: "user request satisfied".into(),
+                depends_on: vec![],
             }],
             knowledge_sufficient: Some(false),
         }
@@ -190,6 +197,7 @@ fn default_evidence_subtask(summary: &str) -> Subtask {
         params: json!({}),
         goal,
         done_when: "user request satisfied with sufficient evidence".into(),
+        depends_on: vec![],
     }
 }
 

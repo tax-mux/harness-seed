@@ -29,6 +29,7 @@ struct SubtaskJson {
     params: Value,
     goal: String,
     done_when: String,
+    depends_on: Vec<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -145,6 +146,7 @@ fn parse_plan_value(trimmed: &str) -> Result<PlanArtifact, PlanParseError> {
             } else {
                 s.done_when
             },
+            depends_on: s.depends_on,
         })
         .collect();
 
@@ -204,6 +206,19 @@ fn parse_subtask_value(value: &Value, fallback_id: u32) -> Option<SubtaskJson> {
         .and_then(|g| g.as_str())
         .unwrap_or("")
         .to_string();
+    let depends_on = obj
+        .get("depends_on")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| {
+                    x.as_u64()
+                        .map(|n| n as u32)
+                        .or_else(|| x.as_str()?.parse().ok())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
     Some(SubtaskJson {
         id,
@@ -211,6 +226,7 @@ fn parse_subtask_value(value: &Value, fallback_id: u32) -> Option<SubtaskJson> {
         params,
         goal,
         done_when,
+        depends_on,
     })
 }
 

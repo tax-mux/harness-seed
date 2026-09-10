@@ -178,7 +178,8 @@ mod tests {
             params: json!({ "path": "src" }),
             goal: String::new(),
             done_when: String::new(),
-        };
+                    depends_on: vec![],
+};
         let mut tools = ToolRuntime::new();
         let r = reg.run_subtask_driver(&sub, &mut tools, false, false).unwrap();
         assert_eq!(r.steps_used, 1);
@@ -201,7 +202,8 @@ mod tests {
             }),
             goal: String::new(),
             done_when: String::new(),
-        };
+                    depends_on: vec![],
+};
         let mut tools = ToolRuntime::new();
         let r = reg.run_subtask_driver(&sub, &mut tools, false, false).unwrap();
         assert_eq!(r.steps_used, 2);
@@ -222,7 +224,8 @@ mod tests {
             params: json!({}),
             goal: "free".into(),
             done_when: String::new(),
-        };
+                    depends_on: vec![],
+};
         assert!(!reg.use_step_driver(&sub));
     }
 }

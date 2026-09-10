@@ -131,14 +131,16 @@ mod tests {
                     params: serde_json::json!({}),
                     goal: "a".into(),
                     done_when: "d".into(),
-                },
+                                    depends_on: vec![],
+},
                 Subtask {
                     id: 2,
                     task: None,
                     params: serde_json::json!({}),
                     goal: "b".into(),
                     done_when: "d".into(),
-                },
+                                    depends_on: vec![],
+},
             ],
             knowledge_sufficient: None,
         };
@@ -163,14 +165,16 @@ mod tests {
                         params: serde_json::json!({}),
                         goal: "new-a".into(),
                         done_when: "d".into(),
-                    },
+                                            depends_on: vec![],
+},
                     Subtask {
                         id: 100,
                         task: None,
                         params: serde_json::json!({}),
                         goal: "new-b".into(),
                         done_when: "d".into(),
-                    },
+                                            depends_on: vec![],
+},
                 ],
                 parent.id,
             )
@@ -195,14 +199,16 @@ mod tests {
                         params: serde_json::json!({}),
                         goal: "x".into(),
                         done_when: "d".into(),
-                    },
+                                            depends_on: vec![],
+},
                     Subtask {
                         id: 2,
                         task: None,
                         params: serde_json::json!({}),
                         goal: "y".into(),
                         done_when: "d".into(),
-                    },
+                                            depends_on: vec![],
+},
                 ],
                 parent.id,
             )
@@ -218,7 +224,8 @@ mod tests {
             params: serde_json::json!({}),
             goal: "rethink".into(),
             done_when: "new plan".into(),
-        };
+                    depends_on: vec![],
+};
         assert!(is_replan_subtask(&s));
     }
 }

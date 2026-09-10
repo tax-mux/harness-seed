@@ -113,7 +113,8 @@ fn parse_numbered_steps(text: &str) -> Option<PlanArtifact> {
             params: json!({}),
             goal: body,
             done_when: "step completed".into(),
-        });
+                    depends_on: vec![],
+});
     }
 
     if subtasks.is_empty() {

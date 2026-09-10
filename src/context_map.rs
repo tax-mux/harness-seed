@@ -117,10 +117,53 @@ pub fn analyze_messages(messages: &[ChatMessage]) -> Vec<ContextSection> {
     merge_adjacent(out)
 }
 
+/// 複数 LLM 呼び出しのプロンプト本文をセクション別に合算する（ターン全体用）。
+pub fn aggregate_prompt_sections<'a>(
+    prompt_bodies: impl IntoIterator<Item = &'a str>,
+) -> Vec<ContextSection> {
+    use std::collections::HashMap;
+
+    let mut totals: HashMap<ContextSectionKind, usize> = HashMap::new();
+    for body in prompt_bodies {
+        for sec in analyze_prompt_body(body) {
+            *totals.entry(sec.kind).or_default() += sec.chars;
+        }
+    }
+
+    const ORDER: &[ContextSectionKind] = &[
+        ContextSectionKind::SystemCore,
+        ContextSectionKind::ToolCatalog,
+        ContextSectionKind::Rules,
+        ContextSectionKind::Recalled,
+        ContextSectionKind::SystemExtra,
+        ContextSectionKind::PreviousTurns,
+        ContextSectionKind::UserInput,
+        ContextSectionKind::TurnTrace,
+        ContextSectionKind::NextStepCue,
+        ContextSectionKind::Other,
+    ];
+
+    ORDER
+        .iter()
+        .filter_map(|kind| {
+            let chars = *totals.get(kind)?;
+            (chars > 0).then_some(ContextSection {
+                kind: *kind,
+                chars,
+            })
+        })
+        .collect()
+}
+
 /// ターミナル向けカラーマップ（ANSI）。`color` が false ならバーのみ。
 pub fn format_colormap(sections: &[ContextSection], color: bool) -> String {
+    format_colormap_titled(sections, color, "prompt sections")
+}
+
+/// タイトル付きカラーマップ（ターン合算など）。
+pub fn format_colormap_titled(sections: &[ContextSection], color: bool, title: &str) -> String {
     if sections.is_empty() {
-        return "(empty prompt)\n".to_string();
+        return format!("({title}: empty)\n");
     }
 
     let total_chars: usize = sections.iter().map(|s| s.chars).sum();
@@ -133,7 +176,7 @@ pub fn format_colormap(sections: &[ContextSection], color: bool) -> String {
     let bar_width = 24;
 
     let mut lines = vec![format!(
-        "prompt sections: {} chars / ~{} tok",
+        "{title}: {} chars / ~{} tok",
         total_chars, total_tokens
     )];
 
@@ -338,5 +381,33 @@ mod tests {
         let map = format_colormap(&secs, false);
         assert!(map.contains("turn_trace"));
         assert!(map.contains("█"));
+    }
+
+    #[test]
+    fn aggregates_sections_across_prompts() {
+        let a = "system: You are an agent.\n\nuser: User input:\nhello\n";
+        let b = "system: You are an agent.\n\nRecalled context:\nnote\n\nuser: User input:\nhello\n\nTurn trace so far:\n[t0]\n";
+        let secs = aggregate_prompt_sections([a, b]);
+        let core: usize = secs
+            .iter()
+            .filter(|s| s.kind == ContextSectionKind::SystemCore)
+            .map(|s| s.chars)
+            .sum();
+        let recalled: usize = secs
+            .iter()
+            .filter(|s| s.kind == ContextSectionKind::Recalled)
+            .map(|s| s.chars)
+            .sum();
+        let trace: usize = secs
+            .iter()
+            .filter(|s| s.kind == ContextSectionKind::TurnTrace)
+            .map(|s| s.chars)
+            .sum();
+        assert!(core > 0);
+        assert!(recalled > 0);
+        assert!(trace > 0);
+        let map = format_colormap_titled(&secs, false, "turn prompts (2 calls)");
+        assert!(map.contains("turn prompts (2 calls)"));
+        assert!(map.contains("recalled"));
     }
 }

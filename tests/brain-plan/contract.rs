@@ -14,7 +14,8 @@ fn trivial_chat_skips_execution() {
             params: serde_json::json!({}),
             goal: "list".into(),
             done_when: "done".into(),
-        }],
+                    depends_on: vec![],
+}],
         knowledge_sufficient: None,
     };
     c.enforce_plan(&mut plan);
@@ -55,7 +56,8 @@ fn host_enforce_collapses_plan() {
             params: serde_json::json!({ "id": 9 }),
             goal: goals.join(" → "),
             done_when: "saved".into(),
-        }];
+                    depends_on: vec![],
+}];
     });
     let mut plan = PlanArtifact {
         summary: "x".into(),
@@ -67,14 +69,16 @@ fn host_enforce_collapses_plan() {
                 params: serde_json::json!({}),
                 goal: "load".into(),
                 done_when: "loaded".into(),
-            },
+                            depends_on: vec![],
+},
             Subtask {
                 id: 2,
                 task: Some("save_item".into()),
                 params: serde_json::json!({}),
                 goal: "persist".into(),
                 done_when: "done".into(),
-            },
+                            depends_on: vec![],
+},
         ],
         knowledge_sufficient: None,
     };

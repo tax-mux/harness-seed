@@ -14,19 +14,21 @@ use crate::brain::AgentBrain;
 use crate::context::PromptBlocks;
 use crate::config::LogRotationConfig;
 use crate::context_log::{default_log_path, ContextLogWriter};
-use crate::context_map::{analyze_prompt_body, format_colormap};
+use crate::context_map::{
+    aggregate_prompt_sections, analyze_prompt_body, format_colormap_titled,
+};
 use crate::context_metrics::TurnContextSummary;
 use crate::harness::{HarnessReference, HarnessState};
 use crate::layer::{run_layer_loop, run_plan_layer, LayerLoopOptions};
-use crate::lifecycle::{HostScratch, HostView, TurnLifecycle, WriteScope};
+use crate::lifecycle::{invoke_lifecycle, HostScratch, HostView, TurnLifecycle, WriteScope};
 use crate::memory::{
     build_memory_rag, inject_memory_recalled, DiaryEntry, DiaryPhase, MemoryBridge, MemoryRag,
     MemoryRuntimeConfig, NoopBridge,
 };
 use crate::session::SessionPromptPolicy;
 use crate::plan::{
-    format_mission, format_plan_for_display, format_planner_fixed_zone_html, is_replan_subtask,
-    PlanArtifact, PlanBrainMode, PlanProgress, PlanQueue, Subtask,
+    execution_waves, format_mission, format_plan_for_display, format_planner_fixed_zone_html,
+    is_replan_subtask, PlanArtifact, PlanBrainMode, PlanProgress, PlanQueue, Subtask,
 };
 use crate::runtime::RuntimeEnvironment;
 use crate::session::SessionMemory;
@@ -71,6 +73,9 @@ pub struct ReActConfig {
     pub show_tool_output: bool,
     /// 外側推進ループ（有効時は `two_phase` より優先）。
     pub advance: AdvanceConfig,
+    /// 同一依存波内のサブタスクを並列実行する（`two_phase` 時）。
+    /// ステップドライバ契約があるタスクはスレッド並列、ReAct タスクは波内で直列。
+    pub parallel_subtasks: bool,
     /// ターンごとに `monitor/context_monitor.html` を更新する。
     pub monitor_plan_html: bool,
     /// 外部メモリ注入（`memory` セクション）。
@@ -98,6 +103,7 @@ impl Default for ReActConfig {
             show_task_execution: true,
             show_tool_output: true,
             advance: AdvanceConfig::default(),
+            parallel_subtasks: false,
             monitor_plan_html: false,
             memory: MemoryRuntimeConfig::default(),
         }
@@ -146,6 +152,8 @@ pub enum ReActError {
     MaxStepsExceeded { limit: usize },
     Cancelled,
     PlanParseFailed { message: String },
+    /// サブタスク依存関係が不正（未知 id・閉路）。
+    ScheduleFailed { message: String },
 }
 
 impl fmt::Display for ReActError {
@@ -157,6 +165,9 @@ impl fmt::Display for ReActError {
             Self::Cancelled => write!(f, "ReAct loop cancelled"),
             Self::PlanParseFailed { message } => {
                 write!(f, "plan parse failed: {message}")
+            }
+            Self::ScheduleFailed { message } => {
+                write!(f, "subtask schedule failed: {message}")
             }
         }
     }
@@ -191,6 +202,9 @@ pub struct ReActLoop<E: AgentBrain> {
     memory: Box<dyn MemoryBridge>,
     /// アダプタ手前の記憶 RAG（分岐・検索語）。
     memory_rag: MemoryRag,
+    /// 並列ワーカー用にツールランタイムを fork するときのパック。
+    tool_packs: Vec<ToolPack>,
+    brave_search: Option<BraveSearchConfig>,
 }
 
 impl<E: AgentBrain> ReActLoop<E> {
@@ -250,6 +264,8 @@ impl<E: AgentBrain> ReActLoop<E> {
             pending_reference_info: Vec::new(),
             memory,
             memory_rag,
+            tool_packs: tool_packs.to_vec(),
+            brave_search,
         }
     }
 
@@ -447,21 +463,25 @@ impl<E: AgentBrain> ReActLoop<E> {
         let Some(h) = self.lifecycle.clone() else {
             return;
         };
-        h.on_turn_started(
-            user_input,
-            HostView::new(&mut self.host_scratch, WriteScope::Turn),
-        );
+        invoke_lifecycle("on_turn_started", || {
+            h.on_turn_started(
+                user_input,
+                HostView::new(&mut self.host_scratch, WriteScope::Turn),
+            );
+        });
     }
 
     fn emit_plan_finished(&mut self, user_input: &str, plan: &PlanArtifact) {
         let Some(h) = self.lifecycle.clone() else {
             return;
         };
-        h.on_plan_finished(
-            user_input,
-            plan,
-            HostView::new(&mut self.host_scratch, WriteScope::Turn),
-        );
+        invoke_lifecycle("on_plan_finished", || {
+            h.on_plan_finished(
+                user_input,
+                plan,
+                HostView::new(&mut self.host_scratch, WriteScope::Turn),
+            );
+        });
     }
 
     fn emit_subtask_started(
@@ -475,13 +495,15 @@ impl<E: AgentBrain> ReActLoop<E> {
             return;
         };
         let id = subtask.id;
-        h.on_subtask_started(
-            user_input,
-            plan,
-            subtask,
-            index,
-            HostView::new(&mut self.host_scratch, WriteScope::Subtask(id)),
-        );
+        invoke_lifecycle("on_subtask_started", || {
+            h.on_subtask_started(
+                user_input,
+                plan,
+                subtask,
+                index,
+                HostView::new(&mut self.host_scratch, WriteScope::Subtask(id)),
+            );
+        });
     }
 
     fn emit_subtask_finished(
@@ -496,27 +518,31 @@ impl<E: AgentBrain> ReActLoop<E> {
             return;
         };
         let id = subtask.id;
-        h.on_subtask_finished(
-            user_input,
-            plan,
-            subtask,
-            answer,
-            steps_used,
-            HostView::new(&mut self.host_scratch, WriteScope::Subtask(id)),
-        );
+        invoke_lifecycle("on_subtask_finished", || {
+            h.on_subtask_finished(
+                user_input,
+                plan,
+                subtask,
+                answer,
+                steps_used,
+                HostView::new(&mut self.host_scratch, WriteScope::Subtask(id)),
+            );
+        });
     }
 
     fn emit_turn_finished(&mut self, user_input: &str, result: &TurnResult) {
         let Some(h) = self.lifecycle.clone() else {
             return;
         };
-        h.on_turn_finished(
-            user_input,
-            &result.answer,
-            result.plan.as_ref(),
-            result.steps_used,
-            HostView::new(&mut self.host_scratch, WriteScope::Turn),
-        );
+        invoke_lifecycle("on_turn_finished", || {
+            h.on_turn_finished(
+                user_input,
+                &result.answer,
+                result.plan.as_ref(),
+                result.steps_used,
+                HostView::new(&mut self.host_scratch, WriteScope::Turn),
+            );
+        });
     }
 
     /// 計画フェーズの Harness パース結果をプロンプト固定ゾーンへ反映する。
@@ -880,57 +906,40 @@ impl<E: AgentBrain> ReActLoop<E> {
             );
         }
 
+        let waves = execution_waves(&plan.subtasks).map_err(|e| ReActError::ScheduleFailed {
+            message: e.to_string(),
+        })?;
         let mut progress = PlanProgress::default();
         let mut subtask_results = Vec::new();
         let mut total_steps = plan_steps;
         let mut final_answer = String::new();
         let mut combined_trace = plan_trace;
+        let mut index = 0usize;
 
-        for (index, subtask) in plan.subtasks.iter().enumerate() {
+        for wave in &waves {
             if self.is_stop_requested() {
                 return Err(ReActError::Cancelled);
             }
-            self.emit_subtask_started(user_input, &plan, subtask, index);
-            if self.config.show_task_execution {
-                println!("--- Exec subtask {} ---", subtask.id);
-                println!(
-                    "{}",
-                    self.task_registry
-                        .format_subtask_execution_for_display(subtask)
+            if self.config.verbose && waves.len() > 1 {
+                let ids: Vec<_> = wave.iter().map(|s| s.id).collect();
+                eprintln!(
+                    "[exec] wave ({} task(s), parallel={}): {ids:?}",
+                    wave.len(),
+                    self.config.parallel_subtasks
                 );
             }
-            if self.config.verbose {
-                eprintln!("[exec] subtask {}: {}", subtask.id, subtask.goal);
-            }
-            self.prepare_harness_for_subtask(&mut harness, subtask);
-            let (exec, used_driver) =
-                self.run_subtask_exec_audited(user_input, &plan, subtask, &progress)?;
-            harness.advance_after_subtask(subtask.id);
-            self.sync_harness_step_to_blocks(&harness);
-            if self.config.show_task_execution {
-                let mode = if used_driver { "step-driver" } else { "ReAct" };
-                println!(
-                    "  completed via {mode}: {}",
-                    TaskRegistry::format_trace_tools_used(&exec.trace)
-                );
-            }
-            self.emit_subtask_finished(
+            self.run_subtask_wave(
                 user_input,
                 &plan,
-                subtask,
-                &exec.answer,
-                exec.steps_used,
-            );
-            total_steps += exec.steps_used;
-            progress.push(subtask.id, exec.answer.clone());
-            subtask_results.push(SubtaskExecResult {
-                id: subtask.id,
-                answer: exec.answer.clone(),
-                steps_used: exec.steps_used,
-                used_step_driver: used_driver,
-            });
-            final_answer = exec.answer;
-            append_trace(&mut combined_trace, &exec.trace);
+                wave,
+                &mut index,
+                &mut progress,
+                &mut harness,
+                &mut subtask_results,
+                &mut total_steps,
+                &mut final_answer,
+                &mut combined_trace,
+            )?;
         }
 
         self.clear_harness_prompt_blocks();
@@ -947,6 +956,245 @@ impl<E: AgentBrain> ReActLoop<E> {
         };
         self.finish_turn(user_input, &result);
         Ok(result)
+    }
+
+    /// 1 依存波を実行する。`parallel_subtasks` 時はステップドライバ契約タスクを並列化。
+    fn run_subtask_wave(
+        &mut self,
+        user_input: &str,
+        plan: &PlanArtifact,
+        wave: &[Subtask],
+        index: &mut usize,
+        progress: &mut PlanProgress,
+        harness: &mut HarnessState,
+        subtask_results: &mut Vec<SubtaskExecResult>,
+        total_steps: &mut usize,
+        final_answer: &mut String,
+        combined_trace: &mut TurnTrace,
+    ) -> Result<(), ReActError> {
+        let parallel_drivers = self.config.parallel_subtasks
+            && wave.len() > 1
+            && wave.iter().any(|st| {
+                self.config.use_step_driver && self.task_registry.use_step_driver(st)
+            });
+
+        if parallel_drivers {
+            let mut drivers = Vec::new();
+            let mut reacts = Vec::new();
+            for st in wave {
+                let idx = *index;
+                *index += 1;
+                if self.config.use_step_driver && self.task_registry.use_step_driver(st) {
+                    drivers.push((idx, st.clone()));
+                } else {
+                    reacts.push((idx, st.clone()));
+                }
+            }
+
+            for (idx, st) in &drivers {
+                self.emit_subtask_started(user_input, plan, st, *idx);
+                if self.config.show_task_execution {
+                    println!("--- Exec subtask {} (parallel driver) ---", st.id);
+                }
+            }
+
+            let wave_progress = progress.clone();
+            let registry = self.task_registry.clone();
+            let verbose = self.config.verbose;
+            let show_tool_output = self.config.show_tool_output;
+            let env = self.tools.environment().clone();
+            let brave = self.brave_search.clone();
+            let packs = self.tool_packs.clone();
+
+            let driver_outcomes: Vec<(Subtask, Result<(TurnResult, bool), String>)> =
+                std::thread::scope(|scope| {
+                    let mut handles = Vec::with_capacity(drivers.len());
+                    for (_idx, st) in drivers {
+                        let registry = registry.clone();
+                        let packs = packs.clone();
+                        let brave = brave.clone();
+                        let env = env.clone();
+                        handles.push(scope.spawn(move || {
+                            let mut tools = ToolRuntime::with_packs(env, brave, &packs);
+                            let outcome = registry
+                                .run_subtask_driver(&st, &mut tools, verbose, show_tool_output)
+                                .map(|drv| {
+                                    (
+                                        TurnResult {
+                                            answer: drv.answer,
+                                            context: TurnContextSummary::default(),
+                                            trace: drv.trace,
+                                            steps_used: drv.steps_used,
+                                            plan: None,
+                                            harness: None,
+                                            subtask_results: vec![],
+                                            advance_phases: vec![],
+                                        },
+                                        true,
+                                    )
+                                })
+                                .map_err(|e| e.to_string());
+                            (st, outcome)
+                        }));
+                    }
+                    handles
+                        .into_iter()
+                        .map(|h| h.join().expect("parallel driver thread"))
+                        .collect()
+                });
+
+            for (st, outcome) in driver_outcomes {
+                let (exec, used_driver) = match outcome {
+                    Ok(v) => v,
+                    Err(err) => {
+                        // ドライバ失敗時はメインスレッドで ReAct にフォールバック
+                        if self.config.verbose {
+                            eprintln!(
+                                "[driver] subtask {} failed ({err}); falling back to ReAct",
+                                st.id
+                            );
+                        }
+                        self.run_subtask_exec_audited(user_input, plan, &st, &wave_progress)?
+                    }
+                };
+                self.finish_subtask_outcome(
+                    user_input,
+                    plan,
+                    &st,
+                    exec,
+                    used_driver,
+                    progress,
+                    harness,
+                    subtask_results,
+                    total_steps,
+                    final_answer,
+                    combined_trace,
+                );
+            }
+
+            for (idx, st) in reacts {
+                self.run_one_subtask_serial(
+                    user_input,
+                    plan,
+                    &st,
+                    idx,
+                    progress,
+                    harness,
+                    subtask_results,
+                    total_steps,
+                    final_answer,
+                    combined_trace,
+                )?;
+            }
+            return Ok(());
+        }
+
+        for st in wave {
+            let idx = *index;
+            *index += 1;
+            self.run_one_subtask_serial(
+                user_input,
+                plan,
+                st,
+                idx,
+                progress,
+                harness,
+                subtask_results,
+                total_steps,
+                final_answer,
+                combined_trace,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn run_one_subtask_serial(
+        &mut self,
+        user_input: &str,
+        plan: &PlanArtifact,
+        subtask: &Subtask,
+        idx: usize,
+        progress: &mut PlanProgress,
+        harness: &mut HarnessState,
+        subtask_results: &mut Vec<SubtaskExecResult>,
+        total_steps: &mut usize,
+        final_answer: &mut String,
+        combined_trace: &mut TurnTrace,
+    ) -> Result<(), ReActError> {
+        if self.is_stop_requested() {
+            return Err(ReActError::Cancelled);
+        }
+        self.emit_subtask_started(user_input, plan, subtask, idx);
+        if self.config.show_task_execution {
+            println!("--- Exec subtask {} ---", subtask.id);
+            println!(
+                "{}",
+                self.task_registry
+                    .format_subtask_execution_for_display(subtask)
+            );
+        }
+        if self.config.verbose {
+            eprintln!("[exec] subtask {}: {}", subtask.id, subtask.goal);
+        }
+        self.prepare_harness_for_subtask(harness, subtask);
+        let (exec, used_driver) =
+            self.run_subtask_exec_audited(user_input, plan, subtask, progress)?;
+        self.finish_subtask_outcome(
+            user_input,
+            plan,
+            subtask,
+            exec,
+            used_driver,
+            progress,
+            harness,
+            subtask_results,
+            total_steps,
+            final_answer,
+            combined_trace,
+        );
+        Ok(())
+    }
+
+    fn finish_subtask_outcome(
+        &mut self,
+        user_input: &str,
+        plan: &PlanArtifact,
+        subtask: &Subtask,
+        exec: TurnResult,
+        used_driver: bool,
+        progress: &mut PlanProgress,
+        harness: &mut HarnessState,
+        subtask_results: &mut Vec<SubtaskExecResult>,
+        total_steps: &mut usize,
+        final_answer: &mut String,
+        combined_trace: &mut TurnTrace,
+    ) {
+        harness.advance_after_subtask(subtask.id);
+        self.sync_harness_step_to_blocks(harness);
+        if self.config.show_task_execution {
+            let mode = if used_driver { "step-driver" } else { "ReAct" };
+            println!(
+                "  completed via {mode}: {}",
+                TaskRegistry::format_trace_tools_used(&exec.trace)
+            );
+        }
+        self.emit_subtask_finished(
+            user_input,
+            plan,
+            subtask,
+            &exec.answer,
+            exec.steps_used,
+        );
+        *total_steps += exec.steps_used;
+        progress.push(subtask.id, exec.answer.clone());
+        subtask_results.push(SubtaskExecResult {
+            id: subtask.id,
+            answer: exec.answer.clone(),
+            steps_used: exec.steps_used,
+            used_step_driver: used_driver,
+        });
+        *final_answer = exec.answer;
+        append_trace(combined_trace, &exec.trace);
     }
 
     /// サブタスク 1 件を実行し、タスク契約の監査で完了を検証する（未達なら同一サブタスクを再実行）。
@@ -1179,9 +1427,26 @@ impl<E: AgentBrain> ReActLoop<E> {
         self.record_diary(user_input, result);
         if self.config.show_context_metrics && !result.context.is_empty() {
             eprintln!("[context turn] {}", result.context);
+            let turn_sections = aggregate_prompt_sections(
+                result
+                    .trace
+                    .context_usages
+                    .iter()
+                    .map(|u| u.prompt_body.as_str()),
+            );
+            if !turn_sections.is_empty() {
+                let title = format!("turn prompts ({} calls)", result.context.llm_calls);
+                eprintln!(
+                    "[context turn map]\n{}",
+                    format_colormap_titled(&turn_sections, true, &title)
+                );
+            }
             if let Some(last) = result.trace.context_usages.last() {
                 let sections = analyze_prompt_body(&last.prompt_body);
-                eprintln!("[context map]\n{}", format_colormap(&sections, true));
+                eprintln!(
+                    "[context map]\n{}",
+                    format_colormap_titled(&sections, true, "last prompt sections")
+                );
             }
         }
         self.write_context_log(user_input, result);
@@ -1440,6 +1705,25 @@ mod tests {
         assert_eq!(result.subtask_results[0].id, 1);
         assert_eq!(result.steps_used, 5);
         assert!(!result.subtask_results[0].used_step_driver);
+        assert!(result.answer.contains("hello world"));
+    }
+
+    #[test]
+    fn lifecycle_panic_does_not_abort_turn() {
+        use crate::lifecycle::{HostView, TurnLifecycle};
+
+        struct Boom;
+        impl TurnLifecycle for Boom {
+            fn on_plan_finished(&self, _: &str, _: &PlanArtifact, _: HostView<'_>) {
+                panic!("host hook exploded");
+            }
+        }
+
+        let mut config = ReActConfig::default();
+        config.two_phase = true;
+        let mut react = ReActLoop::new(SimpleRuleBrain::new(), PlanBrainMode::rule(), config);
+        react.set_lifecycle(Some(Arc::new(Boom)));
+        let result = react.run_turn("hello world").unwrap();
         assert!(result.answer.contains("hello world"));
     }
 

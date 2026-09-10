@@ -138,6 +138,8 @@ pub struct ReactSection {
     /// 外側推進ループ（`react.advance`）。
     #[serde(default)]
     pub advance: AdvanceSection,
+    /// 同一依存波内サブタスクの並列実行（`two_phase` 時。ステップドライバのみ並列）。
+    pub parallel_subtasks: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -391,6 +393,7 @@ impl AppConfig {
             show_plan: self.react.show_plan.unwrap_or(true),
             show_task_execution: self.react.show_task_execution.unwrap_or(true),
             show_tool_output: self.react.show_tool_output.unwrap_or(true),
+            parallel_subtasks: self.react.parallel_subtasks.unwrap_or(false),
             advance: AdvanceConfig {
                 enabled: self.react.advance.enabled.unwrap_or(false),
                 max_phases: self.react.advance.max_phases.unwrap_or(8).max(1),

@@ -32,9 +32,10 @@ hook 内では次を**行わない**。
 
 - `run_turn` / ツール実行の**再入**
 - 計画キュー・`TurnTrace`・最終 Answer の**直接書き換え**
-- エラーをエンジンへ伝播させてターンを落とすこと（外部 API 失敗は hook 内で処理）
 
 hook は**観測と副作用**（および `HostScratch` への書き込み）に限る。制御権は常にエンジン。
+
+外部 API 失敗は hook 内で処理するのが望ましい。万一パニックしても、エンジンは `invoke_lifecycle`（`catch_unwind`）で捕捉し stderr に出して本筋を継続する。パニック途中の `HostScratch` 書き込みはロールバックしない。
 
 ## 3. 呼び出しタイミング
 
@@ -207,7 +208,28 @@ impl TurnLifecycle for PmSync {
 
 両方登録してよい。
 
-## 8. 関連
+## 8. サブタスク依存と並列（`two_phase`）
+
+計画の各 subtask は任意で `depends_on: [id, …]` を持てる。エンジンは依存波に分割する（`execution_waves`）。
+
+- 波と波の間は常に直列
+- 同一波内は互いに依存しない → `react.parallel_subtasks: true` のとき **ステップドライバ契約タスク**をスレッド並列実行
+- 同一波の ReAct（LLM）サブタスクはメインスレッドで直列（脳・プロンプトが共有 `&mut` のため）
+- `HostScratch` の子ノードは subtask id キーなので、並列ドライバ完了後の `on_subtask_finished` でも枝が衝突しない
+
+```json
+{
+  "subtasks": [
+    { "id": 1, "task": "list_dir", "params": { "path": "src" }, "goal": "…", "done_when": "…" },
+    { "id": 2, "task": "list_dir", "params": { "path": "tests" }, "goal": "…", "done_when": "…", "depends_on": [] },
+    { "id": 3, "task": "write_file_verify", "params": { "path": "out.txt", "content": "x" }, "goal": "…", "done_when": "…", "depends_on": [1, 2] }
+  ]
+}
+```
+
+上の例では id 1 と 2 が第 0 波（並列可）、id 3 が第 1 波。
+
+## 9. 関連
 
 - 計画データ契約（ホストが INPUT/OUTPUT を固定）: [architecture/01_計画層.md](architecture/01_計画層.md)
 - 記憶層（LLM に見せる recalled）: [memory.md](memory.md)
