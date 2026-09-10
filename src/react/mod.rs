@@ -1184,6 +1184,7 @@ mod tests {
     fn advance_enabled_runs_single_phase_with_rule_brain() {
         let mut config = ReActConfig::default();
         config.advance.enabled = true;
+        config.advance.max_phases = 1;
         config.advance.show_phases = false;
         config.show_plan = false;
         config.show_task_execution = false;

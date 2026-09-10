@@ -13,16 +13,18 @@ use super::traits::{Tool, ToolContext};
 
 // --- workspace helpers (crate-private) ---
 
-/// ファイル系ツールのルート。`HARNESS_WORKSPACE` または `TRIAGE_ROOT` で上書き可能。
+/// ファイル系ツールのルート。
+/// `HARNESS_WORKSPACE` が tempdir を指すのを防ぐため、`TRIAGE_ROOT` と `CARGO_MANIFEST_DIR` のみを使う。
 pub fn workspace_root() -> PathBuf {
-    for name in ["HARNESS_WORKSPACE", "TRIAGE_ROOT"] {
-        if let Ok(root) = std::env::var(name) {
-            let root = root.trim();
-            if !root.is_empty() {
-                return PathBuf::from(root);
-            }
+    // `TRIAGE_ROOT` はテスト実行時に利用されるワークスペース指定（CI/CD など）
+    if let Ok(root) = std::env::var("TRIAGE_ROOT") {
+        let root = root.trim();
+        if !root.is_empty() {
+            return PathBuf::from(root);
         }
     }
+    // `CARGO_MANIFEST_DIR` は Cargo がテスト実行時にも正しく設定するため、
+    // HARNESS_WORKSPACE を使わずに直接指定
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 

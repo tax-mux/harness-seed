@@ -220,7 +220,9 @@ mod tests {
             None,
             &[ToolPack::Coding],
         );
-        let obs = rt.execute("read_file", &json!({ "path": "doc/ideas" })).1;
+        // doc/en はディレクトリで、list_dir ツールの対象となるため、
+        // read_file で読むと「ディレクトリです」のエラーが返されるべき
+        let obs = rt.execute("read_file", &json!({ "path": "doc/en" })).1;
         assert!(!obs.ok);
         assert!(
             obs.output.contains("directory") && obs.output.contains("list_dir"),

@@ -3,7 +3,7 @@
     "provider": "ollama",
     "api_key": null,
     "base_url": "http://127.0.0.1:11434",
-    "model": "gemma4",
+      "model": "gemma-4-26b:latest",
     "timeout_secs": 120,
     "json_mode": false
   },

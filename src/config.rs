@@ -939,7 +939,7 @@ mod tests {
     fn loads_ollama_sample() {
         let cfg = AppConfig::load_path("config/samples/config.ollama.json").unwrap();
         assert_eq!(cfg.llm.provider.as_deref(), Some("ollama"));
-        assert_eq!(cfg.llm.model.as_deref(), Some("gemma4"));
+        assert_eq!(cfg.llm.model.as_deref(), Some("gemma-4-26b:latest"));
         assert_eq!(cfg.react.max_steps, Some(16));
     }
 

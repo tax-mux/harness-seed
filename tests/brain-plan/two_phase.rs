@@ -9,6 +9,7 @@ fn mock_two_phase_runs_plan_then_two_subtasks() {
     let mut config = ReActConfig::default();
     config.two_phase = true;
     config.context_log_path = None;
+    config.plan_candidate_selection = false;
 
     let reg = TaskRegistry::builtin();
     let mut react = ReActLoop::new(
