@@ -140,6 +140,7 @@ mod tests {
                     done_when: "d".into(),
                 },
             ],
+            knowledge_sufficient: None,
         };
         let mut q = PlanQueue::from_plan(&plan.subtasks, 8);
         assert_eq!(q.pop_next().unwrap().goal, "a");

@@ -219,10 +219,21 @@ impl Tool for ReadFileTool {
             return Observation::failure(invoke_id, "read_file requires path");
         };
         match resolve_in_workspace(path) {
-            Ok(abs) => match std::fs::read_to_string(&abs) {
-                Ok(text) => Observation::success(invoke_id, text),
-                Err(err) => Observation::failure(invoke_id, format!("read_file failed: {err}")),
-            },
+            Ok(abs) => {
+                // Windows ではディレクトリに read_to_string すると「アクセス拒否 (os error 5)」になり誤解を招く
+                if abs.is_dir() {
+                    return Observation::failure(
+                        invoke_id,
+                        format!(
+                            "read_file: path is a directory ({path}). Use list_dir to list entries, then read_file on a file path."
+                        ),
+                    );
+                }
+                match std::fs::read_to_string(&abs) {
+                    Ok(text) => Observation::success(invoke_id, text),
+                    Err(err) => Observation::failure(invoke_id, format!("read_file failed: {err}")),
+                }
+            }
             Err(err) => Observation::failure(invoke_id, err),
         }
     }

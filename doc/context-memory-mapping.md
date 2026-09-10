@@ -6,14 +6,14 @@ LLM に渡す **1 回の Chat Completions リクエスト**（HarnessSeed では
 - 最少行動単位: [agent-minimum-action-unit.md](agent-minimum-action-unit.md)
 - 組み込みツール: [builtin_tools/README.md](builtin_tools/README.md)
 
-**現状（2025-05 時点）**
+**現状（2026-07 時点）**
 
 | 区分 | 状態 |
 |------|------|
 | ターン内 `TurnTrace` | 実装済み |
-| セッション短期 `SessionMemory` → `Previous turns` | **実装済み**（§10） |
-| コンテキスト計測・`logs/context.jsonl` | 実装済み |
-| 外部記憶（検索・diary 等） | 未接続（`PromptBlocks::recalled` の差し込み口のみ） |
+| セッション短期 `SessionMemory` → `Previous turns` | **実装済み**（§10）。**作業ログ経路（`work_log`）のときだけ**注入 |
+| コンテキスト計測・`logs/context.jsonl` | 実装済み（Observation は文字上限あり） |
+| 外部記憶（検索・diary） | **実装済み** — [memory.md](memory.md)（記憶 RAG + `MemoryBridge`） |
 | ルールファイル注入（`prompt.rules_paths`） | **実装済み**（`PromptBlocks`） |
 | trace / session の要約 | 未実装 |
 
@@ -76,7 +76,8 @@ flowchart LR
     end
 
     subgraph mid["中期"]
-        MD1["外部ストア\ndiary / search"]
+        MD1["Memory RAG\nwork_log / knowledge"]
+        MD2["MemoryBridge\nlocal + backends"]
     end
 
     subgraph long["長期"]

@@ -221,6 +221,10 @@ impl MemoryRag {
 
     pub fn route(&self, user_input: &str, prior_one_liner: Option<&str>) -> MemoryRoute {
         let mut route = self.router.route(user_input, prior_one_liner);
+        // 両方 true は話題混線の元。知識質問を優先し作業ログ側を落とす。
+        if route.work_log && route.knowledge {
+            route.work_log = false;
+        }
         if route.knowledge && route.queries.is_empty() {
             let q = user_input.trim();
             if !q.is_empty() {
@@ -460,5 +464,26 @@ mod tests {
         assert!(!route.work_log);
         assert!(route.knowledge);
         assert_eq!(route.queries.len(), 2);
+    }
+
+    struct BothTrueRouter;
+
+    impl MemoryRouter for BothTrueRouter {
+        fn route(&self, user_input: &str, _: Option<&str>) -> MemoryRoute {
+            MemoryRoute {
+                work_log: true,
+                knowledge: true,
+                queries: vec![user_input.trim().to_string()],
+            }
+        }
+    }
+
+    #[test]
+    fn guard_drops_work_log_when_both_channels_on() {
+        let rag = MemoryRag::with_router(Box::new(BothTrueRouter), 3);
+        let route = rag.route("このプロジェクトについて説明して", Some("User: ファルモ"));
+        assert!(!route.work_log, "work_log must yield to knowledge");
+        assert!(route.knowledge);
+        assert!(!route.queries.is_empty());
     }
 }

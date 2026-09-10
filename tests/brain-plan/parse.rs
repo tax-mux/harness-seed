@@ -19,7 +19,7 @@ fn parses_plan_with_subtasks() {
 
 #[test]
 fn parses_skip_execution() {
-    let raw = r#"{"summary":"hi","skip_execution":true,"subtasks":[]}"#;
+    let raw = r#"{"summary":"hi","skip_execution":true,"knowledge_sufficient":true,"subtasks":[]}"#;
     let plan = parse_plan(raw).unwrap();
     assert!(plan.skip_execution);
     assert!(plan.subtasks.is_empty());

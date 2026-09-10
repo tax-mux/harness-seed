@@ -2,6 +2,10 @@
 
 HarnessSeed は **「プロンプト受取 → 計画層 → 実行層 → 終了」** という直列構成を中核とする ReAct ハーネスである。計画層と実行層はいずれも同じ ReAct ループ部品（`run_layer_loop`）を共有するが、**ツールの有無**と**出力の型**が異なる。
 
+開発方針（汎用解を常に優先する）: [development-principles.md](../development-principles.md)
+
+記憶層（Memory RAG・Bridge・diary）: [memory.md](../memory.md)
+
 - 全体像（SVG）: [full_agent_architecture_v2.svg](../full_agent_architecture_v2.svg)
 - 索引: [README.md](README.md)
 - 最少行動単位: [agent-minimum-action-unit.md](../agent-minimum-action-unit.md)
@@ -16,13 +20,16 @@ HarnessSeed は **「プロンプト受取 → 計画層 → 実行層 → 終�
 
 ```mermaid
 flowchart TB
-    A["プロンプト受取<br/>run_turn(user_input)"] --> B["計画層<br/>run_plan_layer"]
+    A["プロンプト受取<br/>run_turn(user_input)"] --> M["記憶 RAG<br/>work_log / knowledge"]
+    M --> B["計画層<br/>run_plan_layer"]
     B --> C{"skip_execution?"}
-    C -->|はい| D["単一 ReAct で応答"]
+    C -->|はい| D["最終回答<br/>（実行スキップ）"]
     C -->|いいえ| E["実行層<br/>サブタスクごとに<br/>run_layer_loop または step-driver"]
-    D --> F["終了<br/>TurnResult"]
+    D --> F["終了<br/>TurnResult + diary"]
     E --> F
 ```
+
+記憶の詳細: [memory.md](../memory.md)。
 
 `src/plan.rs` の冒頭コメント:
 
@@ -43,11 +50,14 @@ flowchart TB
 {
   "summary": "…",
   "skip_execution": false,
+  "knowledge_sufficient": false,
   "subtasks": [
     { "id": 1, "goal": "…", "done_when": "…" }
   ]
 }
 ```
+
+`skip_execution: true` は `knowledge_sufficient: true` のときだけ許可（[memory.md](../memory.md) §3）。
 
 - `skip_execution: true` … 挨拶・ヘルプなど、ツール不要な単純 Q&A
 - 登録タスク id（`tasks/*.json`）を参照するサブタスクもここで列挙される

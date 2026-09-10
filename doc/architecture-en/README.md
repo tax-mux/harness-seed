@@ -2,6 +2,10 @@
 
 Documentation for HarnessSeed's two-layer model (planning + execution) and tool selection.
 
+Memory layer (RAG, Bridge, diary): [memory.md](../memory.md) (Japanese; implementation source of truth).
+
+Development principles: [development-principles.md](../development-principles.md).
+
 | # | Document | Content |
 |---|----------|---------|
 | 00 | [harness-seed structure](00_harness-seed-structure.md) | Overall flow, layer roles, execution modes |

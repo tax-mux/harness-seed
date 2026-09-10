@@ -205,6 +205,7 @@ mod tests {
                     done_when: "done".into(),
                 },
             ],
+            knowledge_sufficient: None,
         };
         let mut progress = AdvanceProgress::new("mission", "two steps");
         progress.push(1, "step one", "answer one");

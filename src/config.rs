@@ -384,7 +384,7 @@ impl AppConfig {
                 .session_max_turns
                 .unwrap_or(SessionMemory::DEFAULT_MAX_TURNS),
             two_phase: self.react.two_phase.unwrap_or(false),
-            max_steps_plan: self.react.max_steps_plan.unwrap_or(4),
+            max_steps_plan: self.react.max_steps_plan.unwrap_or(8),
             max_thoughts: self.react.max_thoughts.unwrap_or(1).max(1),
             use_step_driver: self.react.use_step_driver.unwrap_or(true),
             show_prompt: cli_show_prompt || self.react.show_prompt.unwrap_or(false),

@@ -133,6 +133,7 @@ fn parse_numbered_steps(text: &str) -> Option<PlanArtifact> {
         summary,
         skip_execution: false,
         subtasks,
+        knowledge_sufficient: Some(false),
     })
 }
 

@@ -45,7 +45,8 @@ Schema:
     {"id": 2, "goal": "<freeform if no task id>", "done_when": "<criterion>"}
   ],
   "output": "<fixed OUTPUT contract line copied from prompt>",
-  "skip_execution": <true if trivial chat/help with no tools needed>,
+  "skip_execution": <true only if knowledge_sufficient is true>,
+  "knowledge_sufficient": <true if Recalled and/or general knowledge fully answer the user without tools>
 }
 
 Rules:
@@ -54,9 +55,10 @@ Rules:
 - Keep `input` and `output` equal to the fixed contract in prompt; only design `steps`.
 - For external / current-events / web-only questions, use task `web_research` with params `{"query":"<search string>"}` when it appears in the catalog.
 - For repo-only coding work, use tasks like `list_dir`, `write_file_verify`, or freeform goals with grep/read_file/write_file/run_cmd.
-- Use skip_execution: true only for pure Q&A, greetings, or help with no filesystem/shell/web work.
+- Decide knowledge_sufficient first: true only when Recalled context and/or general knowledge fully answer the user (greetings, chit-chat, facts you can state without files). false when the answer needs workspace files, tools, or more evidence than Recalled provides (project overview, code, logs).
+- skip_execution: true is allowed ONLY when knowledge_sufficient is true. The harness rejects skip otherwise and runs freeform execution (tools chosen from the catalog).
 - When skip_execution is true, set `output` to the final user-facing reply (execution layer may not run).
-- Recalled context: use it when relevant; general knowledge is fine when Recalled is irrelevant — do not claim it came from memory.
+- Recalled context: use it when relevant; general knowledge is fine when Recalled is irrelevant — do not claim it came from memory. Thin or off-topic Recalled is NOT sufficient for project-specific questions.
 - Subtask ids must be unique positive integers starting at 1.
 "#;
 
@@ -77,6 +79,10 @@ pub struct PlanArtifact {
     pub summary: String,
     pub skip_execution: bool,
     pub subtasks: Vec<Subtask>,
+    /// Recalled / 一般知識だけで最終回答できるか。
+    /// `skip_execution: true` はこれが `Some(true)` のときだけ許可（ハーネスが強制）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub knowledge_sufficient: Option<bool>,
 }
 
 impl PlanArtifact {
@@ -86,6 +92,7 @@ impl PlanArtifact {
             summary: "direct execution".into(),
             skip_execution: true,
             subtasks: vec![],
+            knowledge_sufficient: Some(true),
         }
     }
 
@@ -101,12 +108,32 @@ impl PlanArtifact {
                 goal: user_input.to_string(),
                 done_when: "user request satisfied".into(),
             }],
+            knowledge_sufficient: Some(false),
         }
     }
 
     /// 実行フェーズに進むか。
     pub fn needs_execution(&self) -> bool {
         !self.skip_execution && !self.subtasks.is_empty()
+    }
+
+    /// `skip_execution` は `knowledge_sufficient == true` のときだけ許可。
+    /// 不足（false / 未設定）なら実行へ落とし、steps が空なら自由記述の実行 subtask を足す。
+    /// （特定ドメインのツール列は決めない — 実行層 ReAct がカタログから選ぶ。）
+    pub fn enforce_knowledge_sufficiency(&mut self) {
+        if self.skip_execution {
+            if self.knowledge_sufficient == Some(true) {
+                return;
+            }
+            self.skip_execution = false;
+            self.knowledge_sufficient = Some(false);
+        }
+        if !self.skip_execution && self.subtasks.is_empty() {
+            self.subtasks = vec![default_evidence_subtask(self.summary.trim())];
+            if self.knowledge_sufficient != Some(true) {
+                self.knowledge_sufficient = Some(false);
+            }
+        }
     }
 
     /// `skip_execution` 時に exec LLM を呼ばず返す本文。
@@ -145,6 +172,24 @@ impl PlanArtifact {
             return Some(wi.to_string());
         }
         None
+    }
+}
+
+/// 知識不足で steps が空のときの汎用実行 subtask（タスク id 固定なし）。
+fn default_evidence_subtask(summary: &str) -> Subtask {
+    let goal = if usable_direct_reply(summary) {
+        format!(
+            "{summary}. Recalled context alone is insufficient — use available tools as needed, then fully answer the user."
+        )
+    } else {
+        "Recalled context alone is insufficient — use available tools as needed to gather evidence, then fully answer the user.".into()
+    };
+    Subtask {
+        id: 1,
+        task: None,
+        params: json!({}),
+        goal,
+        done_when: "user request satisfied with sufficient evidence".into(),
     }
 }
 
@@ -356,6 +401,7 @@ mod direct_reply_tests {
             summary: "short label".into(),
             skip_execution: true,
             subtasks: vec![],
+            knowledge_sufficient: Some(true),
         };
         let wi = r#"{"summary":"short label","skip_execution":true,"subtasks":[],"output":"最終回答本文"}"#;
         assert_eq!(
@@ -370,6 +416,7 @@ mod direct_reply_tests {
             summary: "これは十分な長さの要約回答です".into(),
             skip_execution: true,
             subtasks: vec![],
+            knowledge_sufficient: Some(true),
         };
         assert!(plan.direct_reply("{}").unwrap().contains("要約回答"));
     }

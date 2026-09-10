@@ -940,6 +940,7 @@ mod tests {
                     goal: "dir".into(),
                     done_when: "done".into(),
                 }],
+                knowledge_sufficient: None,
             },
         );
         let html = format_planner_fixed_zone_html(
@@ -995,6 +996,7 @@ mod tests {
                     goal: "dir".into(),
                     done_when: "done".into(),
                 }],
+                knowledge_sufficient: None,
             },
         );
         let html = format_planner_fixed_zone_html(
@@ -1056,6 +1058,7 @@ mod tests {
                     goal: "dir".into(),
                     done_when: "done".into(),
                 }],
+                knowledge_sufficient: None,
             },
         );
         let html = format_planner_fixed_zone_html(

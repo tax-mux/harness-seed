@@ -844,6 +844,7 @@ mod tests {
                     done_when: "verified".into(),
                 },
             ],
+            knowledge_sufficient: None,
         };
         let st = plan.subtasks[0].clone();
         let m = reg
@@ -869,6 +870,7 @@ mod tests {
                 goal: String::new(),
                 done_when: String::new(),
             }],
+            knowledge_sufficient: None,
         };
         let st = plan.subtasks[0].clone();
         let m = reg
@@ -983,6 +985,7 @@ UID: 7
                     done_when: String::new(),
                 },
             ],
+            knowledge_sufficient: None,
         };
         let input = "\
 User: 古い依頼
@@ -1027,6 +1030,7 @@ UID: 302023
                 goal: String::new(),
                 done_when: String::new(),
             }],
+            knowledge_sufficient: None,
         };
         reg.resolve_plan(&mut plan, "【参照情報】\nUID: 302711\n", None);
         assert_eq!(plan.subtasks[0].params["uid"], 302711);
@@ -1045,6 +1049,7 @@ UID: 302023
                 goal: String::new(),
                 done_when: String::new(),
             }],
+            knowledge_sufficient: None,
         };
         reg.resolve_plan(&mut plan, "【参照情報】\nUID: 99\n", None);
         assert_eq!(plan.subtasks[0].task.as_deref(), Some("compose_context"));
@@ -1078,6 +1083,7 @@ Current user request:
                 goal: String::new(),
                 done_when: String::new(),
             }],
+            knowledge_sufficient: None,
         };
 
         // 参照メールブロックが無いケース → compose_context は compose_context_no_ref に置換される
@@ -1115,6 +1121,7 @@ Current user request:
                 goal: "要約を返す".into(),
                 done_when: "回答した".into(),
             }],
+            knowledge_sufficient: None,
         };
         reg.resolve_plan(&mut plan, "Current user request:\n要約して\n\n【参照情報】\nUID: 42\n", None);
         assert_eq!(plan.subtasks.len(), 2);
@@ -1149,6 +1156,7 @@ Current user request:
                 goal: String::new(),
                 done_when: String::new(),
             }],
+            knowledge_sufficient: None,
         };
         reg.resolve_plan(
             &mut plan,
@@ -1173,6 +1181,7 @@ Current user request:
                 goal: String::new(),
                 done_when: String::new(),
             }],
+            knowledge_sufficient: None,
         };
         reg.resolve_plan(&mut plan, "【参照情報】\nUID: 7\n", None);
         assert_eq!(plan.subtasks[0].task.as_deref(), Some("mail_read"));
@@ -1224,6 +1233,7 @@ Current user request:
                     done_when: "文案提示".into(),
                 },
             ],
+            knowledge_sufficient: None,
         };
         reg.resolve_plan(
             &mut plan,
@@ -1257,6 +1267,7 @@ Current user request:
                     done_when: "set_compose_form 成功".into(),
                 },
             ],
+            knowledge_sufficient: None,
         };
         reg.resolve_plan(
             &mut plan,
@@ -1281,6 +1292,7 @@ Current user request:
                 goal: "sync".into(),
                 done_when: "done".into(),
             }],
+            knowledge_sufficient: None,
         };
         reg.resolve_plan(&mut plan, "UID: 42\n", None);
         let st = &plan.subtasks[0];

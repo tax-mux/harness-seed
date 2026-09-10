@@ -1,6 +1,6 @@
 # mempalace-adapter
 
-HarnessSeed から **疎結合**で使う mempalace クライアント。
+HarnessSeed から **疎結合**で使う mempalace クライアント。本体の記憶フローは [doc/memory.md](../../doc/memory.md)。
 
 ## 既定: MCP stdio（Cursor と同じ）
 

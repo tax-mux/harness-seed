@@ -15,7 +15,8 @@ HarnessSeed に**まだ入っていない**機能・流用案を置く。実装�
 | [tool-plugins.md](tool-plugins.md) | ツール trait・レジストリ・`tools.packs`（basic / coding / web_search）— **v0 実装済み** |
 | [tool-attention-reuse-ideas.md](tool-attention-reuse-ideas.md) | Tool Attention 論文の流用（`tool_attention` モジュール案） |
 | [shell-hook-rtk.md](shell-hook-rtk.md) | 汎用 ReAct の `run_cmd` に ShellHook チェーン、RTK を PreCommand で載せる案 |
-| [mempalace-integration.md](mempalace-integration.md) | mempalace（中期・長期記憶）を `recalled` / `memory_bridge` 経由で接続する案 |
+| [mempalace-integration.md](mempalace-integration.md) | mempalace 連携 — **実装済み**（正本: [../memory.md](../memory.md)） |
+| [memory-and-replan-architecture.md](memory-and-replan-architecture.md) | 記憶 RAG・replan・Recall — **実装済み**（正本: [../memory.md](../memory.md)） |
 | [corpus2skill-integration.md](corpus2skill-integration.md) | Corpus2Skill（ナビ型 Skill ツリー）。telospvl/mempalace 代替候補 |
 | [context-colormap.md](context-colormap.md) | プロンプト・ブロック別カラーマップ（v0 実装済み + HTML 等は将来） |
 | [task-registry.md](task-registry.md) | 機能塊タスク `tasks/*.json` + `TaskRegistry`（スケルトン実装済み） |

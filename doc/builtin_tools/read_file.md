@@ -21,6 +21,8 @@
 
 バイナリファイルは UTF-8 解釈失敗でエラーになる。部分読み・行範囲指定は未対応。
 
+巨大ファイルは Observation 全体の上限（`MAX_OBSERVATION_CHARS`）で先頭のみプロンプトへ載る（文脈溢れ防止）。
+
 ## 成功時の output 例
 
 ファイル内容そのもの（複数行可）:
@@ -38,7 +40,7 @@ fn main() {
 | `path` なし | `read_file requires path` |
 | ワークスペース外 | `path outside workspace: ...` |
 | ファイルなし | `read_file failed: ...` |
-| ディレクトリを指定 | `read_file failed: ...`（OS エラー） |
+| ディレクトリを指定 | `read_file: path is a directory (...). Use list_dir ...`（権限エラーにはしない） |
 
 ## LLM からの呼び出し例
 
