@@ -203,11 +203,8 @@ mod tests {
 
     #[test]
     fn list_dir_lists_cwd() {
-        let mut rt = ToolRuntime::with_packs(
-            RuntimeEnvironment::detect(),
-            None,
-            &[ToolPack::Coding],
-        );
+        let mut rt =
+            ToolRuntime::with_packs(RuntimeEnvironment::detect(), None, &[ToolPack::Coding]);
         let obs = rt.execute("list_dir", &json!({})).1;
         assert!(obs.ok);
         assert!(obs.output.contains("Cargo.toml"));
@@ -215,11 +212,8 @@ mod tests {
 
     #[test]
     fn read_file_rejects_directory_with_clear_message() {
-        let mut rt = ToolRuntime::with_packs(
-            RuntimeEnvironment::detect(),
-            None,
-            &[ToolPack::Coding],
-        );
+        let mut rt =
+            ToolRuntime::with_packs(RuntimeEnvironment::detect(), None, &[ToolPack::Coding]);
         // doc/en はディレクトリで、list_dir ツールの対象となるため、
         // read_file で読むと「ディレクトリです」のエラーが返されるべき
         let obs = rt.execute("read_file", &json!({ "path": "doc/en" })).1;
@@ -242,11 +236,8 @@ mod tests {
         let abs = resolve_in_workspace(rel).unwrap();
         let _ = fs::remove_file(&abs);
 
-        let mut rt = ToolRuntime::with_packs(
-            RuntimeEnvironment::detect(),
-            None,
-            &[ToolPack::Coding],
-        );
+        let mut rt =
+            ToolRuntime::with_packs(RuntimeEnvironment::detect(), None, &[ToolPack::Coding]);
         let write = rt
             .execute(
                 "write_file",
@@ -270,11 +261,8 @@ mod tests {
 
     #[test]
     fn grep_finds_in_src() {
-        let mut rt = ToolRuntime::with_packs(
-            RuntimeEnvironment::detect(),
-            None,
-            &[ToolPack::Coding],
-        );
+        let mut rt =
+            ToolRuntime::with_packs(RuntimeEnvironment::detect(), None, &[ToolPack::Coding]);
         let obs = rt
             .execute(
                 "grep",
@@ -296,11 +284,8 @@ mod tests {
 
     #[test]
     fn run_cmd_echo() {
-        let mut rt = ToolRuntime::with_packs(
-            RuntimeEnvironment::detect(),
-            None,
-            &[ToolPack::Coding],
-        );
+        let mut rt =
+            ToolRuntime::with_packs(RuntimeEnvironment::detect(), None, &[ToolPack::Coding]);
         let command = "echo hello_cmd";
         let obs = rt.execute("run_cmd", &json!({ "command": command })).1;
         assert!(obs.ok, "{}", obs.output);
@@ -309,11 +294,8 @@ mod tests {
 
     #[test]
     fn basic_pack_unknown_tool() {
-        let mut rt = ToolRuntime::with_packs(
-            RuntimeEnvironment::detect(),
-            None,
-            &[ToolPack::Basic],
-        );
+        let mut rt =
+            ToolRuntime::with_packs(RuntimeEnvironment::detect(), None, &[ToolPack::Basic]);
         let obs = rt.execute("grep", &json!({ "pattern": "x" })).1;
         assert!(!obs.ok);
         assert!(obs.output.contains("unknown tool"));

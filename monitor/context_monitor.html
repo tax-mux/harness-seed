@@ -44,15 +44,15 @@ pre{margin:0;padding:12px;border:1px solid #9996;border-radius:8px;overflow:auto
 <section>
 <h2>今回の入力と内部状態</h2>
 <pre>最新ユーザープロンプト:
-どんなフォルダがあるの
+README.md を読んで、このプロジェクトが何をするものか日本語で2文以内で教えて。
 
 内部状態サマリ（Context）:
-llm_calls=2 prompt: 5817 chars / 1550 tok (api) | completion: 269 chars / 306 tok (api) | total_tokens=1856
+llm_calls=3 prompt: 11037 chars / 3046 tok (api) | completion: 242 chars / 469 tok (api) | total_tokens=3515
 
 今回の動き（Trace）:
-thoughts=0 / actions=1 / observations=1
-last_action: list_dir {&quot;path&quot;:&quot;.&quot;}
-last_observation: ok .cursor/ .git/ .gitignore .vscode/ AGENTS.md Cargo.lock Cargo.toml LICENSE README.ja.md README.md adapters/ benches/ config/ doc/ harness-seed.code-workspace ideas/ logs/ monitor/ ...
+thoughts=0 / actions=2 / observations=2
+last_action: read_file {&quot;path&quot;:&quot;README.md&quot;}
+last_observation: ok # HarnessSeed  Embedded ReAct harness (Rust crate `harness-seed`). It is a &quot;seed&quot; for the agent layer to be embedded in existing applications, **not a chat UI**. It provides both a...
 
 Harness内部状態:
 （なし）</pre>
@@ -69,7 +69,7 @@ Harness内部状態:
 <span class="tag tag-p1">Phase 1</span>
 <span class="event-title">ユーザー指示を受領</span>
 </div>
-<p class="event-body">どんなフォルダがあるの</p>
+<p class="event-body">README.md を読んで、このプロジェクトが何をするものか日本語で2文以内で教えて。</p>
 </li>
 <li class="event">
 <div class="event-head">
@@ -91,7 +91,7 @@ Harness内部状態:
 <div class="event-head">
 <span class="event-no">#4</span>
 <span class="tag tag-p3">Phase 3</span>
-<span class="event-title">tool action #4</span>
+<span class="event-title">tool action #1</span>
 </div>
 <p class="event-body">tool=list_dir args={&quot;path&quot;:&quot;.&quot;}</p>
 </li>
@@ -99,9 +99,25 @@ Harness内部状態:
 <div class="event-head">
 <span class="event-no">#5</span>
 <span class="tag tag-p3">Phase 3</span>
-<span class="event-title">observation #4</span>
+<span class="event-title">observation #1</span>
 </div>
-<p class="event-body">status=ok output=.cursor/ .git/ .gitignore .vscode/ AGENTS.md Cargo.lock Cargo.toml LICENSE README.ja.md README.md adapters/ benches/ config/ doc/ harness-seed.code-workspace ideas/ logs/ monitor/ src/ target/ tasks/ test_ollama.sh tests...</p>
+<p class="event-body">status=ok output=.DS_Store .cursor/ .git/ .gitignore .vscode/ AGENTS.md Cargo.lock Cargo.toml LICENSE README.ja.md README.md adapters/ benches/ config/ doc/ harness-seed.code-workspace ideas/ logs/ monitor/ src/ target/ tasks/ test_ollam...</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#6</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">tool action #2</span>
+</div>
+<p class="event-body">tool=read_file args={&quot;path&quot;:&quot;README.md&quot;}</p>
+</li>
+<li class="event">
+<div class="event-head">
+<span class="event-no">#7</span>
+<span class="tag tag-p3">Phase 3</span>
+<span class="event-title">observation #2</span>
+</div>
+<p class="event-body">status=ok output=# HarnessSeed  Embedded ReAct harness (Rust crate `harness-seed`). It is a &quot;seed&quot; for the agent layer to be embedded in existing applications, **not a chat UI**. It provides both a library and a CLI (`harness-seed`) in t...</p>
 </li>
 </ol>
 </section>

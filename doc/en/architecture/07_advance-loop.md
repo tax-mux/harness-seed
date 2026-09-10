@@ -12,7 +12,7 @@ Glossary: [glossary.md](glossary.md) · [JP](../../ja/architecture/07_推進ル�
 ```json
 "react": {
   "advance": {
-    "enabled": true,
+    "mode": "from_plan",
     "max_phases": 8,
     "clear_session_each_phase": true,
     "max_note_chars": 1500,
@@ -27,7 +27,8 @@ Glossary: [glossary.md](glossary.md) · [JP](../../ja/architecture/07_推進ル�
 
 | Key | Meaning | Default |
 |-----|---------|---------|
-| `enabled` | Advance loop ON (priority over `two_phase`) | `false` |
+| `mode` | `off` / `always` / `from_plan`. `always` is legacy `enabled: true`. `from_plan` escalates from plan shape | `off` |
+| `enabled` | Compat: `true`=`always`, `false`=`off` (`mode` wins) | `false` |
 | `max_phases` | Max phases per request | `8` |
 | `clear_session_each_phase` | Clear `SessionMemory` before each phase | `true` |
 | `max_note_chars` | Cap for one phase summary in `recalled` | `1500` |
@@ -43,8 +44,8 @@ These settings bound how much long-running work a single request can perform, ho
 
 `run_turn` branching:
 
-1. `advance.enabled` → `run_turn_advance`
-2. Else if `two_phase` → `run_turn_two_phase`
+1. `advance.mode == always` (legacy `enabled: true`) → `run_turn_advance`
+2. `from_plan` or `two_phase` → plan once; escalate to advance exec when the plan shape is long / has `replan` / has multiple waves; otherwise two_phase exec
 3. Else → single ReAct
 
 ## Flow

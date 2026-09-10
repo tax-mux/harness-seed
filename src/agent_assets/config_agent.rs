@@ -189,10 +189,11 @@ fn resolve_under_base(base_dir: &Path, rel: &str) -> Result<PathBuf, AgentConfig
     } else {
         base_dir.join(rel)
     };
-    path.canonicalize().map_err(|source| AgentConfigError::Path {
-        path: path.clone(),
-        reason: source.to_string(),
-    })
+    path.canonicalize()
+        .map_err(|source| AgentConfigError::Path {
+            path: path.clone(),
+            reason: source.to_string(),
+        })
 }
 
 #[cfg(test)]
@@ -208,7 +209,9 @@ mod tests {
         ];
         let src = resolve_cli_agent_config(&args, Path::new("/cwd")).unwrap();
         match src {
-            CliAgentSource::ConfigFile(p) => assert_eq!(p, PathBuf::from("/tmp/proj/config.agent.json")),
+            CliAgentSource::ConfigFile(p) => {
+                assert_eq!(p, PathBuf::from("/tmp/proj/config.agent.json"))
+            }
             _ => panic!("expected config file"),
         }
     }

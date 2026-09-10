@@ -204,7 +204,8 @@ impl<E: AgentBrain> ReActLoop<E> {
 
     /// JSON 文字列 1 件を処理し、レスポンス JSON 文字列を返す。
     pub fn handle_wire_json(&mut self, json_line: &str) -> Result<String, ProtocolError> {
-        let request: WireRequest = serde_json::from_str(json_line).map_err(ProtocolError::JsonParse)?;
+        let request: WireRequest =
+            serde_json::from_str(json_line).map_err(ProtocolError::JsonParse)?;
         let response = self.handle_wire_request(request);
         serde_json::to_string(&response).map_err(ProtocolError::JsonSerialize)
     }
@@ -217,7 +218,11 @@ impl<E: AgentBrain> ReActLoop<E> {
     }
 }
 
-fn turn_response_ok(session_turns: usize, result: &TurnResult, options: &TurnWireOptions) -> WireResponse {
+fn turn_response_ok(
+    session_turns: usize,
+    result: &TurnResult,
+    options: &TurnWireOptions,
+) -> WireResponse {
     let trace = options
         .include_trace
         .then(|| trace_dto(&result.trace, options.max_observation_chars));
@@ -260,10 +265,9 @@ fn turn_response_err(session_turns: usize, err: &ReActError) -> WireResponse {
             format!("ReAct loop exceeded max steps ({limit})"),
         ),
         ReActError::Cancelled => ("cancelled", "ReAct loop cancelled".to_string()),
-        ReActError::PlanParseFailed { message } => (
-            "plan_parse_failed",
-            format!("Plan parse failed: {message}"),
-        ),
+        ReActError::PlanParseFailed { message } => {
+            ("plan_parse_failed", format!("Plan parse failed: {message}"))
+        }
         ReActError::ScheduleFailed { message } => (
             "schedule_failed",
             format!("Subtask schedule failed: {message}"),
@@ -383,8 +387,7 @@ pub fn protocol_error_response(message: impl Into<String>) -> String {
         message: message.into(),
     };
     serde_json::to_string(&resp).unwrap_or_else(|_| {
-        r#"{"type":"protocol_error","version":1,"ok":false,"message":"serialize failed"}"#
-            .into()
+        r#"{"type":"protocol_error","version":1,"ok":false,"message":"serialize failed"}"#.into()
     })
 }
 
@@ -399,9 +402,7 @@ pub fn run_json_repl<E: AgentBrain>(
     let mut stdout = io::stdout();
     let reader = stdin.lock();
 
-    eprintln!(
-        "HarnessSeed JSON REPL — one JSON object per line (protocol v{WIRE_VERSION})"
-    );
+    eprintln!("HarnessSeed JSON REPL — one JSON object per line (protocol v{WIRE_VERSION})");
     eprintln!("runtime: {}", loop_engine.blocks.runtime.summary_line());
     eprintln!("request types: turn | session_clear | ping");
 

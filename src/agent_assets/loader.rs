@@ -146,10 +146,12 @@ fn load_skills(
                     path: task_path.clone(),
                     source,
                 })?;
-            task_registry.register(def).map_err(|e| TaskLoadError::Invalid {
-                path: task_path,
-                reason: e.to_string(),
-            })?;
+            task_registry
+                .register(def)
+                .map_err(|e| TaskLoadError::Invalid {
+                    path: task_path,
+                    reason: e.to_string(),
+                })?;
             report.skill_tasks += 1;
         }
 

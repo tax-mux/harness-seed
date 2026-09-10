@@ -16,8 +16,8 @@ fn format_plan_for_display_lists_subtasks() {
             params: json!({ "path": "src" }),
             goal: String::new(),
             done_when: "listed".into(),
-                    depends_on: vec![],
-}],
+            depends_on: vec![],
+        }],
         knowledge_sufficient: Some(false),
         user_reply: None,
     };

@@ -153,17 +153,17 @@ fn build_router_messages(
     user.push_str(user_input);
     user.push('\n');
     user.push_str("JSON:");
-    vec![
-        ChatMessage::system(ROUTER_SYSTEM),
-        ChatMessage::user(user),
-    ]
+    vec![ChatMessage::system(ROUTER_SYSTEM), ChatMessage::user(user)]
 }
 
 fn parse_route_json(raw: &str, max_queries: usize) -> Option<MemoryRoute> {
     let trimmed = raw.trim();
     let json_str = extract_json_object(trimmed)?;
     let value: serde_json::Value = serde_json::from_str(json_str).ok()?;
-    let work_log = value.get("work_log").and_then(|v| v.as_bool()).unwrap_or(false);
+    let work_log = value
+        .get("work_log")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let knowledge = value
         .get("knowledge")
         .and_then(|v| v.as_bool())
@@ -325,7 +325,11 @@ fn search_queries(
 }
 
 /// `PackedRecall` を `PromptBlocks.recalled` へ載せる。
-pub fn apply_packed_recall(blocks: &mut PromptBlocks, packed: &PackedRecall, config: &MemoryRuntimeConfig) {
+pub fn apply_packed_recall(
+    blocks: &mut PromptBlocks,
+    packed: &PackedRecall,
+    config: &MemoryRuntimeConfig,
+) {
     if !packed.work_log.is_empty() {
         let text = format_recalled_block(
             "recent work",
@@ -335,8 +339,7 @@ pub fn apply_packed_recall(blocks: &mut PromptBlocks, packed: &PackedRecall, con
         blocks.push_recalled(text);
     }
     if !packed.knowledge.is_empty() {
-        let text =
-            format_recalled_block("search hit", &packed.knowledge, config.search_max_chars);
+        let text = format_recalled_block("search hit", &packed.knowledge, config.search_max_chars);
         blocks.push_recalled(text);
     }
 }
@@ -356,11 +359,7 @@ pub fn inject_memory_recalled(
 }
 
 /// 知識検索のみ（plan `recall`。route はスキップし、呼ぶ側が知識意図と明示）。
-pub fn recall_knowledge(
-    memory: &dyn MemoryBridge,
-    top_k: usize,
-    query: &str,
-) -> Vec<RecalledItem> {
+pub fn recall_knowledge(memory: &dyn MemoryBridge, top_k: usize, query: &str) -> Vec<RecalledItem> {
     let q = query.trim();
     if q.is_empty() {
         return vec![];
@@ -420,12 +419,7 @@ mod tests {
     fn rag_loads_work_log_on_continuation() {
         let memory = seed_project_diary();
         let rag = MemoryRag::rule_only();
-        let packed = rag.run(
-            &memory,
-            &MemoryRuntimeConfig::default(),
-            "続きやって",
-            None,
-        );
+        let packed = rag.run(&memory, &MemoryRuntimeConfig::default(), "続きやって", None);
         assert!(packed.route.work_log);
         assert_eq!(packed.work_log.len(), 1);
         assert!(packed.knowledge.is_empty());

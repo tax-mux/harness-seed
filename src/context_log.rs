@@ -189,9 +189,8 @@ impl ContextLogWriter {
             steps: steps_from_trace(&result.trace),
         };
 
-        let line = serde_json::to_string(&entry).map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidData, e.to_string())
-        })?;
+        let line = serde_json::to_string(&entry)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 
         let mut file = OpenOptions::new()
             .create(true)

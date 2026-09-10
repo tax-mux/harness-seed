@@ -1,6 +1,6 @@
 //! Harness パース（作業指示書 → HarnessState）と内部状態。
 
-use harness_seed::{parse_harness, HarnessStatus, HarnessState, PlanArtifact, TaskRegistry};
+use harness_seed::{parse_harness, HarnessState, HarnessStatus, PlanArtifact, TaskRegistry};
 
 #[test]
 fn parses_json_plan_into_harness_state() {
@@ -67,8 +67,8 @@ fn format_current_step_for_prompt_lists_contract() {
             params: serde_json::json!({ "path": "src" }),
             goal: String::new(),
             done_when: "listed".into(),
-                    depends_on: vec![],
-}],
+            depends_on: vec![],
+        }],
         knowledge_sufficient: Some(false),
         user_reply: None,
     };

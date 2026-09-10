@@ -13,9 +13,7 @@ use crate::context_metrics::ContextUsage;
 use crate::session::SessionMemory;
 use crate::tasks::TaskRegistry;
 use crate::tool::ToolRuntime;
-use crate::turn_observer::{
-    emit_candidates, emit_llm_step, emit_phase_started, TurnObserver,
-};
+use crate::turn_observer::{emit_candidates, emit_llm_step, emit_phase_started, TurnObserver};
 
 use super::prompt::build_candidate_selection_messages;
 
@@ -159,12 +157,8 @@ pub fn select_and_register_plan_candidates_with_budget<B: AgentBrain>(
         .as_ref()
         .map(|c| c.excluded_task_ids.iter().map(String::as_str).collect())
         .unwrap_or_default();
-    let allowed = task_registry.available_task_ids(
-        &available,
-        blocks.web_search_enabled,
-        &exclude,
-        true,
-    );
+    let allowed =
+        task_registry.available_task_ids(&available, blocks.web_search_enabled, &exclude, true);
     if allowed.is_empty() {
         emit_candidates(turn_observer, "candidates", &[], false, true);
         return vec![];
@@ -272,13 +266,7 @@ pub fn select_and_register_plan_candidates_with_budget<B: AgentBrain>(
         );
     }
 
-    emit_candidates(
-        turn_observer,
-        "candidates",
-        &selected,
-        chitchat && ok,
-        ok,
-    );
+    emit_candidates(turn_observer, "candidates", &selected, chitchat && ok, ok);
 
     if selected.is_empty() {
         apply_no_tools_catalog(tools, blocks);

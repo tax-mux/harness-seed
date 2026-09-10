@@ -14,9 +14,9 @@
 
 mod factory;
 mod layered;
-mod rag;
 #[cfg(feature = "mempalace")]
 mod mempalace;
+mod rag;
 
 use std::fmt;
 
@@ -150,10 +150,7 @@ impl LocalDiaryBridge {
             body.push_str(&format!("Answer: {}\n", entry.answer));
         } else {
             for p in &entry.phases {
-                body.push_str(&format!(
-                    "- Phase {}: {}\n  {}\n",
-                    p.id, p.goal, p.answer
-                ));
+                body.push_str(&format!("- Phase {}: {}\n  {}\n", p.id, p.goal, p.answer));
             }
         }
         RecalledItem {
@@ -184,11 +181,8 @@ impl MemoryBridge for LocalDiaryBridge {
         }
         let mut hits = Vec::new();
         for (i, entry) in self.entries.iter().enumerate().rev() {
-            let hay = format!(
-                "{} {} {}",
-                entry.user_input, entry.summary, entry.answer
-            )
-            .to_lowercase();
+            let hay =
+                format!("{} {} {}", entry.user_input, entry.summary, entry.answer).to_lowercase();
             if text_matches_query(&hay, &q) {
                 let mut item = self.entry_to_item(entry, i + 1);
                 item.source = RecalledSource::SearchHit;
@@ -439,17 +433,11 @@ mod tests {
         );
         assert!(!route.work_log);
         assert!(
-            blocks
-                .recalled
-                .iter()
-                .all(|c| !c.contains("[recent work]")),
+            blocks.recalled.iter().all(|c| !c.contains("[recent work]")),
             "topic change must not inject work log"
         );
         assert!(
-            blocks
-                .recalled
-                .iter()
-                .all(|c| !c.contains("[search hit]")),
+            blocks.recalled.iter().all(|c| !c.contains("[search hit]")),
             "unrelated knowledge must not false-hit"
         );
     }

@@ -1,24 +1,34 @@
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::de::Error as DeError;
-use serde::{Deserialize, Deserializer};
-use serde_json::Value;
+use serde::Deserialize;
 
+use crate::advance::{AdvanceConfig, AdvanceMode};
+use crate::brave_search::BraveSearchConfig;
 use crate::context::{ContextError, PromptBlocks};
 use crate::context_log::default_log_path;
 use crate::llm::{LlmConfig, LlmProvider};
-use crate::brave_search::BraveSearchConfig;
-use crate::advance::AdvanceConfig;
 use crate::memory::{build_memory_bridge, MemoryBridge, MemoryRuntimeConfig};
 use crate::react::ReActConfig;
 use crate::session::SessionMemory;
 use crate::tool::{default_packs, packs_from_names, ToolPack};
 
-const DEFAULT_CONFIG_PATH: &str = "config/config.json";
+mod env;
+mod sections;
 
-/// 実行時設定（`config/config.json`）。ひな形は `config/config.json.sample` と `config/samples/`。
+pub use sections::*;
+
+use env::{
+    env_api_key, env_base_url, env_json_mode, env_llm_provider, env_model, env_string,
+    env_u64_seed, nonempty_opt,
+};
+
+const DEFAULT_CONFIG_PATH: &str = "config/config.json";
+const USER_CONFIG_DIR: &str = "harness-seed";
+const USER_CONFIG_FILE: &str = "config.json";
+
+/// 実行時設定。既定は XDG の `~/.config/harness-seed/config.json`（無ければ cwd の `config/config.json`）。
+/// ひな形は `config/config.json.sample` と `config/samples/`。
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AppConfig {
     #[serde(default)]
@@ -35,318 +45,8 @@ pub struct AppConfig {
     pub memory: MemorySection,
 }
 
-/// `memory` セクション（外部記憶ブリッジ）。
-///
-/// **local は外部で置き換えない。** プロセス内 diary（`local`）の上に
-/// `backends` のアダプタを重ねる。固有設定は `providers.<名前>`。
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct MemorySection {
-    /// プロセス内 diary を使うか（`local` / `backends` 指定時の既定は `true`）。
-    pub local: Option<bool>,
-    /// 追加バックエンド名（例: `["mempalace"]`）。local の**後**に重ねる。
-    #[serde(default)]
-    pub backends: Vec<String>,
-    /// プロバイダ名 → 固有設定 JSON。本体は中身を解釈しない。
-    #[serde(default)]
-    pub providers: BTreeMap<String, Value>,
-    #[serde(default)]
-    pub recent_work: MemoryRecentWorkSection,
-    #[serde(default)]
-    pub search: MemorySearchSection,
-    /// 記憶 RAG（アダプタ手前の分岐・検索語）。
-    #[serde(default)]
-    pub rag: MemoryRagSection,
-    /// 計画層 `recall` ステップの上限（既定 2、0 で無効）。
-    pub recall_max_rounds: Option<usize>,
-    /// 旧形式（後方互換）。`mempalace` 指定時も **local は残す**。
-    pub provider: Option<String>,
-    /// 後方互換: `providers.mempalace` が無いときだけ参照。
-    #[serde(default)]
-    pub mempalace: Option<MempalaceSection>,
-}
-
-/// 旧形式 `memory.mempalace`（`providers.mempalace` 推奨）。
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct MempalaceSection {
-    pub base_url: Option<String>,
-    pub agent_name: Option<String>,
-    pub wing: Option<String>,
-    pub room: Option<String>,
-    pub timeout_secs: Option<u64>,
-    /// `"mcp_stdio"`（既定）| `"tools_path"` | `"mcp_jsonrpc"`。
-    pub protocol: Option<String>,
-    pub api_key: Option<String>,
-    pub command: Option<String>,
-    pub args: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct MemoryRecentWorkSection {
-    pub enabled: Option<bool>,
-    pub max_entries: Option<usize>,
-    pub max_chars: Option<usize>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct MemorySearchSection {
-    pub enabled: Option<bool>,
-    pub top_k: Option<usize>,
-    pub max_chars: Option<usize>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct MemoryRagSection {
-    /// `"rule"` | `"llm"`（LLM 不可時は rule にフォールバック）。
-    pub router: Option<String>,
-    /// 知識検索クエリの上限。
-    pub max_queries: Option<usize>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct LlmSection {
-    pub provider: Option<String>,
-    pub api_key: Option<String>,
-    pub base_url: Option<String>,
-    pub model: Option<String>,
-    pub timeout_secs: Option<u64>,
-    pub json_mode: Option<bool>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct ReactSection {
-    pub max_steps: Option<usize>,
-    pub verbose: Option<bool>,
-    pub show_context_metrics: Option<bool>,
-    /// REPL 短期記憶に残す直近ターン数（`Previous turns` 注入）。
-    pub session_max_turns: Option<usize>,
-    /// 計画フェーズ → 実行フェーズの直列オーケストレーション。
-    pub two_phase: Option<bool>,
-    /// 計画層 ReAct ループの最大ステップ。
-    pub max_steps_plan: Option<usize>,
-    /// 実行層 ReAct ループあたりの `thought` 上限（既定: 1）。
-    pub max_thoughts: Option<usize>,
-    /// `tasks/*.json` の `steps[]` があり `react_only: false` のときだけステップドライバ可。
-    /// 組み込みタスクは `react_only: true`（ReAct が選択）。既定はドライバ無効寄りにしないが、
-    /// 契約タスクでも react_only なら ReAct 経路になる。
-    pub use_step_driver: Option<bool>,
-    /// 計画フェーズでタスク summary から候補を選びコンテキストへ登録する。
-    pub plan_candidate_selection: Option<bool>,
-    /// 候補 summary カタログの最大件数。
-    pub plan_catalog_max_entries: Option<usize>,
-    /// 候補 summary カタログの最大文字数。
-    pub plan_catalog_max_chars: Option<usize>,
-    /// ステップ引数監査: `off`（既定）/ `soft` / `hard`。
-    pub arg_audit_mode: Option<String>,
-    /// 各 ReAct ステップのプロンプト全文を stderr に出す。
-    pub show_prompt: Option<bool>,
-    /// 計画層の成果物を stdout に表示する（`two_phase` 時）。
-    pub show_plan: Option<bool>,
-    /// サブタスクごとの契約ツール・実際のツール列を stdout に表示する。
-    pub show_task_execution: Option<bool>,
-    /// 各ツールのコマンド・結果を stderr に表示する（`run_cmd` の `$ ...` など）。
-    pub show_tool_output: Option<bool>,
-    /// 外側推進ループ（`react.advance`）。
-    #[serde(default)]
-    pub advance: AdvanceSection,
-    /// 同一依存波内サブタスクの並列実行（`two_phase` 時。ステップドライバのみ並列）。
-    pub parallel_subtasks: Option<bool>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct AdvanceSection {
-    pub enabled: Option<bool>,
-    pub max_phases: Option<usize>,
-    pub clear_session_each_phase: Option<bool>,
-    pub max_note_chars: Option<usize>,
-    pub show_phases: Option<bool>,
-    /// 判定前に必要な実質証拠（read/grep 等）成功 observation 数。
-    pub min_substantive_obs: Option<usize>,
-    /// 最終合成後にパス引用を証拠 Paths と照合する。
-    pub citation_check: Option<bool>,
-    /// 結論前に先行 Claims の否定証拠を一度探す。
-    pub claim_check: Option<bool>,
-    /// 最終回答の不在主張を trace と照合する。
-    pub absence_check: Option<bool>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct PromptSection {
-    /// ルールファイルまたはディレクトリ（`.md`）のパス。相対パスはクレートルート基準。
-    pub rules_paths: Option<Vec<String>>,
-}
-
-/// `tools.packs` のスイッチ形式（`{ "basic": true, "coding": true }`）。`"true"` 文字列も可。
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct ToolPacksConfig {
-    #[serde(default, deserialize_with = "deserialize_opt_bool_switch")]
-    pub basic: Option<bool>,
-    #[serde(default, deserialize_with = "deserialize_opt_bool_switch")]
-    pub coding: Option<bool>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_opt_bool_switch",
-        alias = "web"
-    )]
-    pub web_search: Option<bool>,
-    #[serde(default, deserialize_with = "deserialize_opt_bool_switch")]
-    pub full: Option<bool>,
-}
-
-impl ToolPacksConfig {
-    pub fn is_unconfigured(&self) -> bool {
-        self.basic.is_none()
-            && self.coding.is_none()
-            && self.web_search.is_none()
-            && self.full.is_none()
-    }
-
-    /// 明示的に `true` のパックだけ返す（`full` が true なら `Full` のみ）。
-    pub fn enabled_packs(&self) -> Vec<ToolPack> {
-        if self.full == Some(true) {
-            return vec![ToolPack::Full];
-        }
-        let mut packs = Vec::new();
-        if self.basic == Some(true) {
-            packs.push(ToolPack::Basic);
-        }
-        if self.coding == Some(true) {
-            packs.push(ToolPack::Coding);
-        }
-        if self.web_search == Some(true) {
-            packs.push(ToolPack::WebSearch);
-        }
-        packs
-    }
-}
-
-/// 旧来の配列形式 `["basic", "coding"]` も読める。
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-pub enum ToolPacksField {
-    Switches(ToolPacksConfig),
-    List(Vec<String>),
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct ToolsSection {
-    /// ツールパックの ON/OFF。未設定・空オブジェクト時は basic+coding（+ Brave キー時 web_search）。
-    pub packs: Option<ToolPacksField>,
-    #[serde(default)]
-    pub brave_search: BraveSearchSection,
-}
-
-fn deserialize_opt_bool_switch<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = Option::<Value>::deserialize(deserializer)?;
-    match value {
-        None => Ok(None),
-        Some(Value::Bool(b)) => Ok(Some(b)),
-        Some(Value::String(s)) => match s.trim().to_ascii_lowercase().as_str() {
-            "true" | "1" | "yes" | "on" => Ok(Some(true)),
-            "false" | "0" | "no" | "off" => Ok(Some(false)),
-            other => Err(DeError::custom(format!(
-                "expected boolean switch, got string \"{other}\""
-            ))),
-        },
-        Some(other) => Err(DeError::custom(format!(
-            "expected boolean switch, got {other}"
-        ))),
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct BraveSearchSection {
-    /// Brave Search API キー（空なら `BRAVE_SEARCH_API_KEY` 環境変数を参照）。
-    pub api_key: Option<String>,
-    /// 1 リクエストあたりの最大件数（1–20、既定 5）。
-    pub max_results: Option<u8>,
-    /// API の snippet が空のとき結果 URL の本文を取得する。
-    pub fetch_content: Option<bool>,
-    /// 本文取得時の最大文字数。
-    pub max_content_chars: Option<usize>,
-}
-
-/// コンテキストログのローテーション（`log.rotation`）。
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct LogRotationSection {
-    /// このサイズ（バイト）を超えたらローテート（既定 10 MiB）。`0` で無効。
-    pub max_bytes: Option<u64>,
-    /// 保持する世代数（現行 + バックアップ）。既定 5。`0` でローテーション無効。
-    pub max_files: Option<u32>,
-}
-
-/// 解決済みローテーション設定。
-#[derive(Debug, Clone, Copy)]
-pub struct LogRotationConfig {
-    pub max_bytes: u64,
-    pub max_files: u32,
-}
-
-impl LogRotationConfig {
-    pub const DEFAULT_MAX_BYTES: u64 = 10 * 1024 * 1024;
-    pub const DEFAULT_MAX_FILES: u32 = 5;
-
-    pub fn disabled() -> Self {
-        Self {
-            max_bytes: 0,
-            max_files: 0,
-        }
-    }
-
-    pub fn enabled(&self) -> bool {
-        self.max_bytes > 0 && self.max_files > 0
-    }
-}
-
-impl LogRotationSection {
-    pub fn resolve(&self) -> LogRotationConfig {
-        LogRotationConfig {
-            max_bytes: self.max_bytes.unwrap_or(LogRotationConfig::DEFAULT_MAX_BYTES),
-            max_files: self.max_files.unwrap_or(LogRotationConfig::DEFAULT_MAX_FILES),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct LogSection {
-    /// コンテキスト計測の JSON Lines ログパス（例: `logs/context.jsonl`）。
-    pub context_metrics: Option<String>,
-    #[serde(default)]
-    pub rotation: Option<LogRotationSection>,
-}
-
-impl LogSection {
-    pub fn resolved_rotation(&self) -> LogRotationConfig {
-        self.rotation
-            .as_ref()
-            .map(LogRotationSection::resolve)
-            .unwrap_or_else(|| LogRotationSection::default().resolve())
-    }
-}
-
-#[derive(Debug)]
-pub enum ConfigError {
-    Read { path: PathBuf, source: std::io::Error },
-    Parse { path: PathBuf, source: serde_json::Error },
-}
-
-impl std::fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Read { path, source } => write!(f, "failed to read {}: {source}", path.display()),
-            Self::Parse { path, source } => {
-                write!(f, "failed to parse {}: {source}", path.display())
-            }
-        }
-    }
-}
-
-impl std::error::Error for ConfigError {}
-
 impl AppConfig {
-    /// 既定パス `config/config.json` を読み込む（無ければデフォルト値）。
+    /// 既定パス（ユーザ設定 → cwd フォールバック）を読み込む（無ければデフォルト値）。
     pub fn load_default() -> Result<Self, ConfigError> {
         Self::load_path(default_config_path())
     }
@@ -381,10 +81,7 @@ impl AppConfig {
     pub fn load_prompt_blocks(&self) -> Result<PromptBlocks, ContextError> {
         let mut blocks = PromptBlocks::new();
         if let Some(paths) = &self.prompt.rules_paths {
-            let resolved: Vec<PathBuf> = paths
-                .iter()
-                .map(|p| resolve_workspace_path(p))
-                .collect();
+            let resolved: Vec<PathBuf> = paths.iter().map(|p| resolve_workspace_path(p)).collect();
             if !resolved.is_empty() {
                 blocks.load_rules_from_paths(&resolved)?;
             }
@@ -403,21 +100,14 @@ impl AppConfig {
                 .react
                 .session_max_turns
                 .unwrap_or(SessionMemory::DEFAULT_MAX_TURNS),
-            two_phase: self.react.two_phase.unwrap_or(false),
+            // CLI / AppConfig: 省略時は計画→実行。ライブラリの ReActConfig::default は false のまま。
+            two_phase: self.react.two_phase.unwrap_or(true),
             max_steps_plan: self.react.max_steps_plan.unwrap_or(8),
             max_thoughts: self.react.max_thoughts.unwrap_or(1).max(1),
             use_step_driver: self.react.use_step_driver.unwrap_or(true),
             plan_candidate_selection: self.react.plan_candidate_selection.unwrap_or(true),
-            plan_catalog_max_entries: self
-                .react
-                .plan_catalog_max_entries
-                .unwrap_or(40)
-                .max(1),
-            plan_catalog_max_chars: self
-                .react
-                .plan_catalog_max_chars
-                .unwrap_or(8_000)
-                .max(256),
+            plan_catalog_max_entries: self.react.plan_catalog_max_entries.unwrap_or(40).max(1),
+            plan_catalog_max_chars: self.react.plan_catalog_max_chars.unwrap_or(8_000).max(256),
             arg_audit_mode: self
                 .react
                 .arg_audit_mode
@@ -430,7 +120,7 @@ impl AppConfig {
             show_tool_output: self.react.show_tool_output.unwrap_or(true),
             parallel_subtasks: self.react.parallel_subtasks.unwrap_or(false),
             advance: AdvanceConfig {
-                enabled: self.react.advance.enabled.unwrap_or(false),
+                mode: resolve_advance_mode(&self.react.advance),
                 max_phases: self.react.advance.max_phases.unwrap_or(8).max(1),
                 clear_session_each_phase: self
                     .react
@@ -444,12 +134,7 @@ impl AppConfig {
                     .unwrap_or(1500)
                     .clamp(200, 16_000),
                 show_phases: self.react.advance.show_phases.unwrap_or(true),
-                min_substantive_obs: self
-                    .react
-                    .advance
-                    .min_substantive_obs
-                    .unwrap_or(3)
-                    .max(1),
+                min_substantive_obs: self.react.advance.min_substantive_obs.unwrap_or(3).max(1),
                 citation_check: self.react.advance.citation_check.unwrap_or(true),
                 claim_check: self.react.advance.claim_check.unwrap_or(true),
                 absence_check: self.react.advance.absence_check.unwrap_or(true),
@@ -608,9 +293,12 @@ impl AppConfig {
 
     pub fn build_llm_config(&self) -> Result<LlmConfig, crate::llm::ConnectorError> {
         let provider = self.resolve_provider();
-        let timeout_secs = env_u64_seed("HARNESS_SEED_LLM_TIMEOUT_SECS", "MYHARNESS_LLM_TIMEOUT_SECS")
-            .or(self.llm.timeout_secs)
-            .unwrap_or(120);
+        let timeout_secs = env_u64_seed(
+            "HARNESS_SEED_LLM_TIMEOUT_SECS",
+            "MYHARNESS_LLM_TIMEOUT_SECS",
+        )
+        .or(self.llm.timeout_secs)
+        .unwrap_or(120);
 
         match provider {
             LlmProvider::Ollama => {
@@ -790,8 +478,7 @@ impl AppConfig {
             return LlmProvider::LmStudio;
         }
 
-        if let Some(base) = env_string("OPENAI_BASE_URL").or_else(env_base_url)
-        {
+        if let Some(base) = env_string("OPENAI_BASE_URL").or_else(env_base_url) {
             if base.contains("11434") {
                 return LlmProvider::Ollama;
             }
@@ -834,11 +521,9 @@ impl AppConfig {
             .or_else(|| env_api_key())
             .or_else(|| env_string("OLLAMA_API_KEY"))
             .or_else(|| env_string("LM_STUDIO_API_KEY"))
-            .or_else(|| {
-                match self.resolve_provider() {
-                    LlmProvider::Gemini | LlmProvider::Anthropic => None,
-                    _ => self.llm.api_key.clone(),
-                }
+            .or_else(|| match self.resolve_provider() {
+                LlmProvider::Gemini | LlmProvider::Anthropic => None,
+                _ => self.llm.api_key.clone(),
             })
             .filter(|k| !k.is_empty())
     }
@@ -869,10 +554,64 @@ impl AppConfig {
     }
 }
 
+fn resolve_advance_mode(section: &AdvanceSection) -> AdvanceMode {
+    if let Some(raw) = section.mode.as_deref() {
+        return AdvanceMode::parse(raw);
+    }
+    match section.enabled {
+        Some(true) => AdvanceMode::Always,
+        Some(false) | None => AdvanceMode::Off,
+    }
+}
+
+/// 設定ファイルの既定パス。
+///
+/// 優先順:
+/// 1. `HARNESS_SEED_CONFIG` / `MYHARNESS_CONFIG`
+/// 2. ユーザ設定（[`user_config_path`]）が存在するとき
+/// 3. cwd の `config/config.json` が存在するとき（後方互換）
+/// 4. いずれも無ければユーザ設定パス（[`AppConfig::load_path`] がビルトイン既定へ）
 pub fn default_config_path() -> PathBuf {
-    env_path("HARNESS_SEED_CONFIG")
-        .or_else(|| env_path("MYHARNESS_CONFIG"))
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG_PATH))
+    let env_override = env_path("HARNESS_SEED_CONFIG").or_else(|| env_path("MYHARNESS_CONFIG"));
+    resolve_default_config_path(
+        env_override,
+        &user_config_path(),
+        Path::new(DEFAULT_CONFIG_PATH),
+    )
+}
+
+/// `$XDG_CONFIG_HOME/harness-seed/config.json`（未設定時は `~/.config/harness-seed/config.json`）。
+pub fn user_config_path() -> PathBuf {
+    config_home().join(USER_CONFIG_DIR).join(USER_CONFIG_FILE)
+}
+
+/// テスト可能なパス解決（ファイル存在でユーザ設定と cwd を切り替える）。
+pub(crate) fn resolve_default_config_path(
+    env_override: Option<PathBuf>,
+    user_path: &Path,
+    cwd_local: &Path,
+) -> PathBuf {
+    if let Some(path) = env_override {
+        return path;
+    }
+    if user_path.is_file() {
+        return user_path.to_path_buf();
+    }
+    if cwd_local.is_file() {
+        return cwd_local.to_path_buf();
+    }
+    user_path.to_path_buf()
+}
+
+fn config_home() -> PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        let trimmed = xdg.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    PathBuf::from(home).join(".config")
 }
 
 pub fn env_path(name: &str) -> Option<PathBuf> {
@@ -888,172 +627,5 @@ pub fn resolve_workspace_path(path: &str) -> PathBuf {
     crate::tool::workspace_root().join(p)
 }
 
-fn env_string(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|s| !s.is_empty())
-}
-
-fn nonempty_opt(value: Option<String>) -> Option<String> {
-    value.and_then(|s| {
-        let t = s.trim();
-        if t.is_empty() {
-            None
-        } else {
-            Some(t.to_string())
-        }
-    })
-}
-
-fn env_u64(name: &str) -> Option<u64> {
-    env_string(name).and_then(|s| s.parse().ok())
-}
-
-fn env_u64_seed(primary: &str, legacy: &str) -> Option<u64> {
-    env_u64(primary).or_else(|| env_u64(legacy))
-}
-
-fn env_base_url() -> Option<String> {
-    env_string("HARNESS_SEED_BASE_URL").or_else(|| env_string("MYHARNESS_BASE_URL"))
-}
-
-fn env_model() -> Option<String> {
-    env_string("HARNESS_SEED_MODEL").or_else(|| env_string("MYHARNESS_MODEL"))
-}
-
-fn env_json_mode() -> Option<String> {
-    env_string("HARNESS_SEED_JSON_MODE").or_else(|| env_string("MYHARNESS_JSON_MODE"))
-}
-
-fn env_llm_provider() -> Option<String> {
-    env_string("HARNESS_SEED_LLM_PROVIDER").or_else(|| env_string("MYHARNESS_LLM_PROVIDER"))
-}
-
-fn env_api_key() -> Option<String> {
-    env_string("HARNESS_SEED_API_KEY").or_else(|| env_string("MYHARNESS_API_KEY"))
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn loads_ollama_sample() {
-        let cfg = AppConfig::load_path("config/samples/config.ollama.json").unwrap();
-        assert_eq!(cfg.llm.provider.as_deref(), Some("ollama"));
-        assert_eq!(cfg.llm.model.as_deref(), Some("gemma-4-26b:latest"));
-        assert_eq!(cfg.react.max_steps, Some(16));
-    }
-
-    #[test]
-    fn builds_ollama_llm_from_sample() {
-        let cfg = AppConfig::load_path("config/samples/config.ollama.json").unwrap();
-        let llm = cfg.build_llm_config().unwrap();
-        assert_eq!(llm.provider, LlmProvider::Ollama);
-        assert_eq!(llm.base_url, "http://127.0.0.1:11434/v1");
-    }
-
-    #[test]
-    fn nonempty_opt_drops_blank_strings() {
-        assert_eq!(nonempty_opt(Some(String::new())), None);
-        assert_eq!(nonempty_opt(Some("   ".into())), None);
-        assert_eq!(nonempty_opt(Some(" http://x ".into())), Some("http://x".into()));
-        assert_eq!(nonempty_opt(None), None);
-    }
-
-    #[test]
-    fn loads_active_config_json() {
-        let cfg = AppConfig::load_path("config/config.json.sample").unwrap();
-        assert_eq!(cfg.llm.provider.as_deref(), Some("lmstudio"));
-        assert_eq!(cfg.react.max_steps, Some(16));
-        assert_eq!(cfg.tools.brave_search.max_results, Some(5));
-        assert_eq!(cfg.tools.brave_search.fetch_content, Some(false));
-    }
-
-    #[test]
-    fn resolves_tool_packs_default_without_brave() {
-        let cfg: AppConfig = serde_json::from_str(r#"{}"#).unwrap();
-        let packs = cfg.resolved_tool_packs();
-        assert!(packs.contains(&ToolPack::Basic));
-        assert!(packs.contains(&ToolPack::Coding));
-        assert!(!packs.contains(&ToolPack::WebSearch));
-    }
-
-    #[test]
-    fn resolves_tool_packs_from_switch_object() {
-        let json = r#"{"tools":{"packs":{"basic":true,"coding":false}}}"#;
-        let cfg: AppConfig = serde_json::from_str(json).unwrap();
-        let packs = cfg.resolved_tool_packs();
-        assert_eq!(packs, vec![ToolPack::Basic]);
-    }
-
-    #[test]
-    fn resolves_tool_packs_from_string_switches() {
-        let json = r#"{"tools":{"packs":{"basic":"true","coding":"true"}}}"#;
-        let cfg: AppConfig = serde_json::from_str(json).unwrap();
-        let packs = cfg.resolved_tool_packs();
-        assert!(packs.contains(&ToolPack::Basic));
-        assert!(packs.contains(&ToolPack::Coding));
-    }
-
-    #[test]
-    fn resolves_tool_packs_from_legacy_list() {
-        let json = r#"{"tools":{"packs":["basic"]}}"#;
-        let cfg: AppConfig = serde_json::from_str(json).unwrap();
-        let packs = cfg.resolved_tool_packs();
-        assert_eq!(packs, vec![ToolPack::Basic]);
-    }
-
-    #[test]
-    fn auto_appends_web_pack_when_brave_key_set() {
-        let json = r#"{"tools":{"packs":{"basic":true,"coding":true},"brave_search":{"api_key":"k"}}}"#;
-        let cfg: AppConfig = serde_json::from_str(json).unwrap();
-        let packs = cfg.resolved_tool_packs();
-        assert!(packs.contains(&ToolPack::WebSearch));
-    }
-
-    #[test]
-    fn web_switch_false_blocks_auto_append() {
-        let json = r#"{"tools":{"packs":{"basic":true,"web_search":false},"brave_search":{"api_key":"k"}}}"#;
-        let cfg: AppConfig = serde_json::from_str(json).unwrap();
-        let packs = cfg.resolved_tool_packs();
-        assert!(!packs.contains(&ToolPack::WebSearch));
-    }
-
-    #[test]
-    fn resolves_brave_search_from_config() {
-        let json = r#"{
-            "tools": {
-                "brave_search": {
-                    "api_key": "test-key",
-                    "max_results": 3,
-                    "fetch_content": true,
-                    "max_content_chars": 1024
-                }
-            }
-        }"#;
-        let cfg: AppConfig = serde_json::from_str(json).unwrap();
-        let brave = cfg.resolved_brave_search().unwrap();
-        assert_eq!(brave.api_key, "test-key");
-        assert_eq!(brave.max_results, 3);
-        assert!(brave.fetch_content);
-        assert_eq!(brave.max_content_chars, 1024);
-    }
-
-    #[test]
-    fn loads_gemini_sample() {
-        let cfg = AppConfig::load_path("config/samples/config.gemini.json").unwrap();
-        assert_eq!(cfg.llm.provider.as_deref(), Some("gemini"));
-        assert_eq!(cfg.llm_provider(), LlmProvider::Gemini);
-        assert_eq!(cfg.llm.model.as_deref(), Some("gemini-2.5-flash"));
-    }
-
-    #[test]
-    fn loads_anthropic_sample() {
-        let cfg = AppConfig::load_path("config/samples/config.anthropic.json").unwrap();
-        assert_eq!(cfg.llm.provider.as_deref(), Some("anthropic"));
-        assert_eq!(cfg.llm_provider(), LlmProvider::Anthropic);
-        assert_eq!(
-            cfg.llm.model.as_deref(),
-            Some("claude-3-5-sonnet-20241022")
-        );
-    }
-}
+mod tests;

@@ -84,12 +84,7 @@ impl ContextUsage {
     }
 
     pub fn measure_messages(messages: &[ChatMessage], completion_text: &str) -> Self {
-        Self::from_parts(
-            &format_messages_body(messages),
-            completion_text,
-            None,
-            None,
-        )
+        Self::from_parts(&format_messages_body(messages), completion_text, None, None)
     }
 }
 
@@ -102,11 +97,7 @@ pub fn format_messages_body(messages: &[ChatMessage]) -> String {
             if images == 0 {
                 format!("{}: {}\n", m.role, m.content.as_text())
             } else {
-                format!(
-                    "{}: {} [+{images} image(s)]\n",
-                    m.role,
-                    m.content.as_text()
-                )
+                format!("{}: {} [+{images} image(s)]\n", m.role, m.content.as_text())
             }
         })
         .collect()

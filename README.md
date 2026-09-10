@@ -27,7 +27,13 @@ harness-seed/
 │   └── en/          # English (architecture, principles; tools/ideas indexes)
 ├── src/
 │   ├── main.rs      # CLI entry point
-│   └── lib.rs       # Library core and public API
+│   ├── lib.rs       # Library core and public API
+│   ├── advance/     # Outer advance loop (evidence, gates, phase)
+│   ├── react/       # ReAct loop, two-phase, step driver, advance turn
+│   ├── config.rs    # AppConfig (section types in config/)
+│   ├── tasks/       # Task registry, contracts, step driver
+│   ├── plan/        # Plan parse, display, queue
+│   └── ...          # layer, lifecycle, llm, memory, tool, …
 ├── tests/           # Integration tests
 └── benches/         # Benchmarks (add if necessary)
 ```
@@ -47,6 +53,35 @@ Index: [doc/README.md](doc/README.md)
 | [doc/en/architecture/README.md](doc/en/architecture/README.md) | Architecture (EN) |
 
 ## Usage
+
+### Install (run from anywhere)
+
+Put the CLI on your PATH (`~/.cargo/bin` must be on `PATH`):
+
+```bash
+cargo install --path .
+```
+
+Then from any directory:
+
+```bash
+harness-seed --help
+```
+
+Default config is **`~/.config/harness-seed/config.json`** (or under `XDG_CONFIG_HOME` when set). If that file is missing, cwd `config/config.json` is still read for backward compatibility. Explicit override:
+
+```bash
+harness-seed --config /path/to/config.json
+# or
+export HARNESS_SEED_CONFIG=/path/to/config.json
+harness-seed
+```
+
+Re-install after pulling changes that affect the binary:
+
+```bash
+cargo install --path . --force
+```
 
 ### Build
 
@@ -70,31 +105,32 @@ cargo run
 # Verbose logs: cargo run -- -v
 # JSON Lines REPL: cargo run -- --json  (doc/ja/architecture/11_ワイヤプロトコル.md)
 
-# First-time setup (config/config.json is gitignored)
-cp config/config.json.sample config/config.json
+# First-time setup (user config; keep secrets here)
+mkdir -p ~/.config/harness-seed
+cp config/config.json.sample ~/.config/harness-seed/config.json
 
-# The LLM brain is determined by llm.provider in config/config.json
+# The LLM brain is determined by llm.provider in ~/.config/harness-seed/config.json
 # Rules-only brain: cargo run -- --no-llm
 
-# Switching providers: Overwrite config.json with a sample template
-cp config/samples/config.lmstudio.json config/config.json
+# Switching providers: overwrite the user config with a sample template
+cp config/samples/config.lmstudio.json ~/.config/harness-seed/config.json
 cargo run
 
 # Local Ollama (Requires: ollama serve / ollama pull gemma4)
-cp config/samples/config.ollama.json config/config.json
+cp config/samples/config.ollama.json ~/.config/harness-seed/config.json
 
 # OpenAI
-cp config/samples/config.openai.json config/config.json
+cp config/samples/config.openai.json ~/.config/harness-seed/config.json
 export OPENAI_API_KEY=sk-...
 cargo run
 
 # Google Gemini (Uses the same API series as the Copilot in triage-mail)
-cp config/samples/config.gemini.json config/config.json
+cp config/samples/config.gemini.json ~/.config/harness-seed/config.json
 export GEMINI_API_KEY=your-key
 cargo run
 
 # Anthropic Claude (Uses Messages API directly, not OpenAI compatible)
-cp config/samples/config.anthropic.json config/config.json
+cp config/samples/config.anthropic.json ~/.config/harness-seed/config.json
 export ANTHROPIC_API_KEY=your-key
 cargo run
 ```
@@ -121,8 +157,9 @@ cargo run
 
 | File | Usage |
 |------|------|
+| `~/.config/harness-seed/config.json` | **Active configuration** (user config; keep secrets here) |
 | `config/config.json.sample` | **Default template** (tracked; no secrets) |
-| `config/config.json` | **Active configuration** (gitignored; copy from sample and edit) |
+| `config/config.json` | **Local fallback** (gitignored; used only when user config is missing) |
 | `config/samples/config.ollama.json` | Ollama template |
 | `config/samples/config.lmstudio.json` | LM Studio template |
 | `config/samples/config.openai.json` | OpenAI template |
@@ -132,7 +169,7 @@ cargo run
 Example of switching:
 
 ```bash
-cp config/samples/config.lmstudio.json config/config.json
+cp config/samples/config.lmstudio.json ~/.config/harness-seed/config.json
 cargo run
 ```
 
@@ -160,17 +197,18 @@ With `-v`, `[context step]` for each step is also displayed. This is also access
 
 ### Integration Tests (LLM)
 
-LLM integration tests in `tests/` read **`config/config.json`** (the path can be overridden with `HARNESS_SEED_CONFIG`). Only the LM Studio test directly references `config/samples/config.lmstudio.json`.
+LLM integration tests in `tests/` read **`default_config_path()`** (default `~/.config/harness-seed/config.json`, else cwd `config/config.json`; override with `HARNESS_SEED_CONFIG`). Only the LM Studio test directly references `config/samples/config.lmstudio.json`.
 
 ```bash
-cp config/samples/config.ollama.json config/config.json
+cp config/samples/config.ollama.json ~/.config/harness-seed/config.json
+# or for local repo workflow: cp config/samples/config.ollama.json config/config.json
 ollama pull gemma4   # Match the model specified in the config
 cargo test
 ```
 
 If the LLM is not running or the model is not installed, the corresponding test will be **SKIPPED**.
 
-**File Logging** (`log.context_metrics` in `config/config.json`):
+**File Logging** (`log.context_metrics` in the config file):
 
 ```json
 "log": {
@@ -222,10 +260,14 @@ cargo bench
 harness-seed = { path = "../harness-seed" }
 ```
 
+When embedding in a host app, **the host chooses the config file path** (CLI `--config` is binary-only). Prefer `AppConfig::load_path`. See [config/README.md](config/README.md#ライブラリ組み込み時のパス指定).
+
 ```rust
 use harness_seed::{AppConfig, BrainPair, SeedBuilder};
 
-let app = AppConfig::load_default()?;
+// Explicit host path (recommended)
+let app = AppConfig::load_path("/var/lib/my-app/harness-seed.json")?;
+// Or the same default resolution as the CLI: AppConfig::load_default()?
 let builder = SeedBuilder::from_app(&app)?;
 let brains = BrainPair::from_cli_with_registry(&app, false, false, builder.task_registry_ref())?;
 let mut react = builder.build(brains.exec, brains.plan, app.react_config(false, false));

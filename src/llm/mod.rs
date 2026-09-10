@@ -1,10 +1,10 @@
 //! LLM コネクタと LLM 駆動の `AgentBrain`。
 
+mod anthropic;
 mod brain;
 mod chat_completions;
 mod completion;
 mod connector;
-mod anthropic;
 mod factory;
 mod gemini;
 mod lmstudio;
@@ -12,6 +12,7 @@ mod mock;
 mod openai;
 mod parse;
 
+pub use anthropic::{normalize_anthropic_base_url, AnthropicConnector};
 pub use brain::LlmBrain;
 pub use chat_completions::ChatCompletionsConnector;
 pub use completion::CompletionResult;
@@ -21,12 +22,11 @@ pub use connector::{
     LlmConfig, LlmConnector, LlmProvider,
 };
 pub use factory::LlmConnectorKind;
-pub use anthropic::{normalize_anthropic_base_url, AnthropicConnector};
 pub use gemini::{normalize_gemini_base_url, resolve_gemini_base_url, GeminiConnector};
 pub use lmstudio::LmStudioConnector;
 pub use mock::MockLlmConnector;
 pub use openai::OpenAiConnector;
 pub use parse::{
-    coerce_tool_named_step_json, extract_json_objects, parse_agent_step, salvage_answer_step_content,
-    ParseError,
+    coerce_tool_named_step_json, extract_json_objects, parse_agent_step,
+    salvage_answer_step_content, ParseError,
 };

@@ -53,10 +53,21 @@ struct ManifestRecalled {
 
 #[derive(Debug)]
 pub enum ContextManifestError {
-    Read { path: PathBuf, source: std::io::Error },
-    Parse { path: PathBuf, source: serde_json::Error },
-    ImageRead { path: PathBuf, source: std::io::Error },
-    EntryNotFound { scope: Value },
+    Read {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    Parse {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
+    ImageRead {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    EntryNotFound {
+        scope: Value,
+    },
     NotConfigured,
 }
 
@@ -279,13 +290,8 @@ mod tests {
         };
         let params = serde_json::json!({ "region": "demo", "stem": "a" });
         let mut blocks = PromptBlocks::new();
-        let n = apply_scoped_entry(
-            &root.join("manifest.json"),
-            &spec,
-            &params,
-            &mut blocks,
-        )
-        .unwrap();
+        let n =
+            apply_scoped_entry(&root.join("manifest.json"), &spec, &params, &mut blocks).unwrap();
         assert_eq!(n, 1);
         assert_eq!(blocks.vision_attachments.len(), 1);
         assert!(blocks.recalled.iter().any(|c| c.contains("hello context")));

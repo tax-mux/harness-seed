@@ -165,14 +165,12 @@ fn parse_plan_value(trimmed: &str) -> Result<PlanArtifact, PlanParseError> {
         let flow: PlanFlowJsonLoose = serde_json::from_value(value)
             .map_err(|e| PlanParseError::InvalidJson(e.to_string()))?;
         let output = flow.output.trim().to_string();
-        let user_reply = if flow.skip_execution
-            && !output.is_empty()
-            && !is_placeholder_plan_label(&output)
-        {
-            Some(output.clone())
-        } else {
-            None
-        };
+        let user_reply =
+            if flow.skip_execution && !output.is_empty() && !is_placeholder_plan_label(&output) {
+                Some(output.clone())
+            } else {
+                None
+            };
         let summary = if !output.is_empty() {
             output
         } else if flow.input.is_empty() {
@@ -247,24 +245,18 @@ fn parse_plan_value(trimmed: &str) -> Result<PlanArtifact, PlanParseError> {
 fn is_placeholder_plan_label(text: &str) -> bool {
     matches!(
         text.trim(),
-        "" | "direct"
-            | "direct chat"
-            | "direct execution"
-            | "planned task"
-            | "single task"
+        "" | "direct" | "direct chat" | "direct execution" | "planned task" | "single task"
     )
 }
 
 /// LLM が `id` にタスク名（`"list_dir"`）を入れる・番号を文字列にする等を吸収する。
 fn parse_subtask_value(value: &Value, fallback_id: u32) -> Option<SubtaskJson> {
     let obj = value.as_object()?;
-    let mut task = obj
-        .get("task")
-        .and_then(|t| match t {
-            Value::String(s) if !s.trim().is_empty() => Some(s.trim().to_string()),
-            Value::Number(n) => Some(n.to_string()),
-            _ => None,
-        });
+    let mut task = obj.get("task").and_then(|t| match t {
+        Value::String(s) if !s.trim().is_empty() => Some(s.trim().to_string()),
+        Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    });
 
     let id = match obj.get("id") {
         Some(Value::Number(n)) => n.as_u64().unwrap_or(u64::from(fallback_id)) as u32,
@@ -285,7 +277,10 @@ fn parse_subtask_value(value: &Value, fallback_id: u32) -> Option<SubtaskJson> {
         _ => fallback_id,
     };
 
-    let params = obj.get("params").cloned().unwrap_or(Value::Object(Default::default()));
+    let params = obj
+        .get("params")
+        .cloned()
+        .unwrap_or(Value::Object(Default::default()));
     let goal = obj
         .get("goal")
         .map(|g| flex_value_to_string(g.clone()))

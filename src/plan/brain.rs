@@ -61,11 +61,18 @@ pub enum PlanBrainMode {
     Llm(PlanLlmBrain<LlmConnectorKind>),
     /// 統合テスト用（`MockLlmConnector`）。
     Mock(PlanLlmBrain<MockLlmConnector>),
+    /// 固定の計画 JSON を返す（昇格判定などの単体テスト用）。
+    Fixed(FixedPlanBrain),
 }
 
 impl PlanBrainMode {
     pub fn rule() -> Self {
         Self::Rule(RulePlanBrain::new())
+    }
+
+    /// 計画層がこの JSON を `answer` として返す。
+    pub fn fixed_plan(json: impl Into<String>) -> Self {
+        Self::Fixed(FixedPlanBrain { json: json.into() })
     }
 
     pub fn from_cli(
@@ -91,6 +98,7 @@ impl AgentBrain for PlanBrainMode {
             Self::Rule(b) => b.decide(ctx),
             Self::Llm(b) => b.decide(ctx),
             Self::Mock(b) => b.decide(ctx),
+            Self::Fixed(b) => b.decide(ctx),
         }
     }
 
@@ -99,6 +107,7 @@ impl AgentBrain for PlanBrainMode {
             Self::Rule(b) => b.poll_context_usage(),
             Self::Llm(b) => b.poll_context_usage(),
             Self::Mock(b) => b.poll_context_usage(),
+            Self::Fixed(b) => b.poll_context_usage(),
         }
     }
 }
@@ -233,4 +242,21 @@ impl<C: LlmConnector> AgentBrain for PlanLlmBrain<C> {
 /// 計画層ループの `TurnResult` から [`PlanArtifact`] を取り出す。
 pub fn artifact_from_plan_turn(answer: &str, user_input: &str) -> PlanArtifact {
     super::parse_step::plan_artifact_from_answer(answer, user_input)
+}
+
+/// 固定計画 JSON を返す頭脳（単体テスト用）。
+#[derive(Debug, Clone)]
+pub struct FixedPlanBrain {
+    json: String,
+}
+
+impl AgentBrain for FixedPlanBrain {
+    fn decide(&mut self, ctx: &TurnPromptContext<'_>) -> AgentStep {
+        if ctx.blocks.candidate_selection_turn {
+            return AgentStep::Answer(
+                r#"{"candidates":[],"reason":"fixed plan brain skips catalog"}"#.into(),
+            );
+        }
+        AgentStep::Answer(self.json.clone())
+    }
 }

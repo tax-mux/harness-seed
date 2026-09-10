@@ -1,8 +1,7 @@
 //! プロンプトブロックと ReAct ループの統合。
 
 use harness_seed::{
-    PlanBrainMode, PromptBlocks, ReActLoop, SimpleRuleBrain, TurnPromptContext,
-    REACT_SYSTEM_CORE,
+    PlanBrainMode, PromptBlocks, ReActLoop, SimpleRuleBrain, TurnPromptContext, REACT_SYSTEM_CORE,
 };
 
 #[test]

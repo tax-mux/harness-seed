@@ -2,14 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-const SKIP_DIR_NAMES: &[&str] = &[
-    ".git",
-    "target",
-    "node_modules",
-    ".cursor",
-    "dist",
-    "build",
-];
+const SKIP_DIR_NAMES: &[&str] = &[".git", "target", "node_modules", ".cursor", "dist", "build"];
 
 const MAX_FILE_BYTES: u64 = 1_024 * 1024;
 
@@ -56,7 +49,10 @@ pub fn grep_in_workspace(
     } else if search_path.is_dir() {
         walk_dir(&root, &search_path, opts, &mut matches, &mut files_searched)?;
     } else {
-        return Err(format!("not a file or directory: {}", search_path.display()));
+        return Err(format!(
+            "not a file or directory: {}",
+            search_path.display()
+        ));
     }
 
     if matches.is_empty() {

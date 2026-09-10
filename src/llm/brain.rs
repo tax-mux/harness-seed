@@ -131,6 +131,9 @@ mod tests {
         assert!(user.content.as_text().contains("Previous turns:"));
         assert!(user.content.as_text().contains("User: first question"));
         assert!(user.content.as_text().contains("Assistant: one answer"));
-        assert!(user.content.as_text().contains("User input:\nfirst question follow-up"));
+        assert!(user
+            .content
+            .as_text()
+            .contains("User input:\nfirst question follow-up"));
     }
 }

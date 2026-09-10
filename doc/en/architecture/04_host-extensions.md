@@ -11,13 +11,16 @@ Code: `src/lifecycle.rs` / `tracking.rs`. **Session bootstrap** goes through [`S
 
 For embedders, the only bootstrap surface to learn is **`SeedBuilder` → `build()`**. Put rules, tasks, tool plugins, plan contracts, lifecycle, and memory on the builder, then take the finished `ReActLoop`.
 
+The host also chooses where the config file lives. CLI `--config` is binary-only; in library mode prefer **`AppConfig::load_path` with a host-owned path** (`load_default()` uses XDG / env / cwd fallback — see [config/README.md](../../../config/README.md#ライブラリ組み込み時のパス指定)).
+
 CLI and standalone helpers only gather assets and call the same builder (`merge_cli_agent` / `merge_agent_project`). Mid-session updates keep using `ReActLoop` mutators.
 
 ```rust
 use harness_seed::{lifecycle_from_tracking, AppConfig, BrainPair, SeedBuilder};
 use std::sync::Arc;
 
-let app = AppConfig::load_default()?;
+let app = AppConfig::load_path("/var/lib/my-app/harness-seed.json")?;
+// or: AppConfig::load_default()?
 let builder = SeedBuilder::from_app(&app)?
     .lifecycle(lifecycle_from_tracking(Arc::new(PmSync)));
 let brains = BrainPair::from_cli_with_registry(&app, false, false, builder.task_registry_ref())?;

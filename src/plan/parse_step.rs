@@ -141,11 +141,23 @@ pub fn parse_plan_agent_step(raw: &str) -> Result<AgentStep, PlanStepParseError>
     let mut last_err = None;
 
     for chunk in extract_json_objects(trimmed) {
-        merge_plan_chunk(&chunk, &mut thought, &mut answer, &mut recall, &mut last_err);
+        merge_plan_chunk(
+            &chunk,
+            &mut thought,
+            &mut answer,
+            &mut recall,
+            &mut last_err,
+        );
     }
 
     if answer.is_none() {
-        merge_plan_chunk(trimmed, &mut thought, &mut answer, &mut recall, &mut last_err);
+        merge_plan_chunk(
+            trimmed,
+            &mut thought,
+            &mut answer,
+            &mut recall,
+            &mut last_err,
+        );
     }
 
     if answer.is_none() && thought.is_none() && recall.is_none() {
@@ -192,10 +204,7 @@ pub fn harness_state_from_plan_answer(
 }
 
 /// 計画層ループ終了時の `Answer` 本文から [`super::PlanArtifact`] を得る。
-pub fn plan_artifact_from_answer(
-    answer: &str,
-    fallback_input: &str,
-) -> super::PlanArtifact {
+pub fn plan_artifact_from_answer(answer: &str, fallback_input: &str) -> super::PlanArtifact {
     harness_state_from_plan_answer(answer, fallback_input).plan
 }
 

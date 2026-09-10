@@ -1,8 +1,8 @@
 //! 計画層頭脳（RulePlanBrain / PlanLlmBrain）。
 
 use harness_seed::{
-    plan_artifact_from_answer, AgentBrain, AgentStep, MockLlmConnector, PlanLlmBrain,
-    PromptBlocks, RulePlanBrain, SessionMemory, TaskRegistry, TurnPromptContext, TurnTrace,
+    plan_artifact_from_answer, AgentBrain, AgentStep, MockLlmConnector, PlanLlmBrain, PromptBlocks,
+    RulePlanBrain, SessionMemory, TaskRegistry, TurnPromptContext, TurnTrace,
 };
 
 #[test]
@@ -28,10 +28,7 @@ fn rule_plan_generic_two_steps() {
     let session = SessionMemory::default();
     let trace0 = TurnTrace::default();
     let ctx1 = TurnPromptContext::new(&blocks, "hello", &trace0, &session);
-    assert!(matches!(
-        brain.decide(&ctx1),
-        AgentStep::Thought(_)
-    ));
+    assert!(matches!(brain.decide(&ctx1), AgentStep::Thought(_)));
 
     let mut trace = TurnTrace::default();
     trace.push_thought("plan".into());

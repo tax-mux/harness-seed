@@ -16,7 +16,9 @@ use harness_seed::{
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
-    let verbose = args.iter().any(|a| matches!(a.as_str(), "-v" | "--verbose"));
+    let verbose = args
+        .iter()
+        .any(|a| matches!(a.as_str(), "-v" | "--verbose"));
     let show_prompt = args.iter().any(|a| a == "--show-prompt");
     let json_repl = args.iter().any(|a| a == "--json");
     let plan_zone = args.iter().any(|a| a == "--plan-zone");
@@ -84,18 +86,15 @@ fn main() -> ExitCode {
         );
     }
 
-    let brains = match BrainPair::from_cli_with_registry(
-        &app,
-        use_llm,
-        no_llm,
-        builder.task_registry_ref(),
-    ) {
-        Ok(b) => b,
-        Err(err) => {
-            eprintln!("failed to initialize LLM brain: {err}");
-            return ExitCode::from(1);
-        }
-    };
+    let brains =
+        match BrainPair::from_cli_with_registry(&app, use_llm, no_llm, builder.task_registry_ref())
+        {
+            Ok(b) => b,
+            Err(err) => {
+                eprintln!("failed to initialize LLM brain: {err}");
+                return ExitCode::from(1);
+            }
+        };
 
     let react_config = app.react_config(verbose, show_prompt);
     let mut react_config = react_config;
@@ -112,7 +111,7 @@ fn main() -> ExitCode {
         react_config.max_steps_plan,
         react_config.session_max_turns,
         react_config.two_phase,
-        react_config.advance.enabled,
+        react_config.advance.mode,
         react_config.show_tool_output
     );
     if let Some(path) = &react_config.context_log_path {
@@ -216,11 +215,10 @@ fn run_plan_zone_mode(
     eprintln!("brain: {}", brains.label());
 
     let memory_rag = build_memory_rag_for_app(app, &react_config, no_llm);
-    let mut react = builder.memory_rag(memory_rag).build(
-        SimpleRuleBrain::new(),
-        brains.plan,
-        react_config,
-    );
+    let mut react =
+        builder
+            .memory_rag(memory_rag)
+            .build(SimpleRuleBrain::new(), brains.plan, react_config);
 
     if full {
         if !no_monitor {
@@ -365,10 +363,13 @@ fn parse_config_path(args: &[String]) -> PathBuf {
 }
 
 /// 記憶 RAG（アダプタ手前）。`memory.rag.router=llm` かつ LLM 利用時のみ LlmRouter。
-fn build_memory_rag_for_app(app: &AppConfig, react_config: &ReActConfig, no_llm: bool) -> MemoryRag {
-    let want_llm = react_config.memory.rag_router.eq_ignore_ascii_case("llm")
-        && !no_llm
-        && app.uses_llm();
+fn build_memory_rag_for_app(
+    app: &AppConfig,
+    react_config: &ReActConfig,
+    no_llm: bool,
+) -> MemoryRag {
+    let want_llm =
+        react_config.memory.rag_router.eq_ignore_ascii_case("llm") && !no_llm && app.uses_llm();
     let connector = if want_llm {
         match harness_seed::LlmConfig::from_app(app)
             .and_then(harness_seed::LlmConnectorKind::from_config)
@@ -406,7 +407,7 @@ Options:
   --plan-zone [TEXT]      固定ゾーン表示 → Planner 実行 → 作業指示書を stdout に出力
   --plan-zone-full [TEXT] 計画層 1 ステップ目のプロンプト全文のみ（LLM 未使用）
   --json                  JSON Lines REPL（stdin/stdout は 1 行 1 JSON、ログは stderr）
-  --config <PATH>         harness-seed 設定（既定: config/config.json）
+  --config <PATH>         harness-seed 設定（既定: ~/.config/harness-seed/config.json）
   --config-agent <PATH>   プロジェクトの config.agent.json（既定: ./config.agent.json）
   --agent-dir <PATH>      エージェント資産ディレクトリ（workspace は実行時 cwd）
   --llm                   設定に関わらず LLM 頭脳を強制
@@ -423,9 +424,11 @@ agent_dir レイアウト:
   tools/*.json            宣言的シェルツール
 
 プロバイダ切替（推奨）:
-  cp config/config.json.sample config/config.json
+  mkdir -p ~/.config/harness-seed
+  cp config/config.json.sample ~/.config/harness-seed/config.json
   # プロバイダ別: config/samples/config.lmstudio.json など
   # 詳細: config/README.md
+  # 後方互換: cwd の config/config.json も存在すれば読む
 
 設定ファイル:
   llm.provider            \"openai\" | \"ollama\" | \"lmstudio\" | \"gemini\" | \"anthropic\" | \"claude\"
@@ -436,8 +439,9 @@ agent_dir レイアウト:
   llm.json_mode           OpenAI JSON モード（Ollama / LM Studio では通常 false）
   react.max_steps         1ターンの最大ステップ
   react.session_max_turns REPL 短期記憶（Previous turns）の保持数
-  react.two_phase         計画層 → 実行層の直列（既定: false）
-  react.advance.enabled   推進ループ（既定: false、true で two_phase より優先）
+  react.two_phase         計画層 → 実行層の直列（既定: true）
+  react.advance.mode      推進ループ: off | always | from_plan（キー省略時: off。CLI サンプルは from_plan）
+  react.advance.enabled   互換: true=always / false=off（mode 指定時は無視）
   react.max_steps_plan    計画層 ReAct の最大ステップ（既定: 4）
   react.verbose           詳細ログ
   react.show_prompt       各ステップのプロンプト全文（stderr）

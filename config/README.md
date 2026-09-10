@@ -4,37 +4,41 @@
 
 | パス | 役割 |
 |------|------|
+| `~/.config/harness-seed/config.json` | **実行時に読む正本**（`$XDG_CONFIG_HOME` があればその下。秘密情報はここ） |
 | `config/config.json.sample` | **既定のひな形**（リポジトリに固定。秘密情報なし） |
-| `config/config.json` | **実行時に読む正本**（gitignore。ローカルで編集する） |
+| `config/config.json` | **後方互換のローカル設定**（gitignore。ユーザ設定が無いときのみ） |
 | `config/samples/config.*.json` | コネクタ別のひな形（リポジトリに固定） |
+
+解決順: `--config` > `HARNESS_SEED_CONFIG` / `MYHARNESS_CONFIG` > ユーザ設定（存在時）> cwd `config/config.json`（存在時）> ユーザ設定パス（無ければビルトイン既定）。
 
 初回セットアップ:
 
 ```bash
-cp config/config.json.sample config/config.json
+mkdir -p ~/.config/harness-seed
+cp config/config.json.sample ~/.config/harness-seed/config.json
 # 必要なら llm.model / api_key などを編集
 ```
 
 ## プロバイダの切り替え
 
-使いたいサンプルを `config.json` にコピーして上書きします。
+使いたいサンプルをユーザ設定にコピーして上書きします。
 
 ```bash
 # Ollama
-cp config/samples/config.ollama.json config/config.json
+cp config/samples/config.ollama.json ~/.config/harness-seed/config.json
 
 # LM Studio
-cp config/samples/config.lmstudio.json config/config.json
+cp config/samples/config.lmstudio.json ~/.config/harness-seed/config.json
 
 # OpenAI（API キーは環境変数 OPENAI_API_KEY でも可）
-cp config/samples/config.openai.json config/config.json
+cp config/samples/config.openai.json ~/.config/harness-seed/config.json
 
 # Google Gemini（API キーは環境変数 GEMINI_API_KEY）
-cp config/samples/config.gemini.json config/config.json
+cp config/samples/config.gemini.json ~/.config/harness-seed/config.json
 export GEMINI_API_KEY=your-key
 
 # Anthropic Claude（Messages API 直）
-cp config/samples/config.anthropic.json config/config.json
+cp config/samples/config.anthropic.json ~/.config/harness-seed/config.json
 export ANTHROPIC_API_KEY=your-key
 ```
 
@@ -45,6 +49,26 @@ cargo run -- --config config/samples/config.lmstudio.json
 ```
 
 環境変数 `HARNESS_SEED_CONFIG`（旧 `MYHARNESS_CONFIG`）でもパスを指定できます。
+
+## ライブラリ組み込み時のパス指定
+
+他システムにクレートとして載せる場合、**ホストが設定ファイルの場所を決める**。CLI の `--config` はバイナリ専用なので、ライブラリからは次のいずれかを使う。
+
+| 方法 | API / 手段 | いつ使うか |
+|------|------------|------------|
+| **明示パス（推奨）** | `AppConfig::load_path("/host/path/config.json")` | ホスト専用の設定ディレクトリに置きたいとき |
+| 既定解決 | `AppConfig::load_default()` | XDG / cwd フォールバックと同じ解決でよいとき |
+| 環境変数 | 起動前に `HARNESS_SEED_CONFIG=...` | ホストがパスだけ差し替え、読み込みは `load_default()` のままにしたいとき |
+
+```rust
+use harness_seed::{AppConfig, SeedBuilder};
+
+// ホストアプリの設定を明示指定（推奨）
+let app = AppConfig::load_path("/var/lib/my-app/harness-seed.json")?;
+let builder = SeedBuilder::from_app(&app)?;
+```
+
+`load_default()` は `default_config_path()` と同じ優先順（env → ユーザ設定 → cwd フォールバック）を使う。ホストの設定場所を XDG と混ぜたくないなら `load_path` を選ぶ。
 
 ## プロジェクト資産（CLI: `config.agent.json`）
 
@@ -191,7 +215,7 @@ ReAct の `web_search` ツールが有効になるのは API キーが解決で�
 
 ## `react` セクション（ループ・短期記憶）
 
-`config/config.json` の `react` で ReAct の上限を変更します（`main` / ライブラリの `AppConfig::react_config` 経由）。
+設定ファイルの `react` で ReAct の上限を変更します（`main` / ライブラリの `AppConfig::react_config` 経由）。
 
 | キー | 意味 | 既定 |
 |------|------|------|
@@ -199,13 +223,15 @@ ReAct の `web_search` ツールが有効になるのは API キーが解決で�
 | `session_max_turns` | **完了ターン**を `Previous turns` に残す件数（超過分は古い順に破棄） | `8` |
 | `verbose` | Thought/Action/Observation を stderr に出す（CLI の `-v` でも ON） | `false` |
 | `show_prompt` | 各 ReAct ステップのプロンプト全文を stderr に出す（CLI の `--show-prompt` でも ON） | `false` |
+| `two_phase` | 計画層 → 実行層の直列。CLI / `AppConfig` のキー省略時は ON。ライブラリの `ReActConfig::default()` は OFF | `true` |
 
 起動時に OS / シェルは自動検出され、stderr に `runtime: ...` と LLM プロンプトの `Execution environment` に反映されます（`src/runtime.rs`）。
 
 | `show_plan` | `two_phase` 時に計画を stdout に表示（既定 `true`） |
 | `show_task_execution` | サブタスクごとの契約ツール列・実行後の実ツール列（既定 `true`） |
 | `show_tool_output` | 各ツールのコマンド・結果を stderr に表示（`run_cmd` は `$ command` 形式、既定 `true`） |
-| `advance.enabled` | 外側推進ループ（計画→フェーズ逐次、`recalled` 引き継ぎ）。`true` 時は `two_phase` より優先 | `false` |
+| `advance.mode` | 推進ループの入り方: `off` / `always` / `from_plan`。`from_plan` は計画後に `PlanArtifact` の形で昇格。CLI サンプルの既定 | `off` |
+| `advance.enabled` | 互換: `true`=`always`、`false`=`off`。`mode` があるときは無視 | `false` |
 | `advance.max_phases` | 1 リクエストの最大フェーズ数 | `8` |
 | `advance.clear_session_each_phase` | 各フェーズ前に REPL 短期記憶をクリア | `true` |
 | `advance.max_note_chars` | 完了フェーズ要約の `recalled` 上限文字数 | `1500` |

@@ -11,7 +11,15 @@
     "max_steps": 16,
     "verbose": false,
     "show_context_metrics": true,
-    "session_max_turns": 8
+    "session_max_turns": 8,
+    "two_phase": true,
+    "advance": {
+      "mode": "from_plan",
+      "max_phases": 8,
+      "clear_session_each_phase": true,
+      "max_note_chars": 1500,
+      "show_phases": true
+    }
   },
   "log": {
     "context_metrics": "logs/context.jsonl"

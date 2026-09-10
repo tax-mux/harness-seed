@@ -6,13 +6,12 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use harness_seed::{
-    default_config_path, AppConfig, BrainMode, BrainPair, ChatMessage, LlmBrain, LlmConnector,
-    LlmConnectorKind, LlmProvider, PlanBrainMode, ReActLoop,
+    default_config_path, AdvanceMode, AppConfig, BrainMode, BrainPair, ChatMessage, LlmBrain,
+    LlmConnector, LlmConnectorKind, LlmProvider, PlanBrainMode, ReActLoop,
 };
 
 /// エージェントに自己紹介させるユーザー入力。
-pub const SELF_INTRO_USER_PROMPT: &str =
-    "あなたは誰ですか？簡潔に自己紹介してください。";
+pub const SELF_INTRO_USER_PROMPT: &str = "あなたは誰ですか？簡潔に自己紹介してください。";
 
 /// カレントディレクトリのファイル一覧を `list_dir` で取得させる入力。
 pub const LIST_FILES_USER_PROMPT: &str =
@@ -48,10 +47,7 @@ pub fn load_test_config() -> Option<AppConfig> {
 
 /// 設定に記載のモデル名。
 pub fn config_model_name(app: &AppConfig) -> &str {
-    app.llm
-        .model
-        .as_deref()
-        .unwrap_or("(model not set)")
+    app.llm.model.as_deref().unwrap_or("(model not set)")
 }
 
 fn default_port_for_provider(provider: LlmProvider) -> u16 {
@@ -115,9 +111,7 @@ pub fn llm_ready(app: &AppConfig) -> bool {
     let Some(connector) = build_connector(app) else {
         return false;
     };
-    connector
-        .complete(&[ChatMessage::user("ping")])
-        .is_ok()
+    connector.complete(&[ChatMessage::user("ping")]).is_ok()
 }
 
 fn provider_hint(app: &AppConfig) -> &'static str {
@@ -138,7 +132,10 @@ pub fn skip_if_llm_not_ready() -> bool {
 
     if !llm_host_is_available(&app) {
         let base = app.llm.base_url.as_deref().unwrap_or("(no base_url)");
-        eprintln!("SKIP: LLM host not reachable ({base}) — {}", provider_hint(&app));
+        eprintln!(
+            "SKIP: LLM host not reachable ({base}) — {}",
+            provider_hint(&app)
+        );
         return true;
     }
 
@@ -164,13 +161,19 @@ pub fn build_react_loop_from_config() -> Option<ReActLoop<BrainMode>> {
 
     let connector = build_connector(&app)?;
     let mut react_config = app.react_config(false, false);
-    // 統合テストは単一 trace の検証が多いため two_phase をオフにする。
+    // 統合テストは単一 trace の検証が多いため two_phase / advance をオフにする。
     react_config.two_phase = false;
+    react_config.advance.mode = AdvanceMode::Off;
 
     let brains = BrainPair {
         exec: BrainMode::Llm(LlmBrain::new(connector)),
-        plan: PlanBrainMode::from_cli(&app, true, false, &harness_seed::TaskRegistry::load_default())
-            .ok()?,
+        plan: PlanBrainMode::from_cli(
+            &app,
+            true,
+            false,
+            &harness_seed::TaskRegistry::load_default(),
+        )
+        .ok()?,
     };
     Some(ReActLoop::new(brains.exec, brains.plan, react_config))
 }
@@ -194,6 +197,5 @@ pub fn llm_chat_from_config(user_prompt: &str) -> Option<String> {
 
 /// LLM エラー応答でないこと。
 pub fn is_llm_error_answer(answer: &str) -> bool {
-    answer.starts_with("LLM connector error:")
-        || answer.starts_with("LLM response parse error:")
+    answer.starts_with("LLM connector error:") || answer.starts_with("LLM response parse error:")
 }

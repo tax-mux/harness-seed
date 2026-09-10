@@ -1,44 +1,40 @@
 //! ReAct ループの実行基盤。
+mod advance_inject;
 mod advance_turn;
+mod hooks;
+mod persist;
+mod plan_turn;
+mod repl;
 mod skip;
+mod step_driver;
 mod synthesis;
 mod two_phase;
 
 use std::fmt;
-use std::fs;
-use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::action::TurnTrace;
-use crate::advance::{restore_base_recalled, AdvanceConfig, AdvancePhaseSummary};
+use crate::advance::{restore_base_recalled, AdvanceConfig, AdvanceMode, AdvancePhaseSummary};
 use crate::brain::AgentBrain;
-use crate::context::PromptBlocks;
+use crate::brave_search::BraveSearchConfig;
 use crate::config::LogRotationConfig;
-use crate::context_log::{default_log_path, ContextLogWriter};
-use crate::context_map::{
-    aggregate_prompt_sections, analyze_prompt_body, format_colormap_titled,
-};
+use crate::context::PromptBlocks;
+use crate::context_log::default_log_path;
 use crate::context_metrics::TurnContextSummary;
 use crate::harness::{HarnessReference, HarnessState};
 use crate::layer::{run_layer_loop, run_plan_layer, LayerLoopOptions};
-use crate::lifecycle::{
-    invoke_lifecycle, HostScratch, HostView, RunStatus, SubtaskOutcome, TurnLifecycle,
-    TurnOutcome, WriteScope,
-};
+use crate::lifecycle::{HostScratch, TurnLifecycle};
 use crate::memory::{
-    build_memory_rag, inject_memory_recalled, DiaryEntry, DiaryPhase, MemoryBridge, MemoryRag,
-    MemoryRuntimeConfig, NoopBridge,
+    build_memory_rag, inject_memory_recalled, MemoryBridge, MemoryRag, MemoryRuntimeConfig,
+    NoopBridge,
 };
-use crate::session::SessionPromptPolicy;
-use crate::plan::{
-    format_plan_for_display, format_planner_fixed_zone_html, PlanArtifact, PlanBrainMode, Subtask,
-};
+use crate::plan::{format_plan_for_display, PlanArtifact, PlanBrainMode, Subtask};
 use crate::runtime::RuntimeEnvironment;
 use crate::session::SessionMemory;
+use crate::session::SessionPromptPolicy;
 use crate::tasks::TaskRegistry;
-use crate::brave_search::BraveSearchConfig;
 use crate::tool::{ToolPack, ToolRuntime};
 use crate::turn_observer::{emit_plan_artifact, TurnObserver};
 
@@ -61,6 +57,7 @@ pub struct ReActConfig {
     /// REPL 短期記憶に保持する直近ターン数。
     pub session_max_turns: usize,
     /// 計画フェーズ → 実行フェーズの直列オーケストレーション。
+    /// ライブラリ既定は `false`。CLI の JSON 省略時は `AppConfig::react_config` が `true`。
     pub two_phase: bool,
     /// 計画層 ReAct ループの最大ステップ。
     pub max_steps_plan: usize,
@@ -168,11 +165,17 @@ pub struct TurnResult {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ReActError {
-    MaxStepsExceeded { limit: usize },
+    MaxStepsExceeded {
+        limit: usize,
+    },
     Cancelled,
-    PlanParseFailed { message: String },
+    PlanParseFailed {
+        message: String,
+    },
     /// サブタスク依存関係が不正（未知 id・閉路）。
-    ScheduleFailed { message: String },
+    ScheduleFailed {
+        message: String,
+    },
 }
 
 impl fmt::Display for ReActError {
@@ -331,10 +334,7 @@ impl<E: AgentBrain> ReActLoop<E> {
     }
 
     /// ターン開始前に参照情報を登録する（計画層の固定ゾーンと Harness JSON に反映）。
-    pub fn inject_reference_info(
-        &mut self,
-        refs: impl IntoIterator<Item = HarnessReference>,
-    ) {
+    pub fn inject_reference_info(&mut self, refs: impl IntoIterator<Item = HarnessReference>) {
         self.pending_reference_info.extend(refs);
     }
 
@@ -382,21 +382,16 @@ impl<E: AgentBrain> ReActLoop<E> {
                 );
             }
         }
-        self.blocks.plan_task_catalog = Some(
-            self.task_registry.catalog_for_planner_filtered(
-                &available,
-                self.blocks.web_search_enabled,
-                &exclude,
-                true,
-            ),
-        );
+        self.blocks.plan_task_catalog = Some(self.task_registry.catalog_for_planner_filtered(
+            &available,
+            self.blocks.web_search_enabled,
+            &exclude,
+            true,
+        ));
     }
 
     /// このターンの read / write 契約を設定し、計画カタログを更新する。
-    pub fn set_plan_data_contract(
-        &mut self,
-        contract: Option<crate::plan::PlanDataContract>,
-    ) {
+    pub fn set_plan_data_contract(&mut self, contract: Option<crate::plan::PlanDataContract>) {
         self.blocks.plan_data_contract = contract;
         self.refresh_plan_task_catalog();
     }
@@ -443,7 +438,10 @@ impl<E: AgentBrain> ReActLoop<E> {
         result
     }
 
-    fn run_plan_preview_inner(&mut self, user_input: &str) -> Result<PlanPreviewResult, ReActError> {
+    fn run_plan_preview_inner(
+        &mut self,
+        user_input: &str,
+    ) -> Result<PlanPreviewResult, ReActError> {
         let turn_refs = self.take_pending_reference_info_for_plan();
         let (mut harness, trace, steps_used) = run_plan_layer(
             &mut self.plan_brain,
@@ -501,167 +499,14 @@ impl<E: AgentBrain> ReActLoop<E> {
         emit_plan_artifact(self.turn_observer.as_ref(), "plan", plan, &display);
     }
 
-    fn emit_turn_started(&mut self, user_input: &str) {
-        let Some(h) = self.lifecycle.clone() else {
-            return;
-        };
-        invoke_lifecycle("on_turn_started", || {
-            h.on_turn_started(
-                user_input,
-                HostView::new(&mut self.host_scratch, WriteScope::Turn),
-            );
-        });
-    }
-
-    fn emit_plan_finished(&mut self, user_input: &str, plan: &PlanArtifact) {
-        self.lifecycle_plan = Some(plan.clone());
-        let Some(h) = self.lifecycle.clone() else {
-            return;
-        };
-        invoke_lifecycle("on_plan_finished", || {
-            h.on_plan_finished(
-                user_input,
-                plan,
-                HostView::new(&mut self.host_scratch, WriteScope::Turn),
-            );
-        });
-    }
-
-    fn emit_subtask_started(
-        &mut self,
-        user_input: &str,
-        plan: &PlanArtifact,
-        subtask: &Subtask,
-        index: usize,
-    ) {
-        self.lifecycle_open_subtasks
-            .push((subtask.clone(), index));
-        let Some(h) = self.lifecycle.clone() else {
-            return;
-        };
-        let id = subtask.id;
-        invoke_lifecycle("on_subtask_started", || {
-            h.on_subtask_started(
-                user_input,
-                plan,
-                subtask,
-                index,
-                HostView::new(&mut self.host_scratch, WriteScope::Subtask(id)),
-            );
-        });
-    }
-
-    fn emit_subtask_finished(
-        &mut self,
-        user_input: &str,
-        plan: &PlanArtifact,
-        subtask: &Subtask,
-        outcome: &SubtaskOutcome,
-    ) {
-        self.lifecycle_open_subtasks
-            .retain(|(s, _)| s.id != subtask.id);
-        let Some(h) = self.lifecycle.clone() else {
-            return;
-        };
-        let id = subtask.id;
-        invoke_lifecycle("on_subtask_finished", || {
-            h.on_subtask_finished(
-                user_input,
-                plan,
-                subtask,
-                outcome,
-                HostView::new(&mut self.host_scratch, WriteScope::Subtask(id)),
-            );
-        });
-    }
-
-    fn emit_turn_finished(&mut self, user_input: &str, plan: Option<&PlanArtifact>, outcome: &TurnOutcome) {
-        self.lifecycle_open_subtasks.clear();
-        let Some(h) = self.lifecycle.clone() else {
-            return;
-        };
-        invoke_lifecycle("on_turn_finished", || {
-            h.on_turn_finished(
-                user_input,
-                plan,
-                outcome,
-                HostView::new(&mut self.host_scratch, WriteScope::Turn),
-            );
-        });
-    }
-
-    /// 開始済み未完了のサブタスクとターンを Failed / Cancelled で閉じる。
-    fn finalize_lifecycle_on_error(&mut self, user_input: &str, err: &ReActError) {
-        let status = match err {
-            ReActError::Cancelled => RunStatus::Cancelled,
-            _ => RunStatus::Failed,
-        };
-        let message = err.to_string();
-        let plan = self.lifecycle_plan.clone();
-        let open: Vec<(Subtask, usize)> = self.lifecycle_open_subtasks.drain(..).collect();
-        if let Some(ref plan) = plan {
-            let outcome = SubtaskOutcome {
-                status,
-                message: message.clone(),
-                steps_used: 0,
-            };
-            for (subtask, _) in open {
-                // retain 済みのため emit の retain は no-op
-                self.emit_subtask_finished(user_input, plan, &subtask, &outcome);
-            }
-        }
-        let turn = TurnOutcome {
-            status,
-            answer: message,
-            steps_used: 0,
-        };
-        self.emit_turn_finished(user_input, plan.as_ref(), &turn);
-    }
-
-    /// 計画フェーズの Harness パース結果をプロンプト固定ゾーンへ反映する。
-    fn apply_harness_from_plan(&mut self, harness: &mut HarnessState, user_input: &str) {
-        self.resolve_plan_for_turn(&mut harness.plan, user_input);
-        self.blocks.work_instructions_text =
-            Some(harness.format_work_instructions_for_prompt());
-        if harness.total_steps > 0 {
-            harness.begin_execution();
-        }
-        self.sync_harness_step_to_blocks(harness);
-        if self.config.verbose {
-            eprintln!("[harness] state:\n{}", harness.to_json_pretty());
-        }
-    }
-
-    fn sync_harness_step_to_blocks(&mut self, harness: &HarnessState) {
-        self.blocks.current_step_text = Some(
-            harness.format_current_step_for_prompt(&self.task_registry),
-        );
-    }
-
-    fn prepare_harness_for_subtask(&mut self, harness: &mut HarnessState, subtask: &Subtask) {
-        harness.current_step = subtask.id;
-        let available: std::collections::HashSet<String> =
-            self.tools.registry().names().into_iter().collect();
-        let policy = self
-            .task_registry
-            .tool_policy_for_subtask_with_tools(subtask, Some(&available));
-        harness.set_tool_set_from_policy(policy.as_ref());
-        self.sync_harness_step_to_blocks(harness);
-    }
-
-    fn clear_harness_prompt_blocks(&mut self) {
-        self.blocks.work_instructions_text = None;
-        self.blocks.current_step_text = None;
-    }
-
     pub fn run_turn(&mut self, user_input: &str) -> Result<TurnResult, ReActError> {
         self.begin_host_scratch_for_turn();
         self.emit_turn_started(user_input);
         let host_recalled = self.blocks.recalled.clone();
         self.inject_memory_for_turn(user_input);
-        let result = if self.config.advance.enabled {
+        let result = if self.config.advance.mode.is_always() {
             self.run_turn_advance(user_input)
-        } else if self.config.two_phase {
+        } else if self.config.advance.mode == AdvanceMode::FromPlan || self.config.two_phase {
             self.run_turn_two_phase(user_input)
         } else {
             let _ = self.take_pending_reference_info_for_plan();
@@ -726,555 +571,17 @@ impl<E: AgentBrain> ReActLoop<E> {
         }
         Ok(result)
     }
-
-    fn finish_turn(&mut self, user_input: &str, result: &TurnResult) {
-        self.session
-            .push_turn(user_input.to_string(), result.answer.clone());
-        self.record_diary(user_input, result);
-        if self.config.show_context_metrics && !result.context.is_empty() {
-            eprintln!("[context turn] {}", result.context);
-            let turn_sections = aggregate_prompt_sections(
-                result
-                    .trace
-                    .context_usages
-                    .iter()
-                    .map(|u| u.prompt_body.as_str()),
-            );
-            if !turn_sections.is_empty() {
-                let title = format!("turn prompts ({} calls)", result.context.llm_calls);
-                eprintln!(
-                    "[context turn map]\n{}",
-                    format_colormap_titled(&turn_sections, true, &title)
-                );
-            }
-            if let Some(last) = result.trace.context_usages.last() {
-                let sections = analyze_prompt_body(&last.prompt_body);
-                eprintln!(
-                    "[context map]\n{}",
-                    format_colormap_titled(&sections, true, "last prompt sections")
-                );
-            }
-        }
-        self.write_context_log(user_input, result);
-        self.write_monitor_html(user_input, result);
-        let outcome = TurnOutcome::completed(&result.answer, result.steps_used);
-        self.emit_turn_finished(user_input, result.plan.as_ref(), &outcome);
-    }
-
-    fn record_diary(&mut self, user_input: &str, result: &TurnResult) {
-        let summary = result
-            .plan
-            .as_ref()
-            .map(|p| p.summary.clone())
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| {
-                result
-                    .answer
-                    .chars()
-                    .take(200)
-                    .collect::<String>()
-            });
-        let phases = if result.advance_phases.is_empty() {
-            result
-                .subtask_results
-                .iter()
-                .map(|s| DiaryPhase {
-                    id: s.id,
-                    goal: format!("subtask {}", s.id),
-                    answer: s.answer.clone(),
-                })
-                .collect()
-        } else {
-            result
-                .advance_phases
-                .iter()
-                .map(|p| DiaryPhase {
-                    id: p.id,
-                    goal: p.goal.clone(),
-                    answer: p.answer.clone(),
-                })
-                .collect()
-        };
-        let entry = DiaryEntry {
-            user_input: user_input.to_string(),
-            summary,
-            answer: result.answer.clone(),
-            phases,
-        };
-        // 実行完了後の最終回答（TurnResult.answer）を MemoryBridge 経由で書く（mempalace 直叩きはしない）。
-        match self.memory.diary(&entry) {
-            Ok(()) => {
-                let preview: String = user_input.chars().take(40).collect();
-                eprintln!("[memory] diary written: {preview}");
-            }
-            Err(err) => eprintln!("[memory] diary: {err}"),
-        }
-    }
-
-    fn write_context_log(&self, user_input: &str, result: &TurnResult) {
-        if result.context.is_empty() {
-            return;
-        }
-        let Some(path) = &self.config.context_log_path else {
-            return;
-        };
-        let writer = ContextLogWriter::new(path).with_rotation(self.config.log_rotation);
-        match writer.append_turn(user_input, result) {
-            Ok(()) => eprintln!("context log: appended to {}", path.display()),
-            Err(err) => eprintln!("context log: failed to write {}: {err}", path.display()),
-        }
-    }
-
-    fn write_monitor_html(&self, user_input: &str, result: &TurnResult) {
-        if !self.config.monitor_plan_html {
-            return;
-        }
-
-        let monitor_dir = PathBuf::from("monitor");
-        if let Err(err) = fs::create_dir_all(&monitor_dir) {
-            eprintln!("monitor html: failed to create {}: {err}", monitor_dir.display());
-            return;
-        }
-
-        let planner_output = result
-            .harness
-            .as_ref()
-            .map(|h| h.work_instructions.as_str());
-        let recent_turns = self.session.format_for_prompt();
-        let subtask_modes: Vec<(u32, bool)> = result
-            .subtask_results
-            .iter()
-            .map(|s| (s.id, s.used_step_driver))
-            .collect();
-        let html = format_planner_fixed_zone_html(
-            &self.blocks,
-            &self.task_registry,
-            result.harness.as_ref(),
-            planner_output,
-            Some(user_input),
-            Some(&result.context),
-            Some(&result.trace),
-            &self.blocks.recalled,
-            if recent_turns.trim().is_empty() {
-                None
-            } else {
-                Some(recent_turns.as_str())
-            },
-            &subtask_modes,
-        );
-        let path = monitor_dir.join("context_monitor.html");
-        match fs::write(&path, html) {
-            Ok(()) => {
-                if self.config.verbose {
-                    eprintln!("monitor html: wrote {}", path.display());
-                }
-            }
-            Err(err) => eprintln!("monitor html: failed to write {}: {err}", path.display()),
-        }
-    }
 }
 
 pub(super) fn append_trace(acc: &mut TurnTrace, step: &TurnTrace) {
     acc.thoughts.extend(step.thoughts.iter().cloned());
     acc.actions.extend(step.actions.iter().cloned());
     acc.observations.extend(step.observations.iter().cloned());
-    acc.context_usages.extend(step.context_usages.iter().cloned());
+    acc.context_usages
+        .extend(step.context_usages.iter().cloned());
 }
 
-/// 対話 REPL（stdin → ReAct → stdout）。
-pub fn run_repl<E: AgentBrain>(
-    loop_engine: &mut ReActLoop<E>,
-    verbose: bool,
-) -> io::Result<()> {
-    loop_engine.apply_cli_verbose(verbose);
+pub use repl::run_repl;
 
-    let stdin = io::stdin();
-    let mut line = String::new();
-
-    println!(
-        "HarnessSeed ReAct REPL — 'help' でコマンド一覧、'clear' で短期記憶リセット、'quit' で終了"
-    );
-
-    loop {
-        line.clear();
-        print!("> ");
-        io::Write::flush(&mut io::stdout())?;
-
-        if stdin.read_line(&mut line)? == 0 {
-            println!();
-            break;
-        }
-
-        let input = line.trim();
-        if input.is_empty() {
-            continue;
-        }
-        if matches!(input, "quit" | "exit" | "q") {
-            break;
-        }
-        if matches!(input, "clear" | "forget" | "reset") {
-            loop_engine.session.clear();
-            println!("session memory cleared");
-            continue;
-        }
-
-        match loop_engine.run_turn(input) {
-            Ok(result) => {
-                if verbose {
-                    eprintln!("--- trace ---\n{}", result.trace);
-                }
-                println!("{}", result.answer);
-            }
-            Err(err) => eprintln!("error: {err}"),
-        }
-    }
-
-    Ok(())
-}
-
-/// ステップドライバの生 answer がそのままユーザー向けに十分そうなら true。
-mod tests {
-    use super::*;
-    use crate::brain::SimpleRuleBrain;
-    use crate::context::TurnPromptContext;
-
-    #[test]
-    fn help_turn_single_step() {
-        let mut react = ReActLoop::with_defaults(SimpleRuleBrain::new());
-        let result = react.run_turn("help").unwrap();
-        assert_eq!(result.steps_used, 1);
-        assert!(result.answer.contains("echo"));
-    }
-
-    #[test]
-    fn generic_input_runs_thought_echo_answer() {
-        let mut react = ReActLoop::with_defaults(SimpleRuleBrain::new());
-        let result = react.run_turn("hello world").unwrap();
-        assert_eq!(result.steps_used, 3);
-        assert_eq!(result.trace.thoughts.len(), 1);
-        assert_eq!(result.trace.actions.len(), 1);
-        assert!(result.answer.contains("hello world"));
-    }
-
-    #[test]
-    fn echo_command_skips_thought() {
-        let mut react = ReActLoop::with_defaults(SimpleRuleBrain::new());
-        let result = react.run_turn("echo ping").unwrap();
-        assert_eq!(result.steps_used, 2);
-        assert!(result.trace.thoughts.is_empty());
-        assert!(result.answer.contains("ping"));
-    }
-
-    #[test]
-    fn blocks_recalled_visible_in_llm_system_when_rendered() {
-        let mut blocks = PromptBlocks::new();
-        blocks.push_recalled("note from host");
-        let trace = TurnTrace::default();
-        let session = SessionMemory::default();
-        let ctx = TurnPromptContext::new(&blocks, "hi", &trace, &session);
-        let system = ctx
-            .render()
-            .into_iter()
-            .find(|m| m.role == "system")
-            .expect("system");
-        assert!(system.content.as_text().contains("note from host"));
-    }
-
-    #[test]
-    fn session_accumulates_completed_turns() {
-        let mut react = ReActLoop::with_defaults(SimpleRuleBrain::new());
-        react.run_turn("help").unwrap();
-        react.run_turn("help").unwrap();
-        assert_eq!(react.session.len(), 2);
-        react.session.set_prompt_policy(SessionPromptPolicy::IncludePrior);
-        assert!(react.session.format_for_prompt().contains("利用可能"));
-    }
-
-    #[test]
-    fn two_phase_help_still_single_exec() {
-        let mut config = ReActConfig::default();
-        config.two_phase = true;
-        let mut react = ReActLoop::new(SimpleRuleBrain::new(), PlanBrainMode::rule(), config);
-        let result = react.run_turn("help").unwrap();
-        // 計画層 1 + 実行層 1（ルール頭脳は context_usages なし）
-        assert_eq!(result.steps_used, 2);
-        assert!(result.plan.as_ref().unwrap().skip_execution);
-        assert!(result.answer.contains("echo"));
-    }
-
-    #[test]
-    fn two_phase_generic_runs_subtask_mission() {
-        let mut config = ReActConfig::default();
-        config.two_phase = true;
-        let mut react = ReActLoop::new(SimpleRuleBrain::new(), PlanBrainMode::rule(), config);
-        let result = react.run_turn("hello world").unwrap();
-        assert_eq!(result.subtask_results.len(), 1);
-        assert_eq!(result.subtask_results[0].id, 1);
-        assert_eq!(result.steps_used, 5);
-        assert!(!result.subtask_results[0].used_step_driver);
-        assert!(result.answer.contains("hello world"));
-    }
-
-    #[test]
-    fn lifecycle_panic_does_not_abort_turn() {
-        use crate::lifecycle::{HostView, TurnLifecycle};
-
-        struct Boom;
-        impl TurnLifecycle for Boom {
-            fn on_plan_finished(&self, _: &str, _: &PlanArtifact, _: HostView<'_>) {
-                panic!("host hook exploded");
-            }
-        }
-
-        let mut config = ReActConfig::default();
-        config.two_phase = true;
-        let mut react = ReActLoop::new(SimpleRuleBrain::new(), PlanBrainMode::rule(), config);
-        react.set_lifecycle(Some(Arc::new(Boom)));
-        let result = react.run_turn("hello world").unwrap();
-        assert!(result.answer.contains("hello world"));
-    }
-
-    #[test]
-    fn lifecycle_hooks_fire_without_changing_answer() {
-        use crate::lifecycle::{HostScratch, HostView, TurnLifecycle};
-        use std::sync::Mutex;
-
-        #[derive(Default)]
-        struct Rec {
-            events: Mutex<Vec<String>>,
-        }
-        impl TurnLifecycle for Rec {
-            fn on_turn_started(&self, _: &str, host: HostView<'_>) {
-                let ticket = host.turn_get_i64("ticket_id").unwrap_or(-1);
-                self.events
-                    .lock()
-                    .unwrap()
-                    .push(format!("turn_started:{ticket}"));
-            }
-            fn on_plan_finished(&self, _: &str, _: &PlanArtifact, mut host: HostView<'_>) {
-                host.insert("parent_ticket", 42);
-                self.events.lock().unwrap().push("plan_finished".into());
-            }
-            fn on_subtask_started(
-                &self,
-                _: &str,
-                _: &PlanArtifact,
-                subtask: &Subtask,
-                _: usize,
-                mut host: HostView<'_>,
-            ) {
-                let parent = host.turn_get_i64("parent_ticket").unwrap_or(-1);
-                host.insert("child_ticket", 7);
-                self.events.lock().unwrap().push(format!(
-                    "subtask_started:{}:{parent}",
-                    subtask.id
-                ));
-            }
-            fn on_subtask_finished(
-                &self,
-                _: &str,
-                _: &PlanArtifact,
-                subtask: &Subtask,
-                outcome: &crate::lifecycle::SubtaskOutcome,
-                host: HostView<'_>,
-            ) {
-                let child = host.get_i64("child_ticket").unwrap_or(-1);
-                self.events.lock().unwrap().push(format!(
-                    "subtask_finished:{}:{child}:{:?}",
-                    subtask.id, outcome.status
-                ));
-            }
-            fn on_turn_finished(
-                &self,
-                _: &str,
-                _: Option<&PlanArtifact>,
-                outcome: &crate::lifecycle::TurnOutcome,
-                host: HostView<'_>,
-            ) {
-                let parent = host.turn_get_i64("parent_ticket").unwrap_or(-1);
-                let child = host.subtask_get_i64(1, "child_ticket").unwrap_or(-1);
-                self.events
-                    .lock()
-                    .unwrap()
-                    .push(format!("turn_finished:{parent}:{child}:{:?}", outcome.status));
-            }
-        }
-
-        let rec = Arc::new(Rec::default());
-        let mut config = ReActConfig::default();
-        config.two_phase = true;
-        let mut react = ReActLoop::new(SimpleRuleBrain::new(), PlanBrainMode::rule(), config);
-        react.set_lifecycle(Some(rec.clone()));
-        let mut seed = HostScratch::new();
-        seed.turn_insert("ticket_id", 10);
-        react.seed_host_scratch(seed);
-        let result = react.run_turn("hello world").unwrap();
-        assert!(result.answer.contains("hello world"));
-        assert_eq!(
-            rec.events.lock().unwrap().as_slice(),
-            [
-                "turn_started:10",
-                "plan_finished",
-                "subtask_started:1:42",
-                "subtask_finished:1:7:Completed",
-                "turn_finished:42:7:Completed",
-            ]
-        );
-        assert_eq!(react.host_scratch().turn_get_i64("ticket_id"), Some(10));
-        assert_eq!(react.host_scratch().turn_get_i64("parent_ticket"), Some(42));
-        assert_eq!(
-            react.host_scratch().subtask_get_i64(1, "child_ticket"),
-            Some(7)
-        );
-        let json = react.host_scratch().to_value();
-        assert_eq!(json["turn"]["parent_ticket"], 42);
-        assert_eq!(json["subtasks"]["1"]["child_ticket"], 7);
-    }
-
-    #[test]
-    fn lifecycle_emits_cancelled_turn_on_abort() {
-        use crate::lifecycle::{HostView, TurnLifecycle};
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::Mutex;
-
-        struct Rec {
-            events: Mutex<Vec<String>>,
-            stop: Arc<AtomicBool>,
-        }
-        impl TurnLifecycle for Rec {
-            fn on_plan_finished(&self, _: &str, _: &PlanArtifact, _: HostView<'_>) {
-                self.events.lock().unwrap().push("plan_finished".into());
-                self.stop.store(true, Ordering::Relaxed);
-            }
-            fn on_turn_finished(
-                &self,
-                _: &str,
-                _: Option<&PlanArtifact>,
-                outcome: &crate::lifecycle::TurnOutcome,
-                _: HostView<'_>,
-            ) {
-                self.events
-                    .lock()
-                    .unwrap()
-                    .push(format!("turn_finished:{:?}", outcome.status));
-            }
-        }
-
-        let stop = Arc::new(AtomicBool::new(false));
-        let rec = Arc::new(Rec {
-            events: Mutex::new(Vec::new()),
-            stop: stop.clone(),
-        });
-        let mut config = ReActConfig::default();
-        config.two_phase = true;
-        config.show_plan = false;
-        config.show_task_execution = false;
-        let mut react = ReActLoop::new(SimpleRuleBrain::new(), PlanBrainMode::rule(), config);
-        react.set_lifecycle(Some(rec.clone()));
-        react.set_stop_requested(Some(stop));
-        let err = react.run_turn("hello world").unwrap_err();
-        assert_eq!(err, ReActError::Cancelled);
-        assert_eq!(
-            rec.events.lock().unwrap().as_slice(),
-            ["plan_finished", "turn_finished:Cancelled"]
-        );
-    }
-
-    #[test]
-    fn advance_enabled_runs_single_phase_with_rule_brain() {
-        let mut config = ReActConfig::default();
-        config.advance.enabled = true;
-        config.advance.max_phases = 1;
-        config.advance.show_phases = false;
-        config.show_plan = false;
-        config.show_task_execution = false;
-        let mut react = ReActLoop::new(SimpleRuleBrain::new(), PlanBrainMode::rule(), config);
-        let result = react.run_turn("hello world").unwrap();
-        assert_eq!(result.advance_phases.len(), 1);
-        assert_eq!(result.advance_phases[0].id, 1);
-        assert!(result.answer.contains("hello world"));
-    }
-
-    #[test]
-    fn plan_preview_runs_plan_layer_only() {
-        let mut react = ReActLoop::new(SimpleRuleBrain::new(), PlanBrainMode::rule(), ReActConfig::default());
-        let preview = react.run_plan_preview("hello world").unwrap();
-        assert!(!preview.planner_text.is_empty());
-        assert_eq!(preview.harness.plan.subtasks.len(), 1);
-        assert!(preview.steps_used >= 1);
-    }
-
-    #[test]
-    fn local_memory_survives_across_turns_without_panic() {
-        use crate::memory::LocalDiaryBridge;
-        let mut config = ReActConfig::default();
-        config.advance.enabled = true;
-        config.advance.show_phases = false;
-        config.show_plan = false;
-        config.show_task_execution = false;
-        let mut react = ReActLoop::new(SimpleRuleBrain::new(), PlanBrainMode::rule(), config);
-        react.set_memory_bridge(Box::new(LocalDiaryBridge::new()));
-        react.run_turn("echo first-unique-token").unwrap();
-        let second = react.run_turn("続きやって").unwrap();
-        assert!(!second.answer.is_empty());
-        // host recalled はターン終了後に復元される
-        assert!(react.blocks.recalled.is_empty());
-    }
-
-    #[test]
-    fn answer_looks_user_ready_accepts_plain_sentence() {
-        assert!(synthesis::answer_looks_user_ready("実装可能です。"));
-        assert!(synthesis::answer_looks_user_ready("  hello world  "));
-    }
-
-    #[test]
-    fn answer_looks_user_ready_rejects_structured_or_multiline() {
-        assert!(!synthesis::answer_looks_user_ready(""));
-        assert!(!synthesis::answer_looks_user_ready("line1\nline2"));
-        assert!(!synthesis::answer_looks_user_ready(r#"{"step":"answer"}"#));
-        assert!(!synthesis::answer_looks_user_ready("a\tb"));
-        assert!(!synthesis::answer_looks_user_ready("[a, b]"));
-    }
-
-    #[test]
-    fn needs_user_answer_synthesis_skips_when_driver_answer_is_ready() {
-        let results = vec![SubtaskExecResult {
-            id: 1,
-            answer: "一覧を取得しました。".into(),
-            steps_used: 1,
-            used_step_driver: true,
-        }];
-        assert!(!ReActLoop::<SimpleRuleBrain>::needs_user_answer_synthesis(&results));
-    }
-
-    #[test]
-    fn needs_user_answer_synthesis_when_driver_output_is_raw() {
-        let results = vec![SubtaskExecResult {
-            id: 1,
-            answer: "README.md\nCargo.toml\nsrc/".into(),
-            steps_used: 1,
-            used_step_driver: true,
-        }];
-        assert!(ReActLoop::<SimpleRuleBrain>::needs_user_answer_synthesis(&results));
-    }
-
-    #[test]
-    fn build_synthesis_evidence_caps_total_chars() {
-        let results = vec![
-            SubtaskExecResult {
-                id: 1,
-                answer: "a".repeat(500),
-                steps_used: 1,
-                used_step_driver: true,
-            },
-            SubtaskExecResult {
-                id: 2,
-                answer: "b".repeat(500),
-                steps_used: 1,
-                used_step_driver: true,
-            },
-        ];
-        let evidence = synthesis::build_synthesis_evidence(&results, &[], 600, 400);
-        assert!(evidence.chars().count() <= 401);
-    }
-}
+#[cfg(test)]
+mod tests;

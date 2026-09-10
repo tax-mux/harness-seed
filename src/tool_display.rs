@@ -61,7 +61,10 @@ fn eprintln_tool_output_body(output: &str) {
         eprintln!("{line}");
     }
     if truncated {
-        eprintln!("... (output truncated, {} chars total)", output.chars().count());
+        eprintln!(
+            "... (output truncated, {} chars total)",
+            output.chars().count()
+        );
     }
 }
 

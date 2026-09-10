@@ -21,8 +21,12 @@ pub struct StepDriverResult {
 
 #[derive(Debug)]
 pub enum StepDriverError {
-    UnknownTask { id: String },
-    NoContract { id: String },
+    UnknownTask {
+        id: String,
+    },
+    NoContract {
+        id: String,
+    },
     StepFailed {
         order: u32,
         method: String,
@@ -35,7 +39,11 @@ impl fmt::Display for StepDriverError {
         match self {
             Self::UnknownTask { id } => write!(f, "unknown task: {id}"),
             Self::NoContract { id } => write!(f, "task '{id}' has no execution contract"),
-            Self::StepFailed { order, method, output } => {
+            Self::StepFailed {
+                order,
+                method,
+                output,
+            } => {
                 write!(f, "step {order} ({method}) failed: {output}")
             }
         }
@@ -47,9 +55,11 @@ impl std::error::Error for StepDriverError {}
 impl TaskRegistry {
     /// サブタスクが `steps[]` 契約を持ち、ステップドライバで実行可能か。
     pub fn use_step_driver(&self, subtask: &Subtask) -> bool {
-        subtask.task.as_ref().and_then(|id| self.get(id)).is_some_and(|d| {
-            d.has_execution_contract() && !d.react_only
-        })
+        subtask
+            .task
+            .as_ref()
+            .and_then(|id| self.get(id))
+            .is_some_and(|d| d.has_execution_contract() && !d.react_only)
     }
 
     /// 契約どおり `steps[]` を順に `execute_action` する（LLM なし）。
@@ -68,9 +78,9 @@ impl TaskRegistry {
                 id: "(no task id)".into(),
             })?
             .clone();
-        let def = self
-            .get(&task_id)
-            .ok_or(StepDriverError::UnknownTask { id: task_id.clone() })?;
+        let def = self.get(&task_id).ok_or(StepDriverError::UnknownTask {
+            id: task_id.clone(),
+        })?;
         if !def.has_execution_contract() {
             return Err(StepDriverError::NoContract { id: task_id });
         }
@@ -198,8 +208,8 @@ mod tests {
             params: json!({ "path": "src" }),
             goal: String::new(),
             done_when: String::new(),
-                    depends_on: vec![],
-};
+            depends_on: vec![],
+        };
         let mut tools = ToolRuntime::new();
         let r = reg
             .run_subtask_driver(&sub, &mut tools, false, false, ArgAuditMode::Soft)
@@ -224,15 +234,19 @@ mod tests {
             }),
             goal: String::new(),
             done_when: String::new(),
-                    depends_on: vec![],
-};
+            depends_on: vec![],
+        };
         let mut tools = ToolRuntime::new();
         let r = reg
             .run_subtask_driver(&sub, &mut tools, false, false, ArgAuditMode::Hard)
             .unwrap();
         assert_eq!(r.steps_used, 2);
         assert_eq!(
-            r.trace.actions.iter().map(|a| a.tool.as_str()).collect::<Vec<_>>(),
+            r.trace
+                .actions
+                .iter()
+                .map(|a| a.tool.as_str())
+                .collect::<Vec<_>>(),
             vec!["write_file", "read_file"]
         );
         assert!(r.audit.complete);
@@ -248,8 +262,8 @@ mod tests {
             params: json!({}),
             goal: "free".into(),
             done_when: String::new(),
-                    depends_on: vec![],
-};
+            depends_on: vec![],
+        };
         assert!(!reg.use_step_driver(&sub));
     }
 }

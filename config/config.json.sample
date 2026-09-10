@@ -18,7 +18,7 @@
     "parallel_subtasks": false,
     "max_steps_plan": 4,
     "advance": {
-      "enabled": true,
+      "mode": "from_plan",
       "max_phases": 8,
       "clear_session_each_phase": true,
       "max_note_chars": 1500,

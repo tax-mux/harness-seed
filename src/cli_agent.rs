@@ -43,10 +43,7 @@ pub fn merge_cli_agent(
     let base = source.base_dir(cwd);
     let (config, config_label) = source.load(cwd)?;
     let builder = builder.merge_agent_project(&config, &base)?;
-    let report = builder
-        .agent_report()
-        .cloned()
-        .unwrap_or_default();
+    let report = builder.agent_report().cloned().unwrap_or_default();
 
     Ok((
         builder,

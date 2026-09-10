@@ -59,9 +59,7 @@ fn format_shell_output(output: &std::process::Output) -> String {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let code = output.status.code().unwrap_or(-1);
-    format!(
-        "exit_code={code}\n--- stdout ---\n{stdout}--- stderr ---\n{stderr}"
-    )
+    format!("exit_code={code}\n--- stdout ---\n{stdout}--- stderr ---\n{stderr}")
 }
 
 // --- tools ---
@@ -78,10 +76,7 @@ impl Tool for EchoTool {
     }
 
     fn execute(&self, invoke_id: u64, args: &Value, _ctx: &ToolContext) -> Observation {
-        let message = args
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("");
+        let message = args.get("message").and_then(Value::as_str).unwrap_or("");
         Observation::success(invoke_id, message.to_string())
     }
 }
@@ -118,10 +113,7 @@ impl Tool for ListDirTool {
     }
 
     fn execute(&self, invoke_id: u64, args: &Value, _ctx: &ToolContext) -> Observation {
-        let path = args
-            .get("path")
-            .and_then(Value::as_str)
-            .unwrap_or(".");
+        let path = args.get("path").and_then(Value::as_str).unwrap_or(".");
         match resolve_in_workspace(path) {
             Ok(abs) => match std::fs::read_dir(&abs) {
                 Ok(entries) => {
@@ -173,10 +165,7 @@ impl Tool for GrepTool {
             .unwrap_or(200)
             .max(1)
             .min(2000);
-        let glob = args
-            .get("glob")
-            .and_then(Value::as_str)
-            .map(str::to_string);
+        let glob = args.get("glob").and_then(Value::as_str).map(str::to_string);
 
         match resolve_in_workspace(path) {
             Ok(abs) => {
@@ -256,10 +245,7 @@ impl Tool for WriteFileTool {
         let Some(path) = args.get("path").and_then(Value::as_str) else {
             return Observation::failure(invoke_id, "write_file requires path");
         };
-        let content = args
-            .get("content")
-            .and_then(Value::as_str)
-            .unwrap_or("");
+        let content = args.get("content").and_then(Value::as_str).unwrap_or("");
         match resolve_in_workspace(path) {
             Ok(abs) => {
                 if let Some(parent) = abs.parent() {

@@ -1,7 +1,7 @@
 use super::chat_completions::ChatCompletionsConnector;
-use super::connector::{ConnectorError, LlmConfig, LlmConnector, LlmProvider};
 use super::completion::CompletionResult;
 use super::connector::ChatMessage;
+use super::connector::{ConnectorError, LlmConfig, LlmConnector, LlmProvider};
 
 /// [LM Studio](https://lmstudio.ai/) ローカルサーバー用コネクタ（OpenAI 互換 API）。
 ///
@@ -15,9 +15,8 @@ impl LmStudioConnector {
     }
 
     pub fn from_env() -> Result<Self, ConnectorError> {
-        let app = crate::config::AppConfig::load_default().map_err(|e| {
-            ConnectorError::Config(e.to_string())
-        })?;
+        let app = crate::config::AppConfig::load_default()
+            .map_err(|e| ConnectorError::Config(e.to_string()))?;
         Self::new(app.build_llm_config()?)
     }
 

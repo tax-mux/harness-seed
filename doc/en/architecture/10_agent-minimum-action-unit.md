@@ -244,6 +244,6 @@ The unit is a tool call together with its recorded outcome. Plans can be logged 
 | Config | `react.two_phase`, `react.max_steps`, `react.use_step_driver`, `react.show_prompt` | `config/config.json`, `ReActConfig` |
 
 The turn and plan types organize the larger lifecycle. Action, observation, and trace types preserve each concrete operation, while the task and audit modules verify that those operations satisfy a registered procedure.
-With `two_phase: false` (default), one turn is **one execution loop** only. With `true`, §3 planning → serial execution applies.
+CLI default is `two_phase: true` (§3 planning → serial execution). Explicit `false`, or library `ReActConfig::default()`, keeps one turn as **one execution loop**.
 
 The outer advance loop (phase split · `recalled` carry-over) is [07_advance-loop.md](07_advance-loop.md) (`react.advance.enabled`). REPL `SessionMemory` is thin short-term memory across turns ([09_context-memory-mapping.md §10](09_context-memory-mapping.md#10-short-term-memory-sessionmemory-implementation)).

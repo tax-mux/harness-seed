@@ -67,7 +67,10 @@ impl PlanDataContract {
         }
     }
 
-    pub fn with_excluded_task_ids(mut self, ids: impl IntoIterator<Item = impl Into<String>>) -> Self {
+    pub fn with_excluded_task_ids(
+        mut self,
+        ids: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
         self.excluded_task_ids = ids.into_iter().map(Into::into).collect();
         self
     }

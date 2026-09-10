@@ -70,10 +70,7 @@ pub enum TurnStepEvent {
         subtask_count: usize,
     },
     /// LLM 呼び出し直前（GPU 待ちの間も UI にフェーズを出す）。
-    PhaseStarted {
-        layer: String,
-        label: String,
-    },
+    PhaseStarted { layer: String, label: String },
     /// 計画前のタスク候補選定結果（id 列のみ。意味はホスト／タスク定義側）。
     Candidates {
         layer: String,

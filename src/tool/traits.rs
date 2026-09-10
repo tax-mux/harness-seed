@@ -15,10 +15,7 @@ pub struct ToolContext {
 
 impl ToolContext {
     pub fn new(env: RuntimeEnvironment, brave_search: Option<BraveSearchConfig>) -> Self {
-        Self {
-            env,
-            brave_search,
-        }
+        Self { env, brave_search }
     }
 }
 

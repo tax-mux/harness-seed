@@ -1,7 +1,7 @@
+use harness_seed::plan::PlanArtifact;
 use harness_seed::{
     format_references_for_prompt, HarnessMailRefKind, HarnessReference, HarnessState,
 };
-use harness_seed::plan::PlanArtifact;
 
 #[test]
 fn harness_reference_formats_kind_labels() {

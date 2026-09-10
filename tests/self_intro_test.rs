@@ -2,8 +2,8 @@
 mod common;
 
 use common::{
-    build_react_loop_from_config, config_model_name, is_llm_error_answer, load_test_config,
-    llm_chat_from_config, skip_if_llm_not_ready, SELF_INTRO_USER_PROMPT,
+    build_react_loop_from_config, config_model_name, is_llm_error_answer, llm_chat_from_config,
+    load_test_config, skip_if_llm_not_ready, SELF_INTRO_USER_PROMPT,
 };
 
 /// config.json のモデルで自己紹介チャットが返ること。
@@ -56,9 +56,7 @@ fn self_intro_react_turn_with_llm() {
     );
     eprintln!("context: {}", result.context);
 
-    let path = app
-        .resolved_context_log_path()
-        .expect("context log path");
+    let path = app.resolved_context_log_path().expect("context log path");
     let text = std::fs::read_to_string(&path).unwrap_or_default();
     assert!(
         text.contains(SELF_INTRO_USER_PROMPT),

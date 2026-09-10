@@ -27,7 +27,13 @@ harness-seed/
 │   └── en/          # 英語（architecture / 方針。tools・ideas は索引）
 ├── src/
 │   ├── main.rs      # CLI エントリポイント
-│   └── lib.rs       # ライブラリ本体・公開 API
+│   ├── lib.rs       # ライブラリ本体・公開 API
+│   ├── advance/     # 外側推進ループ（証拠・ゲート・フェーズ）
+│   ├── react/       # ReAct ループ、two-phase、ステップドライバ、advance turn
+│   ├── config.rs    # AppConfig（セクション型は config/）
+│   ├── tasks/       # タスクレジストリ、契約、ステップドライバ
+│   ├── plan/        # プランのパース・表示・キュー
+│   └── ...          # layer, lifecycle, llm, memory, tool, …
 ├── tests/           # 統合テスト
 └── benches/         # ベンチマーク（必要に応じて追加）
 ```
@@ -47,6 +53,35 @@ harness-seed/
 | [doc/en/architecture/README.md](doc/en/architecture/README.md) | Architecture (EN) |
 
 ## 使い方
+
+### インストール（どこからでも起動）
+
+CLI を PATH に載せる（`~/.cargo/bin` が `PATH` に含まれていること）:
+
+```bash
+cargo install --path .
+```
+
+任意のディレクトリから:
+
+```bash
+harness-seed --help
+```
+
+既定の設定パスは **`~/.config/harness-seed/config.json`**（`XDG_CONFIG_HOME` があればその下）。無ければ cwd の `config/config.json` も読む（後方互換）。明示指定:
+
+```bash
+harness-seed --config /path/to/config.json
+# または
+export HARNESS_SEED_CONFIG=/path/to/config.json
+harness-seed
+```
+
+バイナリに影響する変更を取り込んだあとは再インストール:
+
+```bash
+cargo install --path . --force
+```
 
 ### ビルド
 
@@ -70,31 +105,32 @@ cargo run
 # 詳細ログ: cargo run -- -v
 # JSON Lines REPL: cargo run -- --json  （doc/ja/architecture/11_ワイヤプロトコル.md）
 
-# 初回セットアップ（config/config.json は gitignore）
-cp config/config.json.sample config/config.json
+# 初回セットアップ（ユーザ設定。秘密情報はここへ）
+mkdir -p ~/.config/harness-seed
+cp config/config.json.sample ~/.config/harness-seed/config.json
 
-# LLM 頭脳は config/config.json の llm.provider で決まる
+# LLM 頭脳は ~/.config/harness-seed/config.json の llm.provider で決まる
 # ルール頭脳のみ: cargo run -- --no-llm
 
-# プロバイダ切替: サンプルを config.json に上書きコピー
-cp config/samples/config.lmstudio.json config/config.json
+# プロバイダ切替: サンプルをユーザ設定に上書きコピー
+cp config/samples/config.lmstudio.json ~/.config/harness-seed/config.json
 cargo run
 
 # ローカル Ollama（要: ollama serve / ollama pull gemma4）
-cp config/samples/config.ollama.json config/config.json
+cp config/samples/config.ollama.json ~/.config/harness-seed/config.json
 
 # OpenAI
-cp config/samples/config.openai.json config/config.json
+cp config/samples/config.openai.json ~/.config/harness-seed/config.json
 export OPENAI_API_KEY=sk-...
 cargo run
 
 # Google Gemini（triage-mail の Copilot と同系 API）
-cp config/samples/config.gemini.json config/config.json
+cp config/samples/config.gemini.json ~/.config/harness-seed/config.json
 export GEMINI_API_KEY=your-key
 cargo run
 
 # Anthropic Claude（Messages API 直。OpenAI 互換ではない）
-cp config/samples/config.anthropic.json config/config.json
+cp config/samples/config.anthropic.json ~/.config/harness-seed/config.json
 export ANTHROPIC_API_KEY=your-key
 cargo run
 ```
@@ -121,8 +157,9 @@ cargo run
 
 | ファイル | 用途 |
 |----------|------|
+| `~/.config/harness-seed/config.json` | **実行時の正本**（ユーザ設定。秘密情報はここ） |
 | `config/config.json.sample` | **既定のひな形**（リポジトリに固定。秘密情報なし） |
-| `config/config.json` | **実行時の正本**（gitignore。sample をコピーして編集） |
+| `config/config.json` | **後方互換のローカル設定**（gitignore。ユーザ設定が無いときのみ） |
 | `config/samples/config.ollama.json` | Ollama ひな形 |
 | `config/samples/config.lmstudio.json` | LM Studio ひな形 |
 | `config/samples/config.openai.json` | OpenAI ひな形 |
@@ -132,7 +169,7 @@ cargo run
 切替例:
 
 ```bash
-cp config/samples/config.lmstudio.json config/config.json
+cp config/samples/config.lmstudio.json ~/.config/harness-seed/config.json
 cargo run
 ```
 
@@ -160,17 +197,18 @@ cargo run
 
 ### 統合テスト（LLM）
 
-`tests/` 以下の LLM テストは **`config/config.json`** を読みます（`HARNESS_SEED_CONFIG` でパス変更可）。LM Studio 用テストのみ `config/samples/config.lmstudio.json` を直接参照します。
+`tests/` 以下の LLM テストは **`default_config_path()`**（既定は `~/.config/harness-seed/config.json`、無ければ cwd `config/config.json`）を読みます（`HARNESS_SEED_CONFIG` でパス変更可）。LM Studio 用テストのみ `config/samples/config.lmstudio.json` を直接参照します。
 
 ```bash
-cp config/samples/config.ollama.json config/config.json
+cp config/samples/config.ollama.json ~/.config/harness-seed/config.json
+# または開発用: cp config/samples/config.ollama.json config/config.json
 ollama pull gemma4   # config の model に合わせる
 cargo test
 ```
 
 LLM が未起動、またはモデル未インストールの場合は該当テストを **SKIP** します。
 
-**ファイルログ**（`config/config.json` の `log.context_metrics`）:
+**ファイルログ**（設定ファイルの `log.context_metrics`）:
 
 ```json
 "log": {
@@ -222,10 +260,14 @@ cargo bench
 harness-seed = { path = "../harness-seed" }
 ```
 
+ホストアプリに組み込むときは、**設定ファイルの場所をホスト側で指定する**（CLI の `--config` は使えない）。推奨は `AppConfig::load_path`。詳細は [config/README.md](config/README.md#ライブラリ組み込み時のパス指定)。
+
 ```rust
 use harness_seed::{AppConfig, BrainPair, SeedBuilder};
 
-let app = AppConfig::load_default()?;
+// ホスト専用パスを明示（推奨）
+let app = AppConfig::load_path("/var/lib/my-app/harness-seed.json")?;
+// または XDG / env と同じ既定解決: AppConfig::load_default()?
 let builder = SeedBuilder::from_app(&app)?;
 let brains = BrainPair::from_cli_with_registry(&app, false, false, builder.task_registry_ref())?;
 let mut react = builder.build(brains.exec, brains.plan, app.react_config(false, false));

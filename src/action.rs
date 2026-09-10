@@ -108,11 +108,19 @@ impl fmt::Display for TurnTrace {
             writeln!(f, "[thought {i}] {thought}")?;
         }
         for action in &self.actions {
-            writeln!(f, "[action {}] {} {:?}", action.invoke_id, action.tool, action.args)?;
+            writeln!(
+                f,
+                "[action {}] {} {:?}",
+                action.invoke_id, action.tool, action.args
+            )?;
         }
         for obs in &self.observations {
             let status = if obs.ok { "ok" } else { "err" };
-            writeln!(f, "[observation {}] {status}: {}", obs.invoke_id, obs.output)?;
+            writeln!(
+                f,
+                "[observation {}] {status}: {}",
+                obs.invoke_id, obs.output
+            )?;
         }
         Ok(())
     }

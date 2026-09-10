@@ -165,28 +165,26 @@ Either way, the turn finishes by returning a combined result.
 
 ```mermaid
 flowchart TD
-    RT["run_turn(user_input)"] --> AD{"advance.enabled?"}
+    RT["run_turn(user_input)"] --> AD{"advance.mode == always?"}
     AD -->|yes| ADV["run_turn_advance<br/>plan → phased execution"]
-    AD -->|no| TP{"two_phase?"}
-    TP -->|yes| TWO["run_turn_two_phase<br/>plan → execute"]
+    AD -->|no| TP{"from_plan or two_phase?"}
+    TP -->|yes| TWO["plan once → escalate or execute"]
     TP -->|no| ONE["run_turn_single<br/>single ReAct only"]
     ADV --> END["TurnResult"]
     TWO --> END
     ONE --> END
 ```
 
-The configuration first checks whether long-running phased work is enabled. That route takes priority because it manages the whole turn in phases.
-
-Without it, the turn either plans before executing or uses one direct loop. Every route returns the same turn result.
+The configuration first checks `always` (unconditional advance). Otherwise it may plan once: `from_plan` escalates from the plan shape, and `two_phase` executes that plan without the outer loop.
 
 | Setting | Code default (key omitted) | Behavior |
 |---------|----------------------------|----------|
-| `react.two_phase` | `false` | Serial plan → execution (sample config often `true`) |
-| `react.advance.enabled` | `false` | Outer advance loop (priority over `two_phase`; sample may set `true`) |
+| `react.two_phase` | `true` (CLI / `AppConfig`; `ReActConfig::default()` is `false`) | Serial plan → execution |
+| `react.advance.mode` | `off` (CLI samples: `from_plan`) | `always` is unconditional advance. `from_plan` escalates after planning. Legacy `enabled: true` maps to `always` |
 | `react.use_step_driver` | `true` | Run contract / non-`react_only` tasks without LLM |
 | `react.arg_audit_mode` | `soft` | Arg audit ([05_task-registry.md](05_task-registry.md)) |
 
-When a library user omits these keys, the two-phase and advance routes are disabled. Repository examples may deliberately enable them for their scenario.
+CLI and JSON config (`AppConfig`) enable plan → execute when `two_phase` is omitted. Library callers that use `ReActConfig::default()` still get a single loop. Advance remains off unless its own key is set.
 
 The step-driver and audit settings do not select an entry route. They alter how execution proceeds after a route has been selected. Advance still begins each phase with planning.
 

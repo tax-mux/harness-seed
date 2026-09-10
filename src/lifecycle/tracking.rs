@@ -176,10 +176,10 @@ mod tests {
         }
 
         fn on_turn_finished(&self, event: TurnFinishedEvent<'_>, _: HostView<'_>) {
-            self.events.lock().unwrap().push(format!(
-                "turn:{:?}",
-                event.outcome.status
-            ));
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("turn:{:?}", event.outcome.status));
         }
     }
 

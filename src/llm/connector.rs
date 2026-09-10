@@ -236,9 +236,8 @@ impl LlmConfig {
     }
 
     pub fn from_env() -> Result<Self, ConnectorError> {
-        let app = crate::config::AppConfig::load_default().map_err(|e| {
-            ConnectorError::Config(e.to_string())
-        })?;
+        let app = crate::config::AppConfig::load_default()
+            .map_err(|e| ConnectorError::Config(e.to_string()))?;
         Self::from_app(&app)
     }
 

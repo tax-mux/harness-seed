@@ -40,10 +40,8 @@ impl<E: AgentBrain> ReActLoop<E> {
         if self.config.verbose {
             eprintln!("[plan] skip_execution — no direct reply, fallback to exec LLM");
         }
-        self.blocks.work_instructions_text =
-            Some(harness.format_work_instructions_for_prompt());
-        let mut result =
-            self.run_turn_single(user_input, true, Some(plan), vec![])?;
+        self.blocks.work_instructions_text = Some(harness.format_work_instructions_for_prompt());
+        let mut result = self.run_turn_single(user_input, true, Some(plan), vec![])?;
         append_trace(&mut result.trace, &plan_trace);
         result.context = TurnContextSummary::from_usages(&result.trace.context_usages);
         result.steps_used += plan_steps;
@@ -52,5 +50,4 @@ impl<E: AgentBrain> ReActLoop<E> {
         self.clear_harness_prompt_blocks();
         Ok(result)
     }
-
 }

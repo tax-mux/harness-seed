@@ -20,7 +20,12 @@ impl PlanQueue {
         let total_budget = total_budget.max(1);
         let pending: VecDeque<Subtask> = subtasks.iter().cloned().collect();
         let lineage = subtasks.iter().map(|s| (s.id, None)).collect();
-        let next_id = subtasks.iter().map(|s| s.id).max().unwrap_or(0).saturating_add(1);
+        let next_id = subtasks
+            .iter()
+            .map(|s| s.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
         Self {
             pending,
             consumed_count: 0,
@@ -61,8 +66,7 @@ impl PlanQueue {
         if new_subtasks.is_empty() {
             return Ok(0);
         }
-        let total_after =
-            self.consumed_count + self.pending.len() + new_subtasks.len();
+        let total_after = self.consumed_count + self.pending.len() + new_subtasks.len();
         if total_after > self.total_budget {
             return Err(PlanQueueError::BudgetExceeded {
                 budget: self.total_budget,
@@ -143,16 +147,16 @@ mod tests {
                     params: serde_json::json!({}),
                     goal: "a".into(),
                     done_when: "d".into(),
-                                    depends_on: vec![],
-},
+                    depends_on: vec![],
+                },
                 Subtask {
                     id: 2,
                     task: None,
                     params: serde_json::json!({}),
                     goal: "b".into(),
                     done_when: "d".into(),
-                                    depends_on: vec![],
-},
+                    depends_on: vec![],
+                },
             ],
             knowledge_sufficient: None,
             user_reply: None,
@@ -178,16 +182,16 @@ mod tests {
                         params: serde_json::json!({}),
                         goal: "new-a".into(),
                         done_when: "d".into(),
-                                            depends_on: vec![],
-},
+                        depends_on: vec![],
+                    },
                     Subtask {
                         id: 100,
                         task: None,
                         params: serde_json::json!({}),
                         goal: "new-b".into(),
                         done_when: "d".into(),
-                                            depends_on: vec![],
-},
+                        depends_on: vec![],
+                    },
                 ],
                 parent.id,
             )
@@ -212,16 +216,16 @@ mod tests {
                         params: serde_json::json!({}),
                         goal: "x".into(),
                         done_when: "d".into(),
-                                            depends_on: vec![],
-},
+                        depends_on: vec![],
+                    },
                     Subtask {
                         id: 2,
                         task: None,
                         params: serde_json::json!({}),
                         goal: "y".into(),
                         done_when: "d".into(),
-                                            depends_on: vec![],
-},
+                        depends_on: vec![],
+                    },
                 ],
                 parent.id,
             )
@@ -237,8 +241,8 @@ mod tests {
             params: serde_json::json!({}),
             goal: "rethink".into(),
             done_when: "new plan".into(),
-                    depends_on: vec![],
-};
+            depends_on: vec![],
+        };
         assert!(is_replan_subtask(&s));
         assert!(is_reserved_control_task("replan"));
         assert!(is_reserved_control_task("RePlan"));

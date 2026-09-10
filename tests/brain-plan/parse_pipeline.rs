@@ -21,11 +21,14 @@ fn harness_from_llm_raw(llm_raw: &str, user_input: &str) -> HarnessState {
 
 fn assert_plan_matches(hs: &HarnessState, expected: &PlanExpect) {
     assert_eq!(
-        hs.plan.skip_execution,
-        expected.skip_execution,
+        hs.plan.skip_execution, expected.skip_execution,
         "skip_execution"
     );
-    assert_eq!(hs.plan.subtasks.len(), expected.subtasks.len(), "subtask count");
+    assert_eq!(
+        hs.plan.subtasks.len(),
+        expected.subtasks.len(),
+        "subtask count"
+    );
     for (got, exp) in hs.plan.subtasks.iter().zip(expected.subtasks.iter()) {
         assert_eq!(got.id, exp.id, "subtask id");
         assert_eq!(got.task.as_deref(), exp.task.as_deref(), "task id");
@@ -164,7 +167,8 @@ fn pipeline_step_prefix_japanese() {
 
 #[test]
 fn pipeline_skip_execution_no_steps() {
-    let body = r#"{"summary":"hi","skip_execution":true,"knowledge_sufficient":true,"subtasks":[]}"#;
+    let body =
+        r#"{"summary":"hi","skip_execution":true,"knowledge_sufficient":true,"subtasks":[]}"#;
     let hs = harness_from_answer_body(body, "hello");
     assert!(hs.plan.skip_execution);
     assert_eq!(hs.total_steps, 0);

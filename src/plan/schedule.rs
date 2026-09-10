@@ -16,10 +16,7 @@ impl std::fmt::Display for ScheduleError {
             Self::UnknownDependency {
                 subtask_id,
                 missing,
-            } => write!(
-                f,
-                "subtask {subtask_id} depends on unknown id {missing}"
-            ),
+            } => write!(f, "subtask {subtask_id} depends on unknown id {missing}"),
             Self::Cycle => write!(f, "subtask dependency cycle"),
         }
     }
@@ -54,9 +51,9 @@ pub fn execution_waves(subtasks: &[Subtask]) -> Result<Vec<Vec<Subtask>>, Schedu
     let mut waves = Vec::new();
 
     while !remaining.is_empty() {
-        let (ready, rest): (Vec<_>, Vec<_>) = remaining.into_iter().partition(|st| {
-            st.depends_on.iter().all(|d| done.contains(d))
-        });
+        let (ready, rest): (Vec<_>, Vec<_>) = remaining
+            .into_iter()
+            .partition(|st| st.depends_on.iter().all(|d| done.contains(d)));
         if ready.is_empty() {
             return Err(ScheduleError::Cycle);
         }

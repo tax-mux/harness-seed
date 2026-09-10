@@ -1,6 +1,6 @@
+use super::anthropic::AnthropicConnector;
 use super::chat_completions::ChatCompletionsConnector;
 use super::connector::{ConnectorError, LlmConfig, LlmConnector, LlmProvider};
-use super::anthropic::AnthropicConnector;
 use super::gemini::GeminiConnector;
 use super::lmstudio::LmStudioConnector;
 use super::openai::OpenAiConnector;
@@ -19,9 +19,7 @@ pub enum LlmConnectorKind {
 impl LlmConnectorKind {
     pub fn from_config(config: LlmConfig) -> Result<Self, ConnectorError> {
         match config.provider {
-            LlmProvider::LmStudio => {
-                Ok(Self::LmStudio(LmStudioConnector::new(config)?))
-            }
+            LlmProvider::LmStudio => Ok(Self::LmStudio(LmStudioConnector::new(config)?)),
             LlmProvider::OpenAi => Ok(Self::OpenAi(OpenAiConnector::new(config)?)),
             LlmProvider::Ollama => Ok(Self::ChatCompletions(ChatCompletionsConnector::new(
                 config,

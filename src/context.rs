@@ -133,7 +133,10 @@ impl PromptBlocks {
         self.recalled.clear();
     }
 
-    pub fn set_vision_attachments(&mut self, attachments: Vec<crate::context_manifest::VisionAttachment>) {
+    pub fn set_vision_attachments(
+        &mut self,
+        attachments: Vec<crate::context_manifest::VisionAttachment>,
+    ) {
         self.vision_attachments = attachments;
     }
 
@@ -443,13 +446,13 @@ mod tests {
         let trace = TurnTrace::default();
         let ctx = TurnPromptContext::new(&blocks, "first question follow-up", &trace, &session);
         let messages = ctx.render();
-        let user = messages
-            .iter()
-            .find(|m| m.role == "user")
-            .expect("user");
+        let user = messages.iter().find(|m| m.role == "user").expect("user");
         assert!(user.content.as_text().contains("Previous turns:"));
         assert!(user.content.as_text().contains("User: first question"));
-        assert!(user.content.as_text().contains("User input:\nfirst question follow-up"));
+        assert!(user
+            .content
+            .as_text()
+            .contains("User input:\nfirst question follow-up"));
     }
 
     #[test]

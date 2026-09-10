@@ -100,10 +100,7 @@ mod tests {
                 }],
             })
             .unwrap();
-        let mut layered = LayeredMemoryBridge::new(vec![
-            Box::new(local),
-            Box::new(FailBridge),
-        ]);
+        let mut layered = LayeredMemoryBridge::new(vec![Box::new(local), Box::new(FailBridge)]);
         let recent = layered.recent_work(3).unwrap();
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].source, RecalledSource::RecentWork);

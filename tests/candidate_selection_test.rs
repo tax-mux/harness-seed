@@ -196,9 +196,9 @@ fn observer_emits_phase_llm_and_candidates() {
     let got = events.lock().unwrap().clone();
     assert!(got.iter().any(|s| s == "phase:candidates"));
     assert!(got.iter().any(|s| s == "llm:candidates"));
-    assert!(got
-        .iter()
-        .any(|s| s.starts_with("candidates:candidates:") && s.contains("chitchat=true") && s.contains("ok=true")));
+    assert!(got.iter().any(|s| s.starts_with("candidates:candidates:")
+        && s.contains("chitchat=true")
+        && s.contains("ok=true")));
 }
 
 #[test]

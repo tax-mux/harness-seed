@@ -36,12 +36,12 @@ impl LlmConnector for MockLlmConnector {
                 if last_user.contains("[thought") {
                     plan_list_dir
                 } else {
-                    r#"{"step":"thought","content":"plan for driver"}"# 
+                    r#"{"step":"thought","content":"plan for driver"}"#
                 }
             } else if last_user.contains("[thought") {
                 plan_answer
             } else {
-                r#"{"step":"thought","content":"mock plan thought"}"# 
+                r#"{"step":"thought","content":"mock plan thought"}"#
             }
         } else if last_user.contains("## Subtask") {
             let id = if last_user.contains("\nid: 2\n") || last_user.contains("id: 2\n") {
@@ -51,14 +51,14 @@ impl LlmConnector for MockLlmConnector {
             };
             &format!(r#"{{"step":"answer","content":"subtask \\"{id}\\" done"}}"#)
         } else if last_user.contains("[observation") {
-            r#"{"step":"answer","content":"mock answer"}"# 
+            r#"{"step":"answer","content":"mock answer"}"#
         } else if last_user.contains("[thought") {
             r#"{"step":"action","tool":"echo","args":{"message":"from-mock"}}"#
         } else if last_user.contains("candidates") || last_user.contains("task candidate") {
             // candidates フェーズ：直ちに plan 生成へ進む
             candidates_response
         } else {
-            r#"{"step":"thought","content":"mock thought"}"# 
+            r#"{"step":"thought","content":"mock thought"}"#
         };
 
         let usage = ContextUsage::measure_messages(messages, content);

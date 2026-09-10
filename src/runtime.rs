@@ -130,10 +130,7 @@ impl RuntimeEnvironment {
 
     /// 起動ログ用 1 行。
     pub fn summary_line(&self) -> String {
-        format!(
-            "{} / {} — {}",
-            self.os, self.arch, self.shell_label
-        )
+        format!("{} / {} — {}", self.os, self.arch, self.shell_label)
     }
 
     /// system プロンプトへ追記する短文。
@@ -159,7 +156,11 @@ impl RuntimeEnvironment {
     }
 
     /// ワークスペース内でシェルコマンドを実行する。
-    pub fn run_shell_command(&self, command: &str, cwd: &Path) -> Result<std::process::Output, String> {
+    pub fn run_shell_command(
+        &self,
+        command: &str,
+        cwd: &Path,
+    ) -> Result<std::process::Output, String> {
         let mut cmd = Command::new(&self.shell_program);
         match self.shell_kind {
             ShellKind::Cmd => {
@@ -203,9 +204,7 @@ fn program_runs(program: &str, args: &[&str]) -> bool {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    cmd.status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    cmd.status().map(|s| s.success()).unwrap_or(false)
 }
 
 #[cfg(not(windows))]

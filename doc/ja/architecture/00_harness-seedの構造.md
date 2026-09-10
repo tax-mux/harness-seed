@@ -157,26 +157,26 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    RT["run_turn(user_input)"] --> AD{"advance.enabled?"}
+    RT["run_turn(user_input)"] --> AD{"advance.mode == always?"}
     AD -->|はい| ADV["run_turn_advance<br/>計画 → フェーズ逐次実行"]
-    AD -->|いいえ| TP{"two_phase?"}
-    TP -->|はい| TWO["run_turn_two_phase<br/>計画 → 実行"]
+    AD -->|いいえ| TP{"from_plan または two_phase?"}
+    TP -->|はい| TWO["計画 1 回 → 形で昇格 or 実行"]
     TP -->|いいえ| ONE["run_turn_single<br/>単一 ReAct のみ"]
     ADV --> END["TurnResult"]
     TWO --> END
     ONE --> END
 ```
 
-入口は設定で三つに分かれる。長い作業向けの外側ループ（`advance`）が最優先で、それがオフなら「計画→実行」の二段か、計画なしの単一ループかのどちらかになる。どれを選んでも返り値の型は同じである。
+入口は設定で分かれる。`always` なら無条件に推進ループ。`from_plan` なら計画を 1 回走らせ、計画の形が長ければ推進へ上げ、短ければ two_phase 実行のままにする。どれを選んでも返り値の型は同じである。
 
 | 設定 | コード既定（キー省略時） | 挙動 |
 |------|--------------------------|------|
-| `react.two_phase` | `false` | 計画層 → 実行層の直列（サンプル config では `true` が多い） |
-| `react.advance.enabled` | `false` | 外側推進ループ（`two_phase` より優先）。サンプルでは `true` のことがある |
+| `react.two_phase` | `true`（CLI / `AppConfig`。`ReActConfig::default()` は `false`） | 計画層 → 実行層の直列 |
+| `react.advance.mode` | `off`（CLI サンプルは `from_plan`） | `always` は無条件推進。`from_plan` は計画後に昇格。旧 `enabled: true` は `always` |
 | `react.use_step_driver` | `true` | 契約付き・`react_only: false` のタスクを LLM なしで順次実行 |
 | `react.arg_audit_mode` | `soft` | 引数監査（[05_タスクレジストリ.md](05_タスクレジストリ.md)） |
 
-設定を省略したライブラリ利用では、まず単一の ReAct ループとして動く。二段構成を有効にすると、先に計画を作ってから実行へ渡す。さらに長い作業では推進ループがその入口を引き受け、フェーズごとに進める。
+CLI と JSON 設定（`AppConfig`）ではキー省略時に計画→実行になる。ライブラリ単体で `ReActConfig::default()` を使うと単一ループのままである。長い作業では推進ループがその入口を引き受け、フェーズごとに進める。
 
 一方、ステップドライバと引数監査は入口を選ぶ設定ではない。選ばれた実行経路の内部で、定型作業を機械的に進めるか、渡した引数をどこまで厳しく確かめるかを決める。推進ループを選んだ場合も、各フェーズで計画を先に通す。
 

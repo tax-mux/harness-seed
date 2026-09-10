@@ -70,11 +70,7 @@ impl TaskDefinition {
         }
 
         if allow.is_empty() && !self.steps.is_empty() {
-            allow = self
-                .steps
-                .iter()
-                .map(|s| s.method.clone())
-                .collect();
+            allow = self.steps.iter().map(|s| s.method.clone()).collect();
         }
 
         let mut seen = HashSet::new();

@@ -2,7 +2,7 @@
 mod common;
 
 use common::{
-    build_react_loop_from_config, config_model_name, load_test_config, llm_chat_from_config,
+    build_react_loop_from_config, config_model_name, llm_chat_from_config, load_test_config,
     skip_if_llm_not_ready,
 };
 use harness_seed::{parse_agent_step, AgentStep};
@@ -27,8 +27,7 @@ fn llm_connector_chat_from_config() {
     }
 
     let app = load_test_config().expect("config");
-    let answer =
-        llm_chat_from_config("こんにちは。1文で返してください。").expect("llm answer");
+    let answer = llm_chat_from_config("こんにちは。1文で返してください。").expect("llm answer");
     assert!(!answer.is_empty());
     eprintln!("chat (model: {}): {answer}", config_model_name(&app));
 }

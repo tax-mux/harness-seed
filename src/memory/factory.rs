@@ -111,9 +111,7 @@ fn build_backend(section: &MemorySection, name: &str) -> Option<Box<dyn MemoryBr
     match name {
         PROVIDER_MEMPALACE => build_mempalace_bridge(section),
         other => {
-            eprintln!(
-                "[memory] unknown backend {other:?} (known extras: {PROVIDER_MEMPALACE})"
-            );
+            eprintln!("[memory] unknown backend {other:?} (known extras: {PROVIDER_MEMPALACE})");
             None
         }
     }
@@ -236,7 +234,9 @@ impl MempalaceConfigDto {
                 .unwrap_or_else(default_mempalace_agent),
             wing: legacy.wing.clone(),
             room: legacy.room.clone(),
-            timeout_secs: legacy.timeout_secs.unwrap_or_else(default_mempalace_timeout),
+            timeout_secs: legacy
+                .timeout_secs
+                .unwrap_or_else(default_mempalace_timeout),
             protocol: legacy.protocol.clone(),
             api_key: legacy.api_key.clone(),
             command: None,

@@ -24,10 +24,7 @@ impl std::fmt::Display for HarnessParseError {
 ///
 /// 1. JSON 形式の計画（`PlanArtifact` / `input`+`steps`+`output`）を優先
 /// 2. 失敗時は番号付きテキスト行からサブタスクを復元
-pub fn parse_harness(
-    raw: &str,
-    fallback_input: &str,
-) -> Result<HarnessState, HarnessParseError> {
+pub fn parse_harness(raw: &str, fallback_input: &str) -> Result<HarnessState, HarnessParseError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err(HarnessParseError::Empty);
@@ -93,10 +90,10 @@ fn looks_like_plain_text(text: &str) -> bool {
 
 /// テキスト作業指示書から単一または複数サブタスクへ（最終フォールバック）。
 fn parse_work_instructions_text(text: &str, fallback_input: &str) -> PlanArtifact {
-  if let Some(plan) = parse_numbered_steps(text) {
-      return plan;
-  }
-  PlanArtifact::single_subtask(fallback_input)
+    if let Some(plan) = parse_numbered_steps(text) {
+        return plan;
+    }
+    PlanArtifact::single_subtask(fallback_input)
 }
 
 /// `1.` / `1)` / `ステップ1` 形式の行からサブタスク列を組み立てる。
@@ -188,7 +185,11 @@ mod tests {
         let state = parse_harness_strict(raw, "fallback").unwrap();
         assert_eq!(state.plan.subtasks.len(), 2);
         assert!(
-            state.plan.subtasks.iter().all(|s| s.done_when.contains("concrete evidence")),
+            state
+                .plan
+                .subtasks
+                .iter()
+                .all(|s| s.done_when.contains("concrete evidence")),
             "weak step-completed defaults should be strengthened"
         );
     }

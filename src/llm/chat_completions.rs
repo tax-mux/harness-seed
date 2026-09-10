@@ -16,9 +16,7 @@ pub struct ChatCompletionsConnector {
 impl ChatCompletionsConnector {
     pub fn new(config: LlmConfig) -> Result<Self, ConnectorError> {
         crate::llm::connector::require_absolute_http_base(&config.base_url)?;
-        let client = Client::builder()
-            .timeout(config.timeout)
-            .build()?;
+        let client = Client::builder().timeout(config.timeout).build()?;
         Ok(Self { client, config })
     }
 

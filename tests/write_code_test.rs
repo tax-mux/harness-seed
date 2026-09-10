@@ -33,10 +33,7 @@ fn write_code_react_turn_with_llm() {
     assert!(used_write, "trace: {:?}", result.trace.actions);
 
     let content = std::fs::read_to_string(&abs).unwrap_or_default();
-    assert!(
-        content.contains("fn main"),
-        "file content: {content}"
-    );
+    assert!(content.contains("fn main"), "file content: {content}");
 
     eprintln!(
         "write_code (model: {}): {}\nfile:\n{content}",

@@ -1,8 +1,6 @@
 //! 計画層 ReAct ステップ JSON のパース。
 
-use harness_seed::{
-    parse_plan, parse_plan_agent_step, AgentStep,
-};
+use harness_seed::{parse_plan, parse_plan_agent_step, AgentStep};
 
 #[test]
 fn parses_plan_thought_step() {

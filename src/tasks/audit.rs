@@ -178,7 +178,13 @@ pub fn audit_trace_with_mode(
 pub fn expected_args(def: &TaskDefinition, params: &Value) -> Vec<(u32, String, Value)> {
     def.ordered_required_steps()
         .into_iter()
-        .map(|s| (s.order, s.method.clone(), apply_template_value(&s.args, params)))
+        .map(|s| {
+            (
+                s.order,
+                s.method.clone(),
+                apply_template_value(&s.args, params),
+            )
+        })
         .collect()
 }
 

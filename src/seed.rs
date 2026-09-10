@@ -139,8 +139,7 @@ impl SeedBuilder {
         let paths = config.resolve_paths(base_dir)?;
         apply_workspace_env(&paths.workspace);
         self.blocks.context_manifest_path = config.resolved_context_manifest_path(base_dir)?;
-        let (report, tools) =
-            load_agent_assets(&paths, &mut self.blocks, &mut self.task_registry)?;
+        let (report, tools) = load_agent_assets(&paths, &mut self.blocks, &mut self.task_registry)?;
         self.plugins.extend(tools);
         self.agent_report = Some(report);
         Ok(self)

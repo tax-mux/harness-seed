@@ -1,8 +1,7 @@
 //! Brave Search API（gemini-pad の `braveSearch.mjs` を参考にした組み込み検索）。
 
 const BRAVE_WEB_SEARCH_URL: &str = "https://api.search.brave.com/res/v1/web/search";
-const DEFAULT_USER_AGENT: &str =
-    "Mozilla/5.0 (compatible; harness-seed/1.0; +https://github.com/)";
+const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (compatible; harness-seed/1.0; +https://github.com/)";
 
 /// `config.json` の `tools.brave_search` および環境変数から解決した設定。
 #[derive(Debug, Clone)]
@@ -45,7 +44,11 @@ impl std::fmt::Display for BraveSearchError {
 impl std::error::Error for BraveSearchError {}
 
 /// Brave Web Search API を呼び出し、整形テキストを返す。
-pub fn search_web(cfg: &BraveSearchConfig, query: &str, count: Option<u8>) -> Result<String, BraveSearchError> {
+pub fn search_web(
+    cfg: &BraveSearchConfig,
+    query: &str,
+    count: Option<u8>,
+) -> Result<String, BraveSearchError> {
     if cfg.api_key.is_empty() {
         return Err(BraveSearchError::MissingApiKey);
     }
@@ -113,7 +116,11 @@ pub fn search_web(cfg: &BraveSearchConfig, query: &str, count: Option<u8>) -> Re
         } else {
             String::new()
         };
-        hits.push(WebSearchHit { title, url, content });
+        hits.push(WebSearchHit {
+            title,
+            url,
+            content,
+        });
     }
 
     if hits.is_empty() {
@@ -190,10 +197,7 @@ fn strip_html_to_text(html: &str, max_chars: usize) -> String {
             _ => {}
         }
     }
-    let collapsed: String = out
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let collapsed: String = out.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.len() <= max_chars {
         collapsed
     } else {
@@ -237,9 +241,12 @@ fn push_result_items(items: &[serde_json::Value], out: &mut Vec<NormalizedResult
             .or_else(|| json_str(item, &["snippet"]))
             .unwrap_or_default();
         let url = json_str(item, &["url", "link"]).unwrap_or_else(|| {
-            item.get("meta_url").and_then(meta_url_to_string).unwrap_or_default()
+            item.get("meta_url")
+                .and_then(meta_url_to_string)
+                .unwrap_or_default()
         });
-        let description = json_str(item, &["description", "snippet", "summary"]).unwrap_or_default();
+        let description =
+            json_str(item, &["description", "snippet", "summary"]).unwrap_or_default();
         if url.is_empty() {
             continue;
         }

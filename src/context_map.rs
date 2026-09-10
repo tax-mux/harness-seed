@@ -147,10 +147,7 @@ pub fn aggregate_prompt_sections<'a>(
         .iter()
         .filter_map(|kind| {
             let chars = *totals.get(kind)?;
-            (chars > 0).then_some(ContextSection {
-                kind: *kind,
-                chars,
-            })
+            (chars > 0).then_some(ContextSection { kind: *kind, chars })
         })
         .collect()
 }
@@ -186,7 +183,8 @@ pub fn format_colormap_titled(sections: &[ContextSection], color: bool, title: &
         }
         let pct = (sec.chars as f64) * 100.0 / (total_chars as f64);
         let tok = sec.estimated_tokens();
-        let filled = ((sec.chars as f64) / (total_chars as f64) * bar_width as f64).round() as usize;
+        let filled =
+            ((sec.chars as f64) / (total_chars as f64) * bar_width as f64).round() as usize;
         let filled = filled.clamp(1, bar_width);
         let bar = render_bar(filled, bar_width, color, sec.kind);
         lines.push(format!(
@@ -295,7 +293,11 @@ fn analyze_user_content(s: &str) -> Vec<ContextSection> {
     if head_end > 0 {
         let head = &s[..head_end];
         if head.contains("Previous turns:") {
-            push_section(&mut out, ContextSectionKind::PreviousTurns, head.chars().count());
+            push_section(
+                &mut out,
+                ContextSectionKind::PreviousTurns,
+                head.chars().count(),
+            );
         } else if !head.trim().is_empty() {
             push_section(&mut out, ContextSectionKind::Other, head.chars().count());
         }
@@ -303,24 +305,44 @@ fn analyze_user_content(s: &str) -> Vec<ContextSection> {
 
     if let (Some(ui), Some(tr)) = (user_input, trace) {
         let start = ui + "User input:\n".len();
-        push_section(&mut out, ContextSectionKind::UserInput, s[start..tr].chars().count());
+        push_section(
+            &mut out,
+            ContextSectionKind::UserInput,
+            s[start..tr].chars().count(),
+        );
     } else if let Some(ui) = user_input {
         let start = ui + "User input:\n".len();
         let end = next.unwrap_or(s.len());
-        push_section(&mut out, ContextSectionKind::UserInput, s[start..end].chars().count());
+        push_section(
+            &mut out,
+            ContextSectionKind::UserInput,
+            s[start..end].chars().count(),
+        );
     }
 
     if let (Some(tr), Some(nx)) = (trace, next) {
         let start = tr + "\n\nTurn trace so far:\n".len();
-        push_section(&mut out, ContextSectionKind::TurnTrace, s[start..nx].chars().count());
+        push_section(
+            &mut out,
+            ContextSectionKind::TurnTrace,
+            s[start..nx].chars().count(),
+        );
     } else if let Some(tr) = trace {
         let start = tr + "\n\nTurn trace so far:\n".len();
-        push_section(&mut out, ContextSectionKind::TurnTrace, s[start..].chars().count());
+        push_section(
+            &mut out,
+            ContextSectionKind::TurnTrace,
+            s[start..].chars().count(),
+        );
     }
 
     if let Some(nx) = next {
         let start = nx + "\n\nNext step JSON:".len();
-        push_section(&mut out, ContextSectionKind::NextStepCue, s[start..].chars().count());
+        push_section(
+            &mut out,
+            ContextSectionKind::NextStepCue,
+            s[start..].chars().count(),
+        );
     }
 
     if out.is_empty() {

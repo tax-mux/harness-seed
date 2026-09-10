@@ -44,8 +44,7 @@ impl MemoryBridge for MempalaceBridge {
         // （片方が上位を独占してもう片方を押しのけないようにする）
         let fetch = top_k.saturating_mul(3).max(top_k);
         let hits = self.client.search(query, fetch).map_err(map_err)?;
-        let (diary, knowledge): (Vec<_>, Vec<_>) =
-            hits.into_iter().partition(is_diary_hit);
+        let (diary, knowledge): (Vec<_>, Vec<_>) = hits.into_iter().partition(is_diary_hit);
         Ok(interleave_take(knowledge, diary, top_k)
             .into_iter()
             .map(|h| {
@@ -242,11 +241,7 @@ mod tests {
     }
 
     impl MempalaceTransport for FakeTransport {
-        fn call_tool(
-            &self,
-            name: &str,
-            arguments: Value,
-        ) -> Result<Value, MempalaceError> {
+        fn call_tool(&self, name: &str, arguments: Value) -> Result<Value, MempalaceError> {
             if name == mempalace_adapter::TOOL_ADD_DRAWER {
                 self.writes.lock().unwrap().push(arguments);
                 return Ok(json!({"success": true}));

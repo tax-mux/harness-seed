@@ -20,9 +20,7 @@ pub fn normalize_anthropic_base_url(host: &str) -> String {
     } else {
         trimmed
     };
-    base.strip_suffix("/v1")
-        .unwrap_or(base)
-        .to_string()
+    base.strip_suffix("/v1").unwrap_or(base).to_string()
 }
 
 /// Anthropic Messages API コネクタ（Claude 直）。
@@ -34,18 +32,11 @@ pub struct AnthropicConnector {
 
 impl AnthropicConnector {
     pub fn new(config: LlmConfig) -> Result<Self, ConnectorError> {
-        if config
-            .api_key
-            .as_ref()
-            .filter(|k| !k.is_empty())
-            .is_none()
-        {
+        if config.api_key.as_ref().filter(|k| !k.is_empty()).is_none() {
             return Err(ConnectorError::MissingApiKey);
         }
 
-        let client = Client::builder()
-            .timeout(config.timeout)
-            .build()?;
+        let client = Client::builder().timeout(config.timeout).build()?;
         crate::llm::connector::require_absolute_http_base(&config.base_url)?;
         Ok(Self { client, config })
     }
@@ -218,10 +209,7 @@ mod tests {
 
     #[test]
     fn partition_extracts_system() {
-        let messages = vec![
-            ChatMessage::system("rules"),
-            ChatMessage::user("hello"),
-        ];
+        let messages = vec![ChatMessage::system("rules"), ChatMessage::user("hello")];
         let (sys, msgs) = AnthropicConnector::partition_messages(&messages);
         assert_eq!(sys.as_deref(), Some("rules"));
         assert_eq!(msgs.len(), 1);

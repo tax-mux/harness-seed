@@ -19,7 +19,10 @@ pub fn normalize_gemini_base_url(host: &str) -> String {
 }
 
 /// Gemini 向けに解決する base URL（LM Studio / Ollama 用 URL の誤設定を無視）。
-pub fn resolve_gemini_base_url(configured: Option<&str>, env_gemini_base: Option<String>) -> String {
+pub fn resolve_gemini_base_url(
+    configured: Option<&str>,
+    env_gemini_base: Option<String>,
+) -> String {
     if let Some(u) = env_gemini_base.filter(|s| !s.trim().is_empty()) {
         return normalize_gemini_base_url(&u);
     }
@@ -56,18 +59,11 @@ pub struct GeminiConnector {
 
 impl GeminiConnector {
     pub fn new(config: LlmConfig) -> Result<Self, ConnectorError> {
-        if config
-            .api_key
-            .as_ref()
-            .filter(|k| !k.is_empty())
-            .is_none()
-        {
+        if config.api_key.as_ref().filter(|k| !k.is_empty()).is_none() {
             return Err(ConnectorError::MissingApiKey);
         }
 
-        let client = Client::builder()
-            .timeout(config.timeout)
-            .build()?;
+        let client = Client::builder().timeout(config.timeout).build()?;
         crate::llm::connector::require_absolute_http_base(&config.base_url)?;
         Ok(Self { client, config })
     }
@@ -193,10 +189,11 @@ impl LlmConnector for GeminiConnector {
         }
 
         if let Ok(err) = serde_json::from_str::<serde_json::Value>(&text) {
-            if let Some(msg) = err.get("error").and_then(|e| e.as_str()).or_else(|| {
-                err.pointer("/error/message")
-                    .and_then(|m| m.as_str())
-            }) {
+            if let Some(msg) = err
+                .get("error")
+                .and_then(|e| e.as_str())
+                .or_else(|| err.pointer("/error/message").and_then(|m| m.as_str()))
+            {
                 return Err(ConnectorError::InvalidResponse(msg.to_string()));
             }
         }
@@ -229,18 +226,12 @@ mod tests {
 
     #[test]
     fn normalize_default_base() {
-        assert_eq!(
-            normalize_gemini_base_url(""),
-            DEFAULT_GEMINI_BASE
-        );
+        assert_eq!(normalize_gemini_base_url(""), DEFAULT_GEMINI_BASE);
     }
 
     #[test]
     fn resolve_ignores_lmstudio_base_url() {
-        let url = resolve_gemini_base_url(
-            Some("http://127.0.0.1:1234"),
-            None,
-        );
+        let url = resolve_gemini_base_url(Some("http://127.0.0.1:1234"), None);
         assert_eq!(url, DEFAULT_GEMINI_BASE);
     }
 
@@ -255,10 +246,7 @@ mod tests {
 
     #[test]
     fn partition_extracts_system() {
-        let messages = vec![
-            ChatMessage::system("rules"),
-            ChatMessage::user("hello"),
-        ];
+        let messages = vec![ChatMessage::system("rules"), ChatMessage::user("hello")];
         let (sys, contents) = GeminiConnector::partition_messages(&messages);
         assert_eq!(sys.as_deref(), Some("rules"));
         assert_eq!(contents.len(), 1);

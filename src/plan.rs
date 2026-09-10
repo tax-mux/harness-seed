@@ -17,33 +17,32 @@ use crate::context::PromptBlocks;
 use crate::session::SessionMemory;
 use crate::tasks::TaskRegistry;
 
+pub use brain::{
+    artifact_from_plan_turn, PlanBrainMode, PlanLlmBrain, RulePlanBrain, PLAN_REACT_SYSTEM_CORE,
+};
 pub use candidates::{
     normalize_candidates, parse_candidate_selection, select_and_register_plan_candidates,
     select_and_register_plan_candidates_with_budget, CANDIDATE_SELECTION_SYSTEM,
     PLAN_CATALOG_SUMMARY_MAX_CHARS, PLAN_CATALOG_SUMMARY_MAX_ENTRIES,
 };
-pub use brain::{
-    artifact_from_plan_turn, PlanBrainMode, PlanLlmBrain, RulePlanBrain, PLAN_REACT_SYSTEM_CORE,
-};
 pub use contract::{PlanDataContract, PlanEnforceFn};
+pub use display::{
+    format_plan_zone_after_preview, format_plan_zone_prompt_preview, format_planner_fixed_zone_html,
+};
 pub use parse::{parse_plan, PlanParseError};
-pub use schedule::{execution_waves, ScheduleError};
 pub use parse_step::{
     harness_state_from_plan_answer as harness_state_from_plan_turn, parse_plan_agent_step,
     plan_artifact_from_answer, PlanStepParseError,
 };
 pub use prompt::{
-    build_plan_layer_messages, build_plan_layer_messages_with_catalog, format_plan_fixed_zone_system,
-    format_plan_layer_prompt,
-};
-pub use display::{
-    format_plan_zone_after_preview, format_plan_zone_prompt_preview,
-    format_planner_fixed_zone_html,
+    build_plan_layer_messages, build_plan_layer_messages_with_catalog,
+    format_plan_fixed_zone_system, format_plan_layer_prompt,
 };
 pub use queue::{
     control_plane_catalog_footer, is_replan_subtask, is_reserved_control_task, PlanQueue,
     PlanQueueError, REPLAN_TASK_ID,
 };
+pub use schedule::{execution_waves, ScheduleError};
 
 /// 計画フェーズ用 system 指示（ツールカタログなし）。
 pub const PLAN_SYSTEM_CORE: &str = r#"You are a planning agent. Reply with ONE JSON object only (no markdown).
@@ -273,10 +272,7 @@ fn default_evidence_subtask(summary: &str) -> Subtask {
 pub fn format_plan_for_display(plan: &PlanArtifact, registry: &TaskRegistry) -> String {
     let mut out = String::from("--- Plan ---\n");
     out.push_str(&format!("summary: {}\n", plan.summary));
-    out.push_str(&format!(
-        "skip_execution: {}\n",
-        plan.skip_execution
-    ));
+    out.push_str(&format!("skip_execution: {}\n", plan.skip_execution));
     if plan.subtasks.is_empty() {
         out.push_str("subtasks: (none)\n");
     } else {
@@ -326,7 +322,11 @@ impl PlanProgress {
         let mut out = String::new();
         for (id, text) in &self.results {
             let snippet: String = text.chars().take(500).collect();
-            let suffix = if text.chars().count() > 500 { "…" } else { "" };
+            let suffix = if text.chars().count() > 500 {
+                "…"
+            } else {
+                ""
+            };
             out.push_str(&format!("[{id}] {snippet}{suffix}\n"));
         }
         out
@@ -425,10 +425,7 @@ fn format_mission_freeform(
     subtask: &Subtask,
     progress: &PlanProgress,
 ) -> String {
-    let task = subtask
-        .task
-        .as_deref()
-        .unwrap_or("(freeform)");
+    let task = subtask.task.as_deref().unwrap_or("(freeform)");
     let reference = if subtask.task.is_none() {
         original.trim()
     } else {
@@ -471,18 +468,12 @@ mod direct_reply_tests {
             user_reply: None,
         };
         let wi = r#"{"summary":"short label","skip_execution":true,"subtasks":[],"output":"最終回答本文"}"#;
-        assert_eq!(
-            plan.direct_reply(wi).as_deref(),
-            Some("最終回答本文")
-        );
+        assert_eq!(plan.direct_reply(wi).as_deref(), Some("最終回答本文"));
     }
 
     #[test]
     fn uses_structured_user_reply() {
-        let plan = PlanArtifact::skip_with_reply(
-            "label",
-            "これは十分な長さの要約回答です",
-        );
+        let plan = PlanArtifact::skip_with_reply("label", "これは十分な長さの要約回答です");
         assert!(plan.direct_reply("{}").unwrap().contains("要約回答"));
     }
 

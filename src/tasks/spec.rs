@@ -95,7 +95,10 @@ impl TaskDefinition {
         let mut seen = std::collections::HashSet::new();
         for step in &self.steps {
             if step.method.trim().is_empty() {
-                return Err(format!("task '{}': step order {} has empty method", self.id, step.order));
+                return Err(format!(
+                    "task '{}': step order {} has empty method",
+                    self.id, step.order
+                ));
             }
             if !seen.insert(step.order) {
                 return Err(format!(
@@ -111,9 +114,8 @@ impl TaskDefinition {
     pub fn format_required_execution(&self, params: &Value) -> String {
         let required = self.ordered_required_steps();
         if required.is_empty() {
-            let mut out = String::from(
-                "Required execution: (none — ReAct may choose tools freely)\n",
-            );
+            let mut out =
+                String::from("Required execution: (none — ReAct may choose tools freely)\n");
             if !self.done_when.is_empty() {
                 out.push_str(&format!(
                     "\nDone when: {}\n",
@@ -127,12 +129,7 @@ impl TaskDefinition {
         );
         for step in required {
             let args = apply_template_value(&step.args, params);
-            out.push_str(&format!(
-                "  {}. {}({})\n",
-                step.order,
-                step.method,
-                args
-            ));
+            out.push_str(&format!("  {}. {}({})\n", step.order, step.method, args));
         }
         if !self.done_when.is_empty() {
             let dw = apply_template(&self.done_when, params);

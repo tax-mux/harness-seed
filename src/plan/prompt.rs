@@ -136,10 +136,14 @@ pub fn format_plan_layer_prompt(
     ))
 }
 
-pub(crate) fn plan_task_catalog_for_blocks(blocks: &PromptBlocks, task_registry: &TaskRegistry) -> String {
-    blocks.plan_task_catalog.clone().unwrap_or_else(|| {
-        task_registry.catalog_for_planner_opts(blocks.web_search_enabled)
-    })
+pub(crate) fn plan_task_catalog_for_blocks(
+    blocks: &PromptBlocks,
+    task_registry: &TaskRegistry,
+) -> String {
+    blocks
+        .plan_task_catalog
+        .clone()
+        .unwrap_or_else(|| task_registry.catalog_for_planner_opts(blocks.web_search_enabled))
 }
 
 fn format_tool_definitions_block(catalog: &str) -> String {
