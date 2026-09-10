@@ -1,13 +1,17 @@
 # タスク定義（機能塊）
 
-各タスクは **必須実行メソッド（組み込みツール名）** と **`order` による実行順序** を宣言する。プロンプト用の自由文テンプレートではない。
+各タスクは **必須実行メソッド（組み込みツール名）** と **`order` による実行順序** を宣言する。  
+現行方針では **`react_only: true` が既定**で、`steps[]` は計画・監査用の契約。実行層では ReAct がツールを選ぶ。  
+ステップドライバ（LLM なし固定順）は `react_only: false` のときだけ使う例外経路。
 
 ## スキーマ
 
 ```json
 {
   "id": "write_file_verify",
-  "summary": "一行説明（プランナー向け）",
+  "summary": "一行ラベル",
+  "planner_summary": "計画候補選定用（約200字。いつ選ぶ／選ばない）",
+  "react_only": true,
   "default_params": { "path": "tmp/out.txt", "content": "" },
   "done_when": "完了の言語条件",
   "steps": [
@@ -19,20 +23,23 @@
 
 | フィールド | 意味 |
 |------------|------|
-| `order` | 実行順（1 始まり。小さいほど先） |
-| `method` | ツール名（`list_dir`, `write_file`, `web_search`, …） |
+| `summary` | 短いラベル |
+| `planner_summary` | 計画候補選定用（約200字。いつ選ぶ／選ばない） |
+| `react_only` | `true` なら実行は ReAct（推奨）。`false` なら step ドライバ可 |
+| `steps` | 必須ツール順（監査・mission 表示）。空なら自由実行 |
+| `order` / `method` / `args` / `required` | 各ステップの定義 |
 
 ## 組み込みタスク
 
-| id | 必須ツール順 | 用途 |
-|----|-------------|------|
-| `list_dir` | `list_dir` | ディレクトリ一覧 |
-| `write_file_verify` | `write_file` → `read_file` | 書き込み検証 |
-| `web_research` | `web_search` | Web 検索（`tools.brave_search.api_key` 必須） |
-| `generic` | （なし） | 実行層 ReAct がツールを自由選択 |
-| `args` | 引数テンプレート（`{param}` は `params` で展開） |
-| `required` | 監査対象（既定 `true`） |
-| `steps: []` | 固定順なし（`generic`） |
+| id | 必須ツール順 | 実行 | 用途 |
+|----|-------------|------|------|
+| `list_dir` | `list_dir` | ReAct | ディレクトリ一覧 |
+| `write_file_verify` | `write_file` → `read_file` | ReAct | 書き込み検証 |
+| `web_research` | `web_search` | ReAct | Web 検索（Brave API キー必須） |
+| `process_data` | `process_data` | ReAct | 外部プラグイン（登録時のみ） |
+| `generic` | （なし） | ReAct | 自由選択 |
+
+計画フェーズは `planner_summary` を見て候補を選び、詳細カタログをコンテキストへ登録してから PROCEDURE を書く。
 
 ## 計画 JSON との接続
 
@@ -40,6 +47,6 @@
 { "id": 1, "task": "list_dir", "params": { "path": "src" } }
 ```
 
-実行後、スケルトンでは `TaskRegistry::audit_subtask` が trace 上の **ツール名の順序** を照合する（引数の厳密一致は未実装）。
+実行後、`TaskRegistry::audit_subtask` が trace 上の **ツール名の順序** を照合する。
 
-実装: `src/tasks/spec.rs`（定義）, `src/tasks/audit.rs`（照合）, `src/tasks/registry.rs`（読み込み・mission 生成）。
+実装: `src/tasks/spec.rs`（定義）, `src/tasks/audit.rs`（照合）, `src/tasks/registry.rs`（読み込み・mission 生成）, `src/plan/candidates.rs`（候補選定）。

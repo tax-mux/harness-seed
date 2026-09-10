@@ -29,6 +29,9 @@ fn default_true() -> bool {
 pub struct TaskDefinition {
     pub id: String,
     pub summary: String,
+    /// 計画層の候補選定用（約200字）。空なら `summary` を使う。
+    #[serde(default)]
+    pub planner_summary: String,
     #[serde(default)]
     pub default_params: Value,
     /// 必須実行メソッドと順序。空なら自由実行（`generic`）。
@@ -63,6 +66,16 @@ pub struct ContextManifestSpec {
 }
 
 impl TaskDefinition {
+    /// 計画候補選定用の説明（`planner_summary` 優先、なければ `summary`）。
+    pub fn effective_planner_summary(&self) -> &str {
+        let s = self.planner_summary.trim();
+        if s.is_empty() {
+            self.summary.as_str()
+        } else {
+            s
+        }
+    }
+
     /// `order` 昇順の必須ステップ列。
     pub fn ordered_required_steps(&self) -> Vec<&ExecStep> {
         let mut steps: Vec<_> = self.steps.iter().filter(|s| s.required).collect();

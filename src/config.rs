@@ -125,8 +125,12 @@ pub struct ReactSection {
     pub max_steps_plan: Option<usize>,
     /// 実行層 ReAct ループあたりの `thought` 上限（既定: 1）。
     pub max_thoughts: Option<usize>,
-    /// `tasks/*.json` の `steps[]` 契約があるサブタスクを LLM なしで順次実行する。
+    /// `tasks/*.json` の `steps[]` があり `react_only: false` のときだけステップドライバ可。
+    /// 組み込みタスクは `react_only: true`（ReAct が選択）。既定はドライバ無効寄りにしないが、
+    /// 契約タスクでも react_only なら ReAct 経路になる。
     pub use_step_driver: Option<bool>,
+    /// 計画フェーズでタスク summary から候補を選びコンテキストへ登録する。
+    pub plan_candidate_selection: Option<bool>,
     /// 各 ReAct ステップのプロンプト全文を stderr に出す。
     pub show_prompt: Option<bool>,
     /// 計画層の成果物を stdout に表示する（`two_phase` 時）。
@@ -389,6 +393,7 @@ impl AppConfig {
             max_steps_plan: self.react.max_steps_plan.unwrap_or(8),
             max_thoughts: self.react.max_thoughts.unwrap_or(1).max(1),
             use_step_driver: self.react.use_step_driver.unwrap_or(true),
+            plan_candidate_selection: self.react.plan_candidate_selection.unwrap_or(true),
             show_prompt: cli_show_prompt || self.react.show_prompt.unwrap_or(false),
             show_plan: self.react.show_plan.unwrap_or(true),
             show_task_execution: self.react.show_task_execution.unwrap_or(true),

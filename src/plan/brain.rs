@@ -36,6 +36,7 @@ Rules:
 - Instruction contract: "Take data ONLY from INPUT. Write result ONLY to OUTPUT. Think ONLY about the in-between procedure."
 - Your job is the PROCEDURE in between: emit ordered `steps` that transform INPUT into OUTPUT.
 - Prefer emitting `answer` with the work instructions (JSON plan or numbered steps) when clear; use `thought` only for brief decomposition if needed.
+- When the prompt lists selected plan candidates, use ONLY those task ids in PROCEDURE steps.
 - The plan loop is short. Do NOT explore for many steps here (no tools except optional `recall`). If evidence is missing, answer quickly with knowledge_sufficient:false and steps that send the exec layer to investigate.
 - Decide knowledge_sufficient first: true only if Recalled and/or general knowledge fully answer the user without tools (greetings, chit-chat, self-contained facts). false if you need workspace files, tools, or more evidence than Recalled provides (project overview, code, configs). Thin or off-topic Recalled is NOT sufficient.
 - skip_execution may be true ONLY when knowledge_sufficient is true. The harness rejects skip otherwise and runs a freeform execution step (tools chosen by the exec layer).
@@ -132,6 +133,17 @@ impl RulePlanBrain {
 
 impl AgentBrain for RulePlanBrain {
     fn decide(&mut self, ctx: &TurnPromptContext<'_>) -> AgentStep {
+        if ctx.blocks.candidate_selection_turn {
+            // ルール頭脳: カタログ上の全 id を候補にする（LLM なし）
+            let ids = parse_ids_from_summary_catalog(
+                ctx.blocks.plan_task_catalog.as_deref().unwrap_or(""),
+            );
+            let payload = serde_json::json!({
+                "candidates": ids,
+                "reason": "rule brain: keep all available tasks"
+            });
+            return AgentStep::Answer(payload.to_string());
+        }
         if ctx.trace.thoughts.is_empty() && !ctx.trace.actions.is_empty() {
             return AgentStep::Answer(Self::plan_json_for_input(ctx.user_input));
         }
@@ -147,6 +159,18 @@ impl AgentBrain for RulePlanBrain {
         }
         AgentStep::Answer(Self::plan_json_for_input(ctx.user_input))
     }
+}
+
+fn parse_ids_from_summary_catalog(catalog: &str) -> Vec<String> {
+    catalog
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            let rest = line.strip_prefix("- ")?;
+            let id = rest.split(':').next()?.trim();
+            (!id.is_empty()).then(|| id.to_string())
+        })
+        .collect()
 }
 
 /// LLM 計画層（ReAct ステップ → 最終 Answer で PlanArtifact）。
@@ -174,10 +198,18 @@ impl<C: LlmConnector> AgentBrain for PlanLlmBrain<C> {
             self.registry
                 .catalog_for_planner_opts(ctx.blocks.web_search_enabled)
         });
-        let messages = Self::build_messages(ctx, &catalog);
+        let messages = if ctx.blocks.candidate_selection_turn {
+            super::prompt::build_candidate_selection_messages(ctx)
+        } else {
+            Self::build_messages(ctx, &catalog)
+        };
         match self.inner.connector().complete(&messages) {
             Ok(result) => {
                 self.inner.set_last_usage(result.usage);
+                if ctx.blocks.candidate_selection_turn {
+                    // 候補 JSON をそのまま Answer に（plan step スキーマではない）
+                    return AgentStep::Answer(result.content);
+                }
                 match parse_plan_agent_step(&result.content) {
                     Ok(step) => step,
                     Err(err) => AgentStep::Answer(format!(

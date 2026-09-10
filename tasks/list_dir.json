@@ -1,10 +1,12 @@
 {
   "id": "list_dir",
   "summary": "ワークスペース内のディレクトリ一覧を取得する",
+  "planner_summary": "ワークスペースや指定パスのファイル／ディレクトリ構成を知りたいときに選ぶ。list_dir で一覧を取る。ファイル本文の読取・書込・Web 検索・雑談では選ばない。パスが不明なときは params.path を推定するか generic と併用する。",
   "default_params": {
     "path": "."
   },
   "done_when": "list_dir の結果が observation にある",
+  "react_only": true,
   "steps": [
     {
       "order": 1,
