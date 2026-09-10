@@ -207,6 +207,24 @@ pub struct ToolsSection {
     pub packs: Option<ToolPacksField>,
     #[serde(default)]
     pub brave_search: BraveSearchSection,
+    /// `~/.cursor/mcp.json` 等から MCP ツールを ReAct に載せる。
+    #[serde(default)]
+    pub mcp: McpToolsSection,
+}
+
+/// MCP サーバーを ReAct ツールとして読み込む設定。
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct McpToolsSection {
+    /// 既定 `true`（sources が空なら無効扱い）。
+    pub enabled: Option<bool>,
+    /// `mcpServers` を読む JSON パス（`${HOME}` 展開可）。既定: `~/.cursor/mcp.json`。
+    #[serde(default)]
+    pub sources: Vec<String>,
+    /// 読み込むサーバー名（空なら sources 内の全サーバー）。
+    #[serde(default)]
+    pub servers: Vec<String>,
+    /// 1 リクエストのタイムアウト秒（既定 60）。
+    pub timeout_secs: Option<u64>,
 }
 
 fn deserialize_opt_bool_switch<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
@@ -289,7 +307,7 @@ impl LogRotationSection {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct LogSection {
-    /// コンテキスト計測の JSON Lines ログパス（例: `logs/context.jsonl`）。
+    /// コンテキスト計測の JSON Lines ログパス（例: `logs/events.jsonl`）。
     pub context_metrics: Option<String>,
     #[serde(default)]
     pub rotation: Option<LogRotationSection>,

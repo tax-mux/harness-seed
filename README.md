@@ -187,13 +187,15 @@ Measured for each LLM call in every ReAct step.
 | `tok` | Token count from API `usage` or Ollama's `prompt_eval_count`/`eval_count` (`api`) |
 | `tok (est)` | Rough estimate if API data is unavailable (approx. 4 characters = 1 token) |
 
-At the end of a turn, the total is output to stderr (when `show_context_metrics: true`):
+At the end of a turn, a one-line summary is printed to stderr (when `show_context_metrics: true`):
 
 ```
-[context turn] llm_calls=3 prompt: 1200 chars / 310 tok (api) | completion: 180 chars / 45 tok (api) | total_tokens=355
+▸ turn  steps=3  tokens=355  phase=plan→execute→react  ok  | README.md を読んで…
+  · #1 plan  answer   310→45
+  · #2 execute  action:read_file   400→20
 ```
 
-With `-v`, `[context step]` for each step is also displayed. This is also accessible programmatically via `TurnResult.context`.
+With `-v`, the legacy `[context turn]` totals and `[context map]` section breakdowns are also printed. Totals remain available programmatically via `TurnResult.context`.
 
 ### Integration Tests (LLM)
 
@@ -212,11 +214,13 @@ If the LLM is not running or the model is not installed, the corresponding test 
 
 ```json
 "log": {
-  "context_metrics": "logs/context.jsonl"
+  "context_metrics": "logs/events.jsonl"
 }
 ```
 
-Default path is **`~/.config/harness-seed/logs/context.jsonl`** (or under `$XDG_CONFIG_HOME/harness-seed/logs/` when set). Relative `context_metrics` values are resolved against that same `harness-seed` config directory (next to `config.json`), not the crate root. Appends each turn as a single-line JSON; the directory is created on write if missing. For each LLM call, the full prompt text (in `system:` / `user:` format) sent to the API is saved in `steps[].prompt`. This is recorded automatically via a measurement hook, so `-v` is not required.
+Default path is **`~/.config/harness-seed/logs/events.jsonl`** (or under `$XDG_CONFIG_HOME/harness-seed/logs/` when set). Relative `context_metrics` values are resolved against that same `harness-seed` config directory (next to `config.json`), not the crate root. Each turn appends one schema **v1** JSON line (`kind: turn.summary`) with ISO8601 `ts`, `run_id` / `turn_id`, inferred `phase` / `tool`, and **previews** only. Full prompt/completion bodies (when longer than the preview) are stored under a sibling `blobs/` directory and referenced as `sha256:…`. Older `logs/context.jsonl` paths still work if set explicitly; the line shape is the new schema either way. Recorded via the measurement hook (`-v` not required).
+
+After each turn (unless `--no-monitor`), `monitor/context_monitor.html` is regenerated as an **events viewer**: turn list, token bars, step timeline, and collapsible prompt previews. It embeds recent lines from the events log and can also open a JSONL file from disk.
 
 To run the built binary directly:
 

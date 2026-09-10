@@ -96,7 +96,10 @@ cargo run --release -- --config-agent ./config.agent.json
 |------------------|------|
 | `rules/**/*.md` | 追加ルール（再帰） |
 | `skills/<id>/task.json` | 計画層タスク（スキル） |
-| `skills/<id>/SKILL.md` | スキル説明（ルールへ注入） |
+| `skills/<id>/SKILL.md` | スキル説明（YAML frontmatter + 本文）。`harness:` で計画層メタデータ |
+| `skills/<id>/task.json` | （非推奨・後方互換）計画層タスク JSON |
+| `tools/*.md` | 宣言的シェルツール（YAML frontmatter: `name`, `command`, …） |
+| `tools/*.json` | （非推奨・後方互換）同上 |
 | `tools/*.json` | 宣言的シェルツール |
 
 `workspace` は `HARNESS_WORKSPACE` に設定され、`list_dir` / `run_cmd` 等の基準になります。

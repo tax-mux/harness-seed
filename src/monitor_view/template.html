@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HarnessSeed · Context Monitor</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #0f1419;
+  --panel: #1a222c;
+  --panel2: #222c38;
+  --ink: #e7eef7;
+  --muted: #8b9bb0;
+  --line: #2d3a4a;
+  --accent: #3d9cf0;
+  --ok: #3ecf8e;
+  --warn: #e6b84d;
+  --mono: "IBM Plex Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  --sans: "IBM Plex Sans", "Hiragino Sans", "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f4f6f8;
+    --panel: #ffffff;
+    --panel2: #eef2f6;
+    --ink: #1a2330;
+    --muted: #5b6b7c;
+    --line: #d5dde7;
+    --accent: #1565c0;
+    --ok: #1b7f4e;
+    --warn: #9a6b00;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--ink);
+  line-height: 1.45;
+}
+.shell {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) 1fr;
+  min-height: 100vh;
+}
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; }
+}
+header.top {
+  grid-column: 1 / -1;
+  padding: 18px 22px 10px;
+  border-bottom: 1px solid var(--line);
+}
+header.top h1 {
+  margin: 0;
+  font-size: 1.15rem;
+  letter-spacing: 0.02em;
+  font-weight: 650;
+}
+header.top p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+.toolbar label, .toolbar button {
+  font-size: 0.82rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.toolbar .path {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+aside {
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  padding: 12px;
+  overflow: auto;
+  max-height: calc(100vh - 110px);
+}
+aside h2 {
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+#turn-list {
+  display: grid;
+  gap: 6px;
+}
+.turn-item {
+  text-align: left;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 10px;
+  cursor: pointer;
+  width: 100%;
+}
+.turn-item.active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.turn-item .meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+.turn-item .input {
+  margin-top: 4px;
+  font-size: 0.88rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bar {
+  margin-top: 8px;
+  height: 4px;
+  background: var(--line);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.bar > i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--ok));
+}
+main.detail {
+  padding: 16px 20px 40px;
+  overflow: auto;
+  max-height: calc(100vh - 110px);
+}
+.empty {
+  color: var(--muted);
+  padding: 24px;
+}
+.phase-flow {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  color: var(--accent);
+  margin: 0 0 12px;
+}
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.stat {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+}
+.stat .k { font-size: 0.72rem; color: var(--muted); }
+.stat .v { font-family: var(--mono); font-size: 1rem; margin-top: 2px; }
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.event {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 12px;
+  padding: 12px;
+}
+.event-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.tag {
+  font-size: 0.72rem;
+  font-family: var(--mono);
+  border-radius: 999px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+}
+.tag-plan { color: #7aa2ff; border-color: #7aa2ff66; }
+.tag-execute { color: var(--ok); border-color: #3ecf8e66; }
+.tag-react { color: #c39bff; border-color: #c39bff66; }
+.tag-falsify { color: var(--warn); border-color: #e6b84d66; }
+.tag-replan { color: #ff9a6b; border-color: #ff9a6b66; }
+.tag-audit { color: #6bd3d3; border-color: #6bd3d366; }
+.tok { margin-left: auto; font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
+details.prompt {
+  margin-top: 10px;
+  border-top: 1px dashed var(--line);
+  padding-top: 8px;
+}
+details.prompt summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+pre.preview {
+  margin: 8px 0 0;
+  padding: 10px;
+  background: var(--panel2);
+  border-radius: 8px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  max-height: 280px;
+}
+</style>
+</head>
+<body>
+<div class="shell" data-monitor-viewer="events-v1">
+  <header class="top">
+    <h1>Context Monitor</h1>
+    <p>events.jsonl のターン一覧とステップ・タイムライン。prompt 全文は既定で折りたたみ（preview）。</p>
+    <div class="toolbar">
+      <label for="file-input">JSONL を開く</label>
+      <input id="file-input" type="file" accept=".jsonl,.json,text/plain" hidden>
+      <button type="button" id="reload-embedded">埋め込みデータを再表示</button>
+      <span class="path" id="source-path">__EVENTS_PATH_DISPLAY__</span>
+    </div>
+  </header>
+  <aside>
+    <h2 id="turn-list-heading">ターン一覧</h2>
+    <div id="turn-list" data-turn-list></div>
+  </aside>
+  <main class="detail">
+    <div id="detail" class="empty">左側のターンを選ぶか、JSONL を読み込んでください。</div>
+  </main>
+</div>
+<script id="embedded-events" type="application/json">/*__EVENTS_JSON__*/null</script>
+<script>
+(function () {
+  const EMBEDDED_PATH = __EVENTS_PATH_JSON__;
+  const listEl = document.getElementById("turn-list");
+  const detailEl = document.getElementById("detail");
+  const pathEl = document.getElementById("source-path");
+  const fileInput = document.getElementById("file-input");
+  let turns = [];
+  let active = -1;
+
+  function parseJsonl(text) {
+    const out = [];
+    for (const line of text.split(/\n/)) {
+      const t = line.trim();
+      if (!t) continue;
+      try {
+        const v = JSON.parse(t);
+        if (v && (v.kind === "turn.summary" || v.user_input != null || Array.isArray(v.steps))) out.push(v);
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  function loadEmbedded() {
+    try {
+      turns = JSON.parse(document.getElementById("embedded-events").textContent || "[]");
+    } catch (_) {
+      turns = [];
+    }
+    pathEl.textContent = EMBEDDED_PATH;
+    renderList();
+    if (turns.length) selectTurn(turns.length - 1);
+    else detailEl.innerHTML = '<div class="empty">埋め込みイベントがありません。JSONL を開いてください。</div>';
+  }
+
+  function renderList() {
+    listEl.innerHTML = "";
+    if (!turns.length) {
+      listEl.innerHTML = '<div class="empty">（なし）</div>';
+      return;
+    }
+    const maxTok = Math.max(1, ...turns.map(t => (t.context && t.context.total_tokens) || 0));
+    turns.forEach((t, i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "turn-item" + (i === active ? " active" : "");
+      btn.setAttribute("data-turn-index", String(i));
+      const tok = (t.context && t.context.total_tokens) || 0;
+      const pct = Math.min(100, Math.round((tok / maxTok) * 100));
+      const input = (t.user_input || "").replace(/</g, "&lt;");
+      const ts = t.ts || "";
+      btn.innerHTML = '<div class="meta"><span>' + ts + '</span><span>' + tok + ' tok</span></div>' +
+        '<div class="input">' + input + '</div>' +
+        '<div class="bar"><i style="width:' + pct + '%"></i></div>';
+      btn.addEventListener("click", () => selectTurn(i));
+      listEl.appendChild(btn);
+    });
+  }
+
+  function phaseClass(p) {
+    return "tag tag-" + (p || "react");
+  }
+
+  function selectTurn(i) {
+    active = i;
+    renderList();
+    const t = turns[i];
+    if (!t) return;
+    const phases = Array.isArray(t.phases) ? t.phases.join("→") : "";
+    const ctx = t.context || {};
+    const steps = Array.isArray(t.steps) ? t.steps : [];
+    let html = "";
+    html += '<p class="phase-flow" data-timeline-root>phase ' + (phases || "-") + '</p>';
+    html += '<div class="summary-grid">';
+    html += '<div class="stat"><div class="k">steps</div><div class="v">' + (t.steps_used ?? steps.length) + '</div></div>';
+    html += '<div class="stat"><div class="k">tokens</div><div class="v">' + (ctx.total_tokens ?? 0) + '</div></div>';
+    html += '<div class="stat"><div class="k">llm calls</div><div class="v">' + (ctx.llm_calls ?? 0) + '</div></div>';
+    html += '<div class="stat"><div class="k">schema</div><div class="v">v' + (t.v ?? "?") + '</div></div>';
+    html += '</div>';
+    html += '<h2 style="font-size:0.9rem;margin:0 0 8px">タイムライン</h2>';
+    html += '<ol class="timeline" data-timeline>';
+    steps.forEach((s) => {
+      const phase = s.phase || "react";
+      const tool = s.tool ? (" · " + s.tool) : "";
+      const kind = s.step_kind || "";
+      html += '<li class="event">';
+      html += '<div class="event-head">';
+      html += '<span class="tag">#' + (s.step ?? "") + '</span>';
+      html += '<span class="' + phaseClass(phase) + '">' + phase + '</span>';
+      html += '<strong>' + kind + tool + '</strong>';
+      html += '<span class="tok">' + (s.prompt_tokens ?? 0) + '→' + (s.completion_tokens ?? 0) + '</span>';
+      html += '</div>';
+      html += '<details class="prompt"><summary>prompt / completion preview</summary>';
+      html += '<pre class="preview">' + esc(s.prompt_preview || "") + '</pre>';
+      html += '<pre class="preview">' + esc(s.completion_preview || "") + '</pre>';
+      if (s.prompt_ref || s.completion_ref) {
+        html += '<pre class="preview">refs: ' + esc([s.prompt_ref, s.completion_ref].filter(Boolean).join(" | ")) + '</pre>';
+      }
+      html += '</details></li>';
+    });
+    html += '</ol>';
+    if (!steps.length) {
+      html += '<div class="empty">このターンに steps がありません（旧形式の可能性）。</div>';
+    }
+    detailEl.innerHTML = html;
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+
+  fileInput.addEventListener("change", async (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    const text = await f.text();
+    turns = parseJsonl(text);
+    pathEl.textContent = f.name;
+    renderList();
+    if (turns.length) selectTurn(turns.length - 1);
+  });
+  document.getElementById("reload-embedded").addEventListener("click", loadEmbedded);
+  document.querySelector('label[for="file-input"]').addEventListener("click", () => fileInput.click());
+
+  loadEmbedded();
+})();
+</script>
+</body>
+</html>

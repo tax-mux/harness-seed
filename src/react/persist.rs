@@ -4,11 +4,13 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::brain::AgentBrain;
-use crate::context_log::ContextLogWriter;
+use crate::context_log::{
+    format_step_console_lines, format_turn_console_summary, ContextLogWriter,
+};
 use crate::context_map::{aggregate_prompt_sections, analyze_prompt_body, format_colormap_titled};
 use crate::lifecycle::TurnOutcome;
 use crate::memory::{DiaryEntry, DiaryPhase};
-use crate::plan::format_planner_fixed_zone_html;
+use crate::monitor_view::render_monitor_html_from_log;
 
 use super::{ReActLoop, TurnResult};
 
@@ -18,31 +20,37 @@ impl<E: AgentBrain> ReActLoop<E> {
             .push_turn(user_input.to_string(), result.answer.clone());
         self.record_diary(user_input, result);
         if self.config.show_context_metrics && !result.context.is_empty() {
-            eprintln!("[context turn] {}", result.context);
-            let turn_sections = aggregate_prompt_sections(
-                result
-                    .trace
-                    .context_usages
-                    .iter()
-                    .map(|u| u.prompt_body.as_str()),
-            );
-            if !turn_sections.is_empty() {
-                let title = format!("turn prompts ({} calls)", result.context.llm_calls);
-                eprintln!(
-                    "[context turn map]\n{}",
-                    format_colormap_titled(&turn_sections, true, &title)
-                );
+            eprintln!("{}", format_turn_console_summary(user_input, result));
+            for line in format_step_console_lines(result) {
+                eprintln!("{line}");
             }
-            if let Some(last) = result.trace.context_usages.last() {
-                let sections = analyze_prompt_body(&last.prompt_body);
-                eprintln!(
-                    "[context map]\n{}",
-                    format_colormap_titled(&sections, true, "last prompt sections")
+            if self.config.verbose {
+                eprintln!("[context turn] {}", result.context);
+                let turn_sections = aggregate_prompt_sections(
+                    result
+                        .trace
+                        .context_usages
+                        .iter()
+                        .map(|u| u.prompt_body.as_str()),
                 );
+                if !turn_sections.is_empty() {
+                    let title = format!("turn prompts ({} calls)", result.context.llm_calls);
+                    eprintln!(
+                        "[context turn map]\n{}",
+                        format_colormap_titled(&turn_sections, true, &title)
+                    );
+                }
+                if let Some(last) = result.trace.context_usages.last() {
+                    let sections = analyze_prompt_body(&last.prompt_body);
+                    eprintln!(
+                        "[context map]\n{}",
+                        format_colormap_titled(&sections, true, "last prompt sections")
+                    );
+                }
             }
         }
         self.write_context_log(user_input, result);
-        self.write_monitor_html(user_input, result);
+        self.write_monitor_html();
         let outcome = TurnOutcome::completed(&result.answer, result.steps_used);
         self.emit_turn_finished(user_input, result.plan.as_ref(), &outcome);
     }
@@ -100,12 +108,16 @@ impl<E: AgentBrain> ReActLoop<E> {
         };
         let writer = ContextLogWriter::new(path).with_rotation(self.config.log_rotation);
         match writer.append_turn(user_input, result) {
-            Ok(()) => eprintln!("context log: appended to {}", path.display()),
+            Ok(()) => {
+                if self.config.verbose {
+                    eprintln!("context log: appended to {}", path.display());
+                }
+            }
             Err(err) => eprintln!("context log: failed to write {}: {err}", path.display()),
         }
     }
 
-    pub(super) fn write_monitor_html(&self, user_input: &str, result: &TurnResult) {
+    pub(super) fn write_monitor_html(&self) {
         if !self.config.monitor_plan_html {
             return;
         }
@@ -119,32 +131,8 @@ impl<E: AgentBrain> ReActLoop<E> {
             return;
         }
 
-        let planner_output = result
-            .harness
-            .as_ref()
-            .map(|h| h.work_instructions.as_str());
-        let recent_turns = self.session.format_for_prompt();
-        let subtask_modes: Vec<(u32, bool)> = result
-            .subtask_results
-            .iter()
-            .map(|s| (s.id, s.used_step_driver))
-            .collect();
-        let html = format_planner_fixed_zone_html(
-            &self.blocks,
-            &self.task_registry,
-            result.harness.as_ref(),
-            planner_output,
-            Some(user_input),
-            Some(&result.context),
-            Some(&result.trace),
-            &self.blocks.recalled,
-            if recent_turns.trim().is_empty() {
-                None
-            } else {
-                Some(recent_turns.as_str())
-            },
-            &subtask_modes,
-        );
+        // ログ追記後の events を埋め込む（パスが無い場合は空のビューア）。
+        let html = render_monitor_html_from_log(self.config.context_log_path.as_deref());
         let path = monitor_dir.join("context_monitor.html");
         match fs::write(&path, html) {
             Ok(()) => {

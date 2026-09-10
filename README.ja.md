@@ -187,13 +187,15 @@ cargo run
 | `tok` | API の `usage` または Ollama の `prompt_eval_count` / `eval_count`（`api`） |
 | `tok (est)` | API が無い場合は約 4 文字 = 1 トークンで概算 |
 
-ターン終了時に stderr へ合計が出ます（`show_context_metrics: true` 時）:
+ターン終了時に stderr へ1行サマリが出ます（`show_context_metrics: true` 時）:
 
 ```
-[context turn] llm_calls=3 prompt: 1200 chars / 310 tok (api) | completion: 180 chars / 45 tok (api) | total_tokens=355
+▸ turn  steps=3  tokens=355  phase=plan→execute→react  ok  | README.md を読んで…
+  · #1 plan  answer   310→45
+  · #2 execute  action:read_file   400→20
 ```
 
-`-v` では各ステップの `[context step]` も表示されます。`TurnResult.context` にプログラムからも参照できます。
+`-v` では従来の `[context turn]` 合計と `[context map]` セクション内訳も出ます。合計は `TurnResult.context` でも参照できます。
 
 ### 統合テスト（LLM）
 
@@ -212,11 +214,13 @@ LLM が未起動、またはモデル未インストールの場合は該当テ�
 
 ```json
 "log": {
-  "context_metrics": "logs/context.jsonl"
+  "context_metrics": "logs/events.jsonl"
 }
 ```
 
-既定パスは **`~/.config/harness-seed/logs/context.jsonl`**（`XDG_CONFIG_HOME` があればその下の `harness-seed/logs/`）。相対の `context_metrics` はクレートルートではなく、同じ `harness-seed` 設定ディレクトリ（`config.json` の隣）基準で解決します。各ターンを 1 行の JSON として追記し、ディレクトリが無ければ書き込み時に作成します。LLM 呼び出しごとに `steps[].prompt` に API へ送った全文（`system:` / `user:` 形式）が入ります。計測フックで自動記録され、`-v` は不要です。
+既定パスは **`~/.config/harness-seed/logs/events.jsonl`**（`XDG_CONFIG_HOME` があればその下の `harness-seed/logs/`）。相対の `context_metrics` はクレートルートではなく、同じ `harness-seed` 設定ディレクトリ（`config.json` の隣）基準で解決します。各ターンはスキーマ **v1** の JSON 1 行（`kind: turn.summary`）として追記し、ISO8601 の `ts`、`run_id` / `turn_id`、推定した `phase` / `tool`、および **preview** のみを載せます。preview を超える prompt/completion 全文は隣の `blobs/` に置き、`sha256:…` 参照で紐づけます。設定で古い `logs/context.jsonl` を指定しても書き込み先として有効ですが、行形式は新スキーマです。計測フックで自動記録され、`-v` は不要です。
+
+ターン終了ごと（`--no-monitor` でない限り）に `monitor/context_monitor.html` を **events ビューア**として再生成します（ターン一覧・トークン棒・ステップ・タイムライン・折りたたみ preview）。events ログの直近行を埋め込み、ディスク上の JSONL を開くこともできます。
 
 ビルド済みバイナリを直接実行する場合:
 

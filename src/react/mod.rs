@@ -272,7 +272,7 @@ impl<E: AgentBrain> ReActLoop<E> {
         blocks.runtime = runtime.clone();
         let tools = ToolRuntime::with_packs(runtime.clone(), brave_search.clone(), tool_packs);
         blocks.tool_catalog = tools.catalog();
-        blocks.web_search_enabled = tools.has_tool("web_search");
+        blocks.web_search_enabled = tools.has_web_search();
         let memory_rag = build_memory_rag(&config.memory, None);
         Self {
             exec_brain,
@@ -355,7 +355,7 @@ impl<E: AgentBrain> ReActLoop<E> {
 
     pub fn refresh_tool_catalog(&mut self) {
         self.blocks.tool_catalog = self.tools.catalog();
-        self.blocks.web_search_enabled = self.tools.has_tool("web_search");
+        self.blocks.web_search_enabled = self.tools.has_web_search();
         self.refresh_plan_task_catalog();
     }
 

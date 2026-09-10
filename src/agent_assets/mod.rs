@@ -3,8 +3,11 @@
 //! CLI では `config.agent.json` または `--agent-dir` / `--config-agent` で指定する。
 
 mod config_agent;
+mod frontmatter;
 mod loader;
+mod md_tool;
 mod script_tool;
+mod skill_md;
 
 pub use config_agent::{
     apply_workspace_env, load_agent_project_file, resolve_cli_agent_config, AgentConfigError,

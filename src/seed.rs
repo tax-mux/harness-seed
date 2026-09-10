@@ -14,6 +14,7 @@ use crate::brave_search::BraveSearchConfig;
 use crate::config::AppConfig;
 use crate::context::{ContextError, PromptBlocks};
 use crate::lifecycle::TurnLifecycle;
+use crate::mcp::load_mcp_tools;
 use crate::memory::{MemoryBridge, MemoryRag, NoopBridge};
 use crate::plan::{PlanBrainMode, PlanDataContract};
 use crate::react::{ReActConfig, ReActLoop};
@@ -55,12 +56,13 @@ impl SeedBuilder {
         }
     }
 
-    /// `AppConfig` から rules / packs / brave / memory を取り込む。
+    /// `AppConfig` から rules / packs / brave / memory / MCP ツールを取り込む。
     pub fn from_app(app: &AppConfig) -> Result<Self, ContextError> {
+        let mcp_tools = load_mcp_tools(&app.tools.mcp);
         Ok(Self {
             blocks: app.load_prompt_blocks()?,
             task_registry: TaskRegistry::load_default(),
-            plugins: Vec::new(),
+            plugins: mcp_tools,
             lifecycle: None,
             brave_search: app.resolved_brave_search(),
             tool_packs: app.resolved_tool_packs(),

@@ -9,7 +9,10 @@ use crate::tasks::{TaskDefinition, TaskLoadError, TaskRegistry};
 use crate::tool::Tool;
 
 use super::config_agent::{AgentProjectConfig, ResolvedAgentPaths};
+use super::frontmatter::parse_frontmatter;
+use super::md_tool::tool_from_markdown;
 use super::script_tool::{ScriptTool, ScriptToolDefinition};
+use super::skill_md::task_from_skill_md;
 
 #[derive(Debug, Clone, Default)]
 pub struct AgentLoadReport {
@@ -19,6 +22,7 @@ pub struct AgentLoadReport {
     pub skill_tasks: usize,
     pub skill_docs: usize,
     pub script_tools: usize,
+    pub markdown_tools: usize,
 }
 
 #[derive(Debug)]
@@ -87,12 +91,13 @@ pub fn load_agent_assets(
     }
 
     let tools_dir = paths.agent_dir.join("tools");
-    let script_tools = if tools_dir.is_dir() {
-        load_script_tools(&tools_dir)?
+    let (script_tools, markdown_tools) = if tools_dir.is_dir() {
+        load_tools(&tools_dir)?
     } else {
-        Vec::new()
+        (Vec::new(), 0)
     };
     report.script_tools = script_tools.len();
+    report.markdown_tools = markdown_tools;
 
     if let Some(manifest_path) = blocks.context_manifest_path.clone() {
         if let Err(e) = crate::context_manifest::note_manifest_available(&manifest_path, blocks) {
@@ -136,6 +141,8 @@ fn load_skills(
 
     for dir in child_dirs {
         let task_path = dir.join("task.json");
+        let skill_md_path = dir.join("SKILL.md");
+
         if task_path.is_file() {
             let text = fs::read_to_string(&task_path).map_err(|source| TaskLoadError::Read {
                 path: task_path.clone(),
@@ -153,6 +160,23 @@ fn load_skills(
                     reason: e.to_string(),
                 })?;
             report.skill_tasks += 1;
+        } else if skill_md_path.is_file() {
+            let text = fs::read_to_string(&skill_md_path).map_err(|source| ContextError::Read {
+                path: skill_md_path.clone(),
+                source,
+            })?;
+            if let Some(doc) = parse_frontmatter(&text) {
+                if doc.meta.get("name").is_some() {
+                    let def = task_from_skill_md(&skill_md_path, &doc)?;
+                    task_registry
+                        .register(def)
+                        .map_err(|e| TaskLoadError::Invalid {
+                            path: skill_md_path.clone(),
+                            reason: e.to_string(),
+                        })?;
+                    report.skill_tasks += 1;
+                }
+            }
         }
 
         for doc_name in ["SKILL.md", "skill.prompt.md"] {
@@ -186,19 +210,38 @@ fn load_skills(
     Ok(())
 }
 
-fn load_script_tools(tools_dir: &Path) -> Result<Vec<Box<dyn Tool>>, AgentLoadError> {
+fn load_tools(tools_dir: &Path) -> Result<(Vec<Box<dyn Tool>>, usize), AgentLoadError> {
     let mut paths: Vec<PathBuf> = fs::read_dir(tools_dir)
         .map_err(|source| AgentLoadError::Tools {
             path: tools_dir.to_path_buf(),
             reason: source.to_string(),
         })?
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.is_file() && p.extension().is_some_and(|e| e == "json"))
+        .filter(|p| {
+            p.is_file()
+                && p.extension().is_some_and(|e| e == "json" || e == "md")
+                && p.file_name().is_some_and(|n| n != "README.md" && n != "TOOLS.md")
+        })
         .collect();
     paths.sort();
 
     let mut out: Vec<Box<dyn Tool>> = Vec::new();
+    let mut markdown_tools = 0usize;
     for path in paths {
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if ext == "md" {
+            let text = fs::read_to_string(&path).map_err(|source| AgentLoadError::Tools {
+                path: path.clone(),
+                reason: source.to_string(),
+            })?;
+            let tool = tool_from_markdown(&path, &text).map_err(|reason| AgentLoadError::Tools {
+                path: path.clone(),
+                reason,
+            })?;
+            out.push(Box::new(tool));
+            markdown_tools += 1;
+            continue;
+        }
         let text = fs::read_to_string(&path).map_err(|source| AgentLoadError::Tools {
             path: path.clone(),
             reason: source.to_string(),
@@ -217,7 +260,12 @@ fn load_script_tools(tools_dir: &Path) -> Result<Vec<Box<dyn Tool>>, AgentLoadEr
         })?;
         out.push(Box::new(tool));
     }
-    Ok(out)
+    Ok((out, markdown_tools))
+}
+
+#[allow(dead_code)]
+fn load_script_tools(tools_dir: &Path) -> Result<Vec<Box<dyn Tool>>, AgentLoadError> {
+    Ok(load_tools(tools_dir)?.0)
 }
 
 fn collect_md_files(dir: &Path) -> Result<Vec<PathBuf>, ContextError> {

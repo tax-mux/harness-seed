@@ -2,7 +2,7 @@
   "llm": {
     "provider": "ollama",
     "api_key": null,
-    "base_url": "http://127.0.0.1:11434",
+    "base_url": "http://127.0.0.1:11436",
       "model": "gemma-4-26b:latest",
     "timeout_secs": 120,
     "json_mode": false
@@ -22,6 +22,6 @@
     }
   },
   "log": {
-    "context_metrics": "logs/context.jsonl"
+    "context_metrics": "logs/events.jsonl"
   }
 }

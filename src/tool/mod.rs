@@ -132,6 +132,17 @@ impl ToolRuntime {
         self.registry.contains(name)
     }
 
+    /// 組み込み `web_search` または MCP `*web_search*` ツールが登録されているか。
+    pub fn has_web_search(&self) -> bool {
+        if self.registry.contains("web_search") {
+            return true;
+        }
+        self.registry
+            .names()
+            .iter()
+            .any(|name| name.contains("web_search"))
+    }
+
     /// ホストアプリから in-process ツールを追加する。
     pub fn register_plugin(&mut self, tool: Box<dyn Tool>) {
         self.registry.register(tool);

@@ -41,13 +41,15 @@ Rules:
 
 /// Brave Search が有効なときだけ system に追記する Web 検索 ReAct 指針。
 pub const REACT_WEB_SEARCH_GUIDANCE: &str = r#"
-Web search ReAct (Brave Search API is enabled):
-- Use web_search when the user asks about current events, external APIs, documentation not in the repo, or facts you cannot verify from workspace files alone.
-- Typical flow: thought → web_search with a short focused query (and optional count) → read observations → answer citing titles/URLs from results.
-- If the first result page is thin or off-target, try one alternate query (spelling, alias, site, language) before concluding that no match exists.
-- You may combine web_search with local tools: e.g. web_search then read_file to compare upstream docs with this codebase.
+Web search ReAct (Brave — builtin web_search and/or MCP mcp_*_web_search):
+- Search hits return title, url, and description. description is a Brave snippet/digest, NOT the live page. Never treat description alone as ground truth for weather, news, prices, schedules, or other time-sensitive facts.
+- Typical flow for live facts: web_search with fetch_content:true (MCP) OR web_search → pick the best url (check age, prefer official/1-hour pages over multi-day forecast listings) → run_cmd curl that url → read page text → answer with date/time context.
+- If you only have snippets, say you need to fetch the page — do not invent numbers or mix rows from a 10-day forecast table as "today".
+- Typical flow for docs/how-to: thought → web_search → read observations → answer citing titles/URLs; fetch_content when snippets are thin.
+- If the first result page is off-target, try one alternate query (spelling, alias, site:, language) before giving up.
+- You may combine web_search with local tools (read_file, grep) when comparing external docs with this repo.
 - Do not use web_search for pure local edits, grep-only exploration, or greetings unless the user explicitly wants web lookup.
-- If web_search fails (missing key / API error), say so in the answer and continue with local tools only if still useful.
+- If web_search fails (missing key / API error), say so and continue with local tools only if still useful.
 "#;
 
 /// セッションをまたいで保持するプロンプトブロック（rules / recalled など）。

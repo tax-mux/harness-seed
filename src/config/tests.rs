@@ -82,7 +82,7 @@ fn default_log_path_is_inside_user_config_dir() {
     let got = default_log_path();
     assert_eq!(
         got,
-        dir.join("harness-seed").join("logs").join("context.jsonl")
+        dir.join("harness-seed").join("logs").join("events.jsonl")
     );
     match prev_xdg {
         Some(v) => unsafe { std::env::set_var("XDG_CONFIG_HOME", v) },
@@ -97,11 +97,11 @@ fn resolved_context_log_relative_uses_user_config_dir() {
     let prev_xdg = std::env::var_os("XDG_CONFIG_HOME");
     unsafe { std::env::set_var("XDG_CONFIG_HOME", &dir) };
     let mut cfg = AppConfig::default();
-    cfg.log.context_metrics = Some("logs/context.jsonl".into());
+    cfg.log.context_metrics = Some("logs/events.jsonl".into());
     let got = cfg.resolved_context_log_path().expect("path");
     assert_eq!(
         got,
-        dir.join("harness-seed").join("logs").join("context.jsonl")
+        dir.join("harness-seed").join("logs").join("events.jsonl")
     );
     match prev_xdg {
         Some(v) => unsafe { std::env::set_var("XDG_CONFIG_HOME", v) },

@@ -56,13 +56,14 @@ pub fn merge_cli_agent(
 
 pub fn log_agent_setup(setup: &AgentCliSetup) {
     eprintln!(
-        "agent: {} (workspace: {}, rules: {} file(s), skill tasks: {}, skill docs: {}, script tools: {})",
+        "agent: {} (workspace: {}, rules: {} file(s), skill tasks: {}, skill docs: {}, tools: {} json + {} md)",
         setup.config_label.display(),
         setup.report.workspace.display(),
         setup.report.rules_files,
         setup.report.skill_tasks,
         setup.report.skill_docs,
-        setup.report.script_tools,
+        setup.report.script_tools.saturating_sub(setup.report.markdown_tools),
+        setup.report.markdown_tools,
     );
 }
 

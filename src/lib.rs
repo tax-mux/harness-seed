@@ -19,6 +19,8 @@ pub mod lifecycle;
 pub mod line_io;
 pub mod llm;
 pub mod memory;
+pub mod mcp;
+pub mod monitor_view;
 pub mod plan;
 pub mod protocol;
 pub mod react;
@@ -54,15 +56,17 @@ pub use brave_search::{BraveSearchConfig, BraveSearchError, WebSearchHit};
 pub use config::{
     default_config_path, resolve_user_config_rel, user_config_dir, user_config_path, AppConfig,
     BraveSearchSection, ConfigError, LlmSection, LogRotationConfig, LogRotationSection, LogSection,
-    MemoryRecentWorkSection, MemorySearchSection, MemorySection, MempalaceSection, PromptSection,
-    ReactSection, ToolsSection,
+    MemoryRecentWorkSection, MemorySearchSection, MemorySection, MempalaceSection, McpToolsSection,
+    PromptSection, ReactSection, ToolsSection,
 };
 pub use context::{
     format_plan_rule_prompt_preview, format_trace, ContextError, PromptBlocks, TurnPromptContext,
     REACT_SYSTEM_CORE, REACT_WEB_SEARCH_GUIDANCE,
 };
 pub use context_log::{
-    default_log_path, rotate_log_file, ContextLogEntry, ContextLogWriter, DEFAULT_CONTEXT_LOG_REL,
+    default_log_path, format_step_console_lines, format_turn_console_summary, infer_phase,
+    infer_step_meta, iso8601_timestamp_now, preview_text, rotate_log_file, ContextLogEntry,
+    ContextLogWriter, CONTEXT_LOG_SCHEMA_VERSION, DEFAULT_CONTEXT_LOG_REL, PREVIEW_CHARS,
 };
 pub use context_manifest::{
     apply_scoped_entry, format_apply_error_hint, note_manifest_available, ContextManifestError,
@@ -101,6 +105,10 @@ pub use memory::{
     DiaryPhase, LayeredMemoryBridge, LocalDiaryBridge, MemoryBridge, MemoryError, MemoryLayerPlan,
     MemoryRag, MemoryRoute, MemoryRouter, MemoryRuntimeConfig, NoopBridge, RecalledItem,
     RecalledSource, RuleRouter, PROVIDER_LOCAL, PROVIDER_MEMPALACE, PROVIDER_NOOP,
+};
+pub use mcp::load_mcp_tools;
+pub use monitor_view::{
+    format_events_monitor_html, load_recent_event_lines, render_monitor_html_from_log,
 };
 pub use plan::{
     artifact_from_plan_turn, build_plan_layer_messages, execution_waves, format_mission,
