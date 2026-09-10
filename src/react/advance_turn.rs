@@ -2,8 +2,9 @@
 
 use crate::action::TurnTrace;
 use crate::advance::{
-    count_ok_tool_observations, evidence_deepening_subtask, prepare_phase_recalled,
-    prior_evidence_is_thin, restore_base_recalled, AdvancePhaseSummary, AdvanceProgress,
+    build_phase_note, count_substantive_ok_observations, evidence_deepening_subtask,
+    prepare_phase_recalled, prior_evidence_is_thin, restore_base_recalled, AdvancePhaseSummary,
+    AdvanceProgress,
 };
 use crate::brain::AgentBrain;
 use crate::context_metrics::TurnContextSummary;
@@ -78,8 +79,9 @@ impl<E: AgentBrain> ReActLoop<E> {
         let mut total_steps = plan_steps;
         let mut final_answer = String::new();
         let mut phase_index = 0usize;
-        let mut ok_tool_obs = 0usize;
+        let mut substantive_ok_obs = 0usize;
         let mut evidence_boost_used = false;
+        let min_substantive = advance.min_substantive_obs;
 
         while let Some(subtask) = plan_queue.pop_next() {
             if self.is_stop_requested() {
@@ -120,7 +122,7 @@ impl<E: AgentBrain> ReActLoop<E> {
                 total_steps += replan_steps;
                 append_trace(&mut combined_trace, &replan_trace);
                 let note = if new_subs.is_empty()
-                    && prior_evidence_is_thin(ok_tool_obs)
+                    && prior_evidence_is_thin(substantive_ok_obs, min_substantive)
                     && !evidence_boost_used
                     && plan_queue.consumed_count() + plan_queue.pending_len() + 1
                         <= plan_queue.total_budget()
@@ -180,9 +182,9 @@ impl<E: AgentBrain> ReActLoop<E> {
                 continue;
             }
 
-            // 先行フェーズがあり証拠が薄いとき、結論フェーズの前に一度だけ証拠深化を差し込む。
+            // 先行フェーズがあり実質証拠が薄いとき、結論フェーズの前に一度だけ証拠深化を差し込む。
             if !advance_progress.steps.is_empty()
-                && prior_evidence_is_thin(ok_tool_obs)
+                && prior_evidence_is_thin(substantive_ok_obs, min_substantive)
                 && !evidence_boost_used
                 && plan_queue.consumed_count() + plan_queue.pending_len() + 1
                     <= plan_queue.total_budget()
@@ -191,7 +193,7 @@ impl<E: AgentBrain> ReActLoop<E> {
                 let boost = evidence_deepening_subtask(subtask.id.saturating_add(1000));
                 if advance.show_phases || self.config.show_task_execution {
                     eprintln!(
-                        "[advance] thin prior evidence ({ok_tool_obs} ok tool obs) — running evidence-deepening before phase {}",
+                        "[advance] thin prior evidence ({substantive_ok_obs} substantive ok obs, min {min_substantive}) — running evidence-deepening before phase {}",
                         subtask.id
                     );
                 }
@@ -224,7 +226,7 @@ impl<E: AgentBrain> ReActLoop<E> {
                     self.run_subtask_exec_audited(user_input, &plan, &boost, &plan_progress)?;
                 harness.advance_after_subtask(boost.id);
                 self.sync_harness_step_to_blocks(&harness);
-                ok_tool_obs += count_ok_tool_observations(&boost_exec.trace);
+                substantive_ok_obs += count_substantive_ok_observations(&boost_exec.trace);
                 if self.config.show_task_execution {
                     let mode = if boost_driver { "step-driver" } else { "ReAct" };
                     println!(
@@ -238,18 +240,25 @@ impl<E: AgentBrain> ReActLoop<E> {
                     &boost,
                     &SubtaskOutcome::completed(&boost_exec.answer, boost_exec.steps_used),
                 );
-                advance_progress.push(boost.id, boost.goal.clone(), boost_exec.answer.clone());
-                plan_progress.push(boost.id, boost_exec.answer.clone());
+                let boost_note = build_phase_note(
+                    boost.id,
+                    boost.goal.clone(),
+                    boost_exec.answer.clone(),
+                    Some(&boost_exec.trace),
+                );
+                let boost_carry = boost_note.format_structured(advance.max_note_chars);
+                advance_progress.push_note(boost_note);
+                plan_progress.push(boost.id, boost_carry.clone());
                 subtask_results.push(SubtaskExecResult {
                     id: boost.id,
-                    answer: boost_exec.answer.clone(),
+                    answer: boost_carry.clone(),
                     steps_used: boost_exec.steps_used,
                     used_step_driver: boost_driver,
                 });
                 advance_phases.push(AdvancePhaseSummary {
                     id: boost.id,
                     goal: boost.goal.clone(),
-                    answer: boost_exec.answer.clone(),
+                    answer: boost_carry,
                     steps_used: boost_exec.steps_used,
                 });
                 total_steps += boost_exec.steps_used;
@@ -293,7 +302,7 @@ impl<E: AgentBrain> ReActLoop<E> {
                 self.run_subtask_exec_audited(user_input, &plan, &subtask, &plan_progress)?;
             harness.advance_after_subtask(subtask.id);
             self.sync_harness_step_to_blocks(&harness);
-            ok_tool_obs += count_ok_tool_observations(&exec.trace);
+            substantive_ok_obs += count_substantive_ok_observations(&exec.trace);
 
             if self.config.show_task_execution {
                 let mode = if used_driver { "step-driver" } else { "ReAct" };
@@ -309,18 +318,25 @@ impl<E: AgentBrain> ReActLoop<E> {
                 &subtask,
                 &SubtaskOutcome::completed(&exec.answer, exec.steps_used),
             );
-            advance_progress.push(subtask.id, subtask.goal.clone(), exec.answer.clone());
-            plan_progress.push(subtask.id, exec.answer.clone());
+            let phase_note = build_phase_note(
+                subtask.id,
+                subtask.goal.clone(),
+                exec.answer.clone(),
+                Some(&exec.trace),
+            );
+            let phase_carry = phase_note.format_structured(advance.max_note_chars);
+            advance_progress.push_note(phase_note);
+            plan_progress.push(subtask.id, phase_carry.clone());
             subtask_results.push(SubtaskExecResult {
                 id: subtask.id,
-                answer: exec.answer.clone(),
+                answer: phase_carry.clone(),
                 steps_used: exec.steps_used,
                 used_step_driver: used_driver,
             });
             advance_phases.push(AdvancePhaseSummary {
                 id: subtask.id,
                 goal: subtask.goal.clone(),
-                answer: exec.answer.clone(),
+                answer: phase_carry,
                 steps_used: exec.steps_used,
             });
             total_steps += exec.steps_used;

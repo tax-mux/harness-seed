@@ -237,7 +237,7 @@ impl<E: AgentBrain> ReActLoop<E> {
         let mission = if advance_style {
             format!(
                 "User request:\n{user_input}\n\nPlan summary: {}\n\n\
-Evidence from completed phases (do not invent beyond this):\n{evidence}\n\n\
+Evidence from completed phases (structured Paths / Claims / Open questions when available; do not invent beyond this):\n{evidence}\n\n\
 {grounding}\n\
 Produce the final user-facing reply in clear language based only on the evidence. \
 Prefer claims that cite paths or prior-phase findings. \
@@ -256,7 +256,14 @@ Prefer {{\"step\":\"answer\",\"content\":\"...\"}} with no tools if evidence is 
         };
 
         let synth = self.run_turn_single(&mission, false, None, vec![])?;
-        *final_answer = synth.answer;
+        *final_answer = if advance_style && self.config.advance.citation_check {
+            let evidence_paths = crate::advance::evidence_paths_from_texts(
+                results.iter().map(|r| r.answer.as_str()),
+            );
+            crate::advance::apply_citation_gate(&synth.answer, &evidence_paths)
+        } else {
+            synth.answer
+        };
         *total_steps += synth.steps_used;
         append_trace(combined_trace, &synth.trace);
         Ok(())

@@ -67,7 +67,11 @@ When the plan emits `task: replan`, treat it as control-plane work, not an exec 
 
 Later phases receive an **evidence grounding** rule in Recalled (and in the mission when prior results exist): claims must cite prior-phase evidence; unsupported points are unverified candidates or need more tools. After two or more phases finish, the harness runs a final **answer synthesis** pass that rewrites the user reply from phase evidence only.
 
-When successful tool observations are still thin before the next phase, the harness inserts one **evidence-deepening** subtask (also after an empty `replan`). Weak `done_when` values such as `step completed` are raised to an evidence-oriented criterion at plan resolve.
+When **substantive** successful tool observations (`read_file` / `grep` / `web_search` / `run_cmd` / `write_file`; bare `list_dir` does not count) are still below `min_substantive_obs` (default 3) before the next phase, the harness inserts one **evidence-deepening** subtask (also after an empty `replan`). Weak `done_when` values such as `step completed` are raised to an evidence-oriented criterion at plan resolve.
+
+Phase handoff uses a **structured note** (Paths / Claims / Open questions, plus a short answer excerpt when needed) instead of only truncating the full answer. Later Recalled context and final synthesis prefer that structure.
+
+After multi-phase answer synthesis, when `citation_check` is on (default), path-like tokens in the final reply are checked against prior Paths; unsupported ones are annotated under `## Citation check` as unverified.
 
 ## Library
 

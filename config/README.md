@@ -209,6 +209,9 @@ ReAct の `web_search` ツールが有効になるのは API キーが解決で�
 | `advance.max_phases` | 1 リクエストの最大フェーズ数 | `8` |
 | `advance.clear_session_each_phase` | 各フェーズ前に REPL 短期記憶をクリア | `true` |
 | `advance.max_note_chars` | 完了フェーズ要約の `recalled` 上限文字数 | `1500` |
+| `advance.show_phases` | 各フェーズ開始を stdout に表示 | `true` |
+| `advance.min_substantive_obs` | 判定前に必要な実質証拠（read/grep 等）成功 observation 数。浅い `list_dir` は数えない | `3` |
+| `advance.citation_check` | 最終合成後にパス引用を先行 Paths と照合し、無いものを未検証注記 | `true` |
 | `show_context_metrics` | ターン終了時に `[context turn]` を stderr に出す | `true` |
 | `arg_audit_mode` | タスク契約の引数監査: `off` / `soft`（既定・警告のみ）/ `hard`（不一致で失敗） | `soft` |
 
