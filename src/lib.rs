@@ -75,7 +75,8 @@ pub use harness::{
 };
 pub use llm::{
     normalize_anthropic_base_url, normalize_gemini_base_url, normalize_lmstudio_base_url,
-    normalize_ollama_base_url, parse_agent_step, AnthropicConnector, ChatMessage, ConnectorError,
+    coerce_tool_named_step_json, normalize_ollama_base_url, parse_agent_step, AnthropicConnector,
+    ChatMessage, ConnectorError,
     CompletionResult, GeminiConnector, LlmBrain, LlmConfig, LlmConnector, LlmConnectorKind,
     LlmProvider, LmStudioConnector, MockLlmConnector, OpenAiConnector, ParseError,
 };

@@ -801,6 +801,15 @@ impl<E: AgentBrain> ReActLoop<E> {
             phase_index += 1;
         }
 
+        self.maybe_synthesize_user_answer(
+            user_input,
+            &plan,
+            &subtask_results,
+            &mut final_answer,
+            &mut combined_trace,
+            &mut total_steps,
+        )?;
+
         restore_base_recalled(&mut self.blocks, &base_recalled);
         self.clear_harness_prompt_blocks();
 
@@ -942,6 +951,15 @@ impl<E: AgentBrain> ReActLoop<E> {
             )?;
         }
 
+        self.maybe_synthesize_user_answer(
+            user_input,
+            &plan,
+            &subtask_results,
+            &mut final_answer,
+            &mut combined_trace,
+            &mut total_steps,
+        )?;
+
         self.clear_harness_prompt_blocks();
 
         let result = TurnResult {
@@ -956,6 +974,64 @@ impl<E: AgentBrain> ReActLoop<E> {
         };
         self.finish_turn(user_input, &result);
         Ok(result)
+    }
+
+    /// 最後のサブタスクがステップドライバだけのとき、観測を踏まえたユーザー向け回答を合成する。
+    fn needs_user_answer_synthesis(results: &[SubtaskExecResult]) -> bool {
+        results
+            .last()
+            .is_some_and(|r| r.used_step_driver)
+    }
+
+    fn maybe_synthesize_user_answer(
+        &mut self,
+        user_input: &str,
+        plan: &PlanArtifact,
+        results: &[SubtaskExecResult],
+        final_answer: &mut String,
+        combined_trace: &mut TurnTrace,
+        total_steps: &mut usize,
+    ) -> Result<(), ReActError> {
+        if !Self::needs_user_answer_synthesis(results) {
+            return Ok(());
+        }
+        if self.is_stop_requested() {
+            return Err(ReActError::Cancelled);
+        }
+        if self.config.verbose || self.config.show_task_execution {
+            eprintln!("[exec] synthesizing user-facing answer from step-driver evidence");
+        }
+
+        let mut evidence = String::new();
+        for r in results {
+            evidence.push_str(&format!("### subtask {}\n{}\n\n", r.id, r.answer));
+        }
+        for obs in &combined_trace.observations {
+            if !obs.ok {
+                continue;
+            }
+            let snippet = if obs.output.chars().count() > 600 {
+                let s: String = obs.output.chars().take(600).collect();
+                format!("{s}…")
+            } else {
+                obs.output.clone()
+            };
+            evidence.push_str(&format!("- observation: {snippet}\n"));
+        }
+
+        let mission = format!(
+            "User request:\n{user_input}\n\nPlan summary: {}\n\n\
+Evidence from completed work (do not invent beyond this):\n{evidence}\n\n\
+Reply to the user in clear language based only on the evidence. \
+Prefer {{\"step\":\"answer\",\"content\":\"...\"}} with no tools if evidence is sufficient.",
+            plan.summary
+        );
+
+        let synth = self.run_turn_single(&mission, false, None, vec![])?;
+        *final_answer = synth.answer;
+        *total_steps += synth.steps_used;
+        append_trace(combined_trace, &synth.trace);
+        Ok(())
     }
 
     /// 1 依存波を実行する。`parallel_subtasks` 時はステップドライバ契約タスクを並列化。
