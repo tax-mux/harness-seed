@@ -22,8 +22,8 @@ pub use connector::{
 };
 pub use factory::LlmConnectorKind;
 pub use anthropic::{normalize_anthropic_base_url, AnthropicConnector};
-pub use gemini::{normalize_gemini_base_url, GeminiConnector};
+pub use gemini::{normalize_gemini_base_url, resolve_gemini_base_url, GeminiConnector};
 pub use lmstudio::LmStudioConnector;
 pub use mock::MockLlmConnector;
 pub use openai::OpenAiConnector;
-pub use parse::{parse_agent_step, ParseError};
+pub use parse::{extract_json_objects, parse_agent_step, salvage_answer_step_content, ParseError};

@@ -21,6 +21,7 @@ pub mod session;
 pub mod tasks;
 pub mod tool;
 pub mod tool_display;
+pub mod turn_observer;
 
 pub use action::{Action, AgentStep, Observation, TurnTrace};
 pub use advance::{
@@ -68,6 +69,11 @@ pub use protocol::{
 pub use react::{
     run_repl, ReActConfig, ReActError, ReActLoop, SubtaskExecResult, TurnResult,
 };
+pub use turn_observer::{
+    emit_llm_step, emit_observation_step, emit_phase_started, emit_plan_artifact, AgentStepDto,
+    TurnObserver,
+    TurnStepEvent,
+};
 pub use scout::{
     apply_scout_recalled, artifact_from_scout_answer, format_scout_recalled,
     format_scout_user_input, is_trivial_scout_skip, ResearchArtifact, ScoutConfig,
@@ -77,7 +83,8 @@ pub use runtime::{OsFamily, RuntimeEnvironment, ShellKind};
 pub use session::{PastTurn, SessionMemory};
 pub use tasks::{
     apply_template, apply_template_value, audit_trace, ExecStep, MissionRenderContext,
-    StepAudit, TaskDefinition, TaskError, TaskExecutionAudit, TaskLoadError, TaskRegistry,
+    StepAudit, SubtaskToolPolicy, TaskDefinition, TaskError, TaskExecutionAudit, TaskLoadError,
+    TaskRegistry, ToolPolicySpec,
 };
 pub use tool::{
     apply_packs, default_packs, execute_action, format_tool_catalog, full_builtin_registry,

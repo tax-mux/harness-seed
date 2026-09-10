@@ -47,11 +47,9 @@ impl std::error::Error for StepDriverError {}
 impl TaskRegistry {
     /// サブタスクが `steps[]` 契約を持ち、ステップドライバで実行可能か。
     pub fn use_step_driver(&self, subtask: &Subtask) -> bool {
-        subtask
-            .task
-            .as_ref()
-            .and_then(|id| self.get(id))
-            .is_some_and(|d| d.has_execution_contract())
+        subtask.task.as_ref().and_then(|id| self.get(id)).is_some_and(|d| {
+            d.has_execution_contract() && !d.react_only
+        })
     }
 
     /// 契約どおり `steps[]` を順に `execute_action` する（LLM なし）。

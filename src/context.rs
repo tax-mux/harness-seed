@@ -18,6 +18,7 @@ Schema:
 - {"step":"answer","content":"<final reply to user>"}
 
 Rules:
+- Prefer `action` or `answer` directly; use `thought` only when you truly need brief reasoning before the next step.
 - Use only tools listed in the Tool catalog below (exact names and args).
 - If the user needs a tool, return action (not answer yet).
 - After observations appear in the trace, use them and return answer when done.

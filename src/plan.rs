@@ -240,32 +240,39 @@ pub fn format_mission(
 
 fn format_mission_freeform(
     original: &str,
-    plan: &PlanArtifact,
+    _plan: &PlanArtifact,
     subtask: &Subtask,
     progress: &PlanProgress,
 ) -> String {
-    let mut subtask_list = String::new();
-    for st in &plan.subtasks {
-        subtask_list.push_str(&format!(
-            "- id {}: {} (done when: {})\n",
-            st.id, st.goal, st.done_when
-        ));
-    }
-    format!(
-        "Original request:\n{original}\n\n\
-         Plan summary: {}\n\n\
-         All subtasks:\n{subtask_list}\n\
-         Prior subtask results:\n{}\n\
-         Current subtask: {}\n\
-         Goal: {}\n\
-         Done when: {}\n\n\
-         Complete ONLY this subtask. Do not replan. Reply with ReAct JSON when done.",
-        plan.summary,
-        progress.format_for_mission(),
+    let task = subtask
+        .task
+        .as_deref()
+        .unwrap_or("(freeform)");
+    let reference = if subtask.task.is_none() {
+        original.trim()
+    } else {
+        ""
+    };
+    let mut mission = format!(
+        "## Subtask\nid: {}\ntask: {}\nparams: {}\ngoal: {}\ndone_when: {}\n\n\
+         ## Task contract\n(freeform)\n\n\
+         ## Prior subtask results\n{}",
         subtask.id,
+        task,
+        subtask.params,
         subtask.goal,
-        subtask.done_when
-    )
+        subtask.done_when,
+        progress.format_for_mission(),
+    );
+    if !reference.is_empty() {
+        mission.push_str("\n\n## User request (reference)\n");
+        mission.push_str(reference);
+        mission.push('\n');
+    }
+    mission.push_str(
+        "\nComplete ONLY this subtask. Do not replan or work ahead to other subtasks.",
+    );
+    mission
 }
 
 #[cfg(test)]
@@ -299,7 +306,9 @@ mod tests {
         let st = plan.subtasks[0].clone();
         let reg = TaskRegistry::builtin();
         let m = format_mission(&reg, "list files", &plan, &st, &PlanProgress::default());
-        assert!(m.contains("Current subtask: 1"));
-        assert!(m.contains("Original request:"));
+        assert!(m.contains("## Subtask"));
+        assert!(m.contains("id: 1"));
+        assert!(!m.contains("All subtasks"));
+        assert!(!m.contains("Plan summary"));
     }
 }

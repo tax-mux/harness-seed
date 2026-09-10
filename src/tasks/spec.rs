@@ -3,6 +3,8 @@ use std::fmt;
 use serde::Deserialize;
 use serde_json::Value;
 
+use super::policy::ToolPolicySpec;
+
 /// タスク内の 1 実行ステップ（必須メソッド + 順序）。
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct ExecStep {
@@ -35,6 +37,18 @@ pub struct TaskDefinition {
     /// 全ステップ完了後の完了条件（テキスト）。
     #[serde(default)]
     pub done_when: String,
+    /// true のとき契約は mission 表示・監査に使うが、ステップドライバは使わない（LLM が引数を埋める）。
+    #[serde(default)]
+    pub react_only: bool,
+    /// サブタスク実行時のツール遮蔽・禁止監査。
+    #[serde(default)]
+    pub tool_policy: ToolPolicySpec,
+    /// 実行 mission 末尾に追記するサブタスク固有の指示。
+    #[serde(default)]
+    pub mission_append: String,
+    /// true のときのみ、ユーザ依頼全文を mission に載せる（参照メールなど）。
+    #[serde(default)]
+    pub include_user_reference: bool,
 }
 
 impl TaskDefinition {

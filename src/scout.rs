@@ -7,6 +7,7 @@ use crate::brain::AgentBrain;
 use crate::context::PromptBlocks;
 use crate::layer::{run_layer_loop, LayerLoopOptions};
 use crate::react::ReActError;
+use crate::turn_observer::TurnObserver;
 use crate::session::SessionMemory;
 use crate::tool::ToolRuntime;
 
@@ -202,7 +203,8 @@ pub fn run_scout_phase<E: AgentBrain>(
     verbose: bool,
     show_prompt: bool,
     show_tool_output: bool,
-) -> Result<(ResearchArtifact, usize), ReActError> {
+    turn_observer: Option<&TurnObserver>,
+) -> Result<(ResearchArtifact, crate::action::TurnTrace, usize), ReActError> {
     let saved_extra = blocks.system_extra.clone();
     if !saved_extra.contains("Scout phase") {
         blocks.system_extra = format!("{saved_extra}{SCOUT_SYSTEM_APPEND}");
@@ -221,12 +223,13 @@ pub fn run_scout_phase<E: AgentBrain>(
         show_tool_output,
         None,
         vec![],
+        turn_observer,
     )?;
 
     blocks.system_extra = saved_extra;
 
     let artifact = artifact_from_scout_answer(&turn.answer, &turn.trace);
-    Ok((artifact, turn.steps_used))
+    Ok((artifact, turn.trace, turn.steps_used))
 }
 
 #[cfg(test)]

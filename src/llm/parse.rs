@@ -46,12 +46,8 @@ pub fn parse_agent_step(raw: &str, invoke_id: u64) -> Result<AgentStep, ParseErr
     let mut answer = None;
     let mut last_err = None;
 
-    for line in trimmed.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        match parse_one_json(line, invoke_id) {
+    for chunk in extract_json_objects(trimmed) {
+        match parse_one_json(&chunk, invoke_id) {
             Ok(AgentStep::Answer(a)) => answer = Some(a),
             Ok(AgentStep::Action(a)) => action = Some(a),
             Ok(AgentStep::Thought(t)) => {
@@ -59,7 +55,36 @@ pub fn parse_agent_step(raw: &str, invoke_id: u64) -> Result<AgentStep, ParseErr
                     thought = Some(t);
                 }
             }
-            Err(e) => last_err = Some(e),
+            Err(e) => {
+                if answer.is_none() {
+                    if let Some(a) = salvage_answer_step_content(&chunk) {
+                        answer = Some(a);
+                    } else {
+                        last_err = Some(e);
+                    }
+                } else {
+                    last_err = Some(e);
+                }
+            }
+        }
+    }
+
+    if answer.is_none() && action.is_none() && thought.is_none() {
+        for line in trimmed.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            match parse_one_json(line, invoke_id) {
+                Ok(AgentStep::Answer(a)) => answer = Some(a),
+                Ok(AgentStep::Action(a)) => action = Some(a),
+                Ok(AgentStep::Thought(t)) => {
+                    if thought.is_none() {
+                        thought = Some(t);
+                    }
+                }
+                Err(e) => last_err = Some(e),
+            }
         }
     }
 
@@ -95,6 +120,95 @@ fn strip_code_fence(s: &str) -> &str {
     s.trim()
 }
 
+fn normalize_escaped_json_body(body: &str) -> String {
+    if body.contains("\\\"") {
+        body.replace("\\\"", "\"")
+    } else {
+        body.to_string()
+    }
+}
+
+/// `answer` ステップの `content` が改行入りで JSON パースに失敗したときの救済。
+pub fn salvage_answer_step_content(chunk: &str) -> Option<String> {
+    if !chunk.contains("\"step\":\"answer\"") && !chunk.contains("\"step\": \"answer\"") {
+        return None;
+    }
+    let markers = ["\"content\":\"", "\"content\": \""];
+    let start = markers
+        .iter()
+        .find_map(|m| chunk.find(m).map(|i| i + m.len()))?;
+    let rest = chunk[start..].trim_start();
+    if rest.starts_with('"') {
+        let end = rest[1..].find('"')? + 1;
+        return Some(normalize_escaped_json_body(rest[1..end].trim()));
+    }
+    if !rest.starts_with('{') {
+        return None;
+    }
+    let end = rest.rfind("\"}")?;
+    let body = rest[..end].trim();
+    if body.is_empty() {
+        return None;
+    }
+    Some(normalize_escaped_json_body(body))
+}
+
+/// テキスト中のトップレベル JSON オブジェクトを出現順に抽出する（複数行・複数オブジェクト対応）。
+pub fn extract_json_objects(text: &str) -> Vec<String> {
+    let mut objects = Vec::new();
+    let bytes = text.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] != b'{' {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        let mut depth = 0i32;
+        let mut in_string = false;
+        let mut escape = false;
+        while i < bytes.len() {
+            let c = bytes[i];
+            if in_string {
+                if escape {
+                    escape = false;
+                } else if c == b'\\' {
+                    escape = true;
+                } else if c == b'"' {
+                    in_string = false;
+                }
+                i += 1;
+                continue;
+            }
+            match c {
+                b'"' => {
+                    in_string = true;
+                    i += 1;
+                }
+                b'{' => {
+                    depth += 1;
+                    i += 1;
+                }
+                b'}' => {
+                    depth -= 1;
+                    i += 1;
+                    if depth == 0 {
+                        if let Ok(s) = std::str::from_utf8(&bytes[start..i]) {
+                            objects.push(s.to_string());
+                        }
+                        break;
+                    }
+                }
+                _ => i += 1,
+            }
+        }
+        if depth != 0 {
+            break;
+        }
+    }
+    objects
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,5 +239,17 @@ mod tests {
         let raw = "```json\n{\"step\":\"answer\",\"content\":\"ok\"}\n```";
         let step = parse_agent_step(raw, 1).unwrap();
         assert!(matches!(step, AgentStep::Answer(a) if a == "ok"));
+    }
+
+    #[test]
+    fn picks_answer_from_multiline_objects_with_embedded_newlines() {
+        let raw = r#"{"step":"thought","content":"planning"}
+{"step":"answer","content":"{
+  \"summary\": \"do work\",
+  \"skip_execution\": false,
+  \"subtasks\": [{\"id\": 1, \"goal\": \"g\", \"done_when\": \"d\"}]
+}"}"#;
+        let step = parse_agent_step(raw, 1).unwrap();
+        assert!(matches!(step, AgentStep::Answer(a) if a.contains("summary")));
     }
 }

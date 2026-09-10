@@ -37,6 +37,8 @@ pub enum TokenSource {
 pub struct ContextUsage {
     /// API に送ったプロンプト全文（`role: content` 形式）。
     pub prompt_body: String,
+    /// LLM の生出力全文。
+    pub completion_body: String,
     pub prompt: TextSize,
     pub completion: TextSize,
     pub prompt_tokens: Option<u32>,
@@ -72,6 +74,7 @@ impl ContextUsage {
         };
         Self {
             prompt_body: prompt_body.to_string(),
+            completion_body: completion_text.to_string(),
             prompt: TextSize::measure(prompt_body),
             completion: TextSize::measure(completion_text),
             prompt_tokens,
@@ -110,6 +113,15 @@ pub struct TurnContextSummary {
 }
 
 impl TurnContextSummary {
+    /// 複数フェーズ（計画・スカウト・実行など）のトレースを 1 ターン分として合算する。
+    pub fn from_traces(traces: &[&crate::action::TurnTrace]) -> Self {
+        let mut usages = Vec::new();
+        for trace in traces {
+            usages.extend(trace.context_usages.iter().cloned());
+        }
+        Self::from_usages(&usages)
+    }
+
     pub fn from_usages(usages: &[ContextUsage]) -> Self {
         if usages.is_empty() {
             return Self::default();
@@ -214,5 +226,19 @@ mod tests {
         assert_eq!(sum.llm_calls, 2);
         assert_eq!(sum.prompt.chars, 6);
         assert_eq!(sum.prompt_tokens, 10 + 1);
+    }
+
+    #[test]
+    fn turn_summary_from_traces_merges_phases() {
+        use crate::action::TurnTrace;
+
+        let mut plan = TurnTrace::default();
+        plan.push_context_usage(ContextUsage::from_parts("plan", "p", Some(100), Some(10)));
+        let mut exec = TurnTrace::default();
+        exec.push_context_usage(ContextUsage::from_parts("exec", "e", Some(200), Some(20)));
+        let sum = TurnContextSummary::from_traces(&[&plan, &exec]);
+        assert_eq!(sum.llm_calls, 2);
+        assert_eq!(sum.prompt_tokens, 300);
+        assert_eq!(sum.completion_tokens, 30);
     }
 }

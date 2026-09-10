@@ -45,6 +45,8 @@ pub struct ContextLogStep {
     pub step: usize,
     /// API に送ったプロンプト全文。
     pub prompt: String,
+    /// LLM の生出力全文。
+    pub completion: String,
     pub prompt_chars: usize,
     pub prompt_bytes: usize,
     pub prompt_tokens: u32,
@@ -90,6 +92,7 @@ fn step_from_usage(step: usize, u: &ContextUsage) -> ContextLogStep {
     ContextLogStep {
         step,
         prompt: u.prompt_body.clone(),
+        completion: u.completion_body.clone(),
         prompt_chars: u.prompt.chars,
         prompt_bytes: u.prompt.bytes,
         prompt_tokens: u.prompt_tokens_effective(),

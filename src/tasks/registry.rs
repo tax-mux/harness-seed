@@ -10,6 +10,7 @@ use crate::plan::{PlanArtifact, PlanProgress, Subtask};
 use crate::tool::workspace_root;
 
 use super::audit::{audit_trace, TaskExecutionAudit};
+use super::policy::SubtaskToolPolicy;
 use super::spec::{TaskDefinition, TaskError};
 
 /// 組み込みタスク JSON（`tasks/` ディレクトリと同期すること）。
@@ -159,47 +160,82 @@ impl TaskRegistry {
             .join(" → ")
     }
 
-    /// サブタスクを実行ループ用 mission 文へ（必須実行順序を明示）。
+    /// サブタスクを実行ループ用 mission 文へ（**現在サブタスクのみ**を渡す）。
     pub fn render_mission(
         &self,
         original: &str,
-        plan: &PlanArtifact,
+        _plan: &PlanArtifact,
         subtask: &Subtask,
         progress: &PlanProgress,
     ) -> Result<String, TaskError> {
-        let subtask_list = format_subtask_list(plan);
-
-        let body = if let Some(task_id) = &subtask.task {
+        let (body, include_user_reference, mission_append) = if let Some(task_id) = &subtask.task {
             let def = self
                 .get(task_id)
                 .ok_or_else(|| TaskError::UnknownTask { id: task_id.clone() })?;
             let mut merged = merge_params(&def.default_params, &subtask.params);
             ensure_goal_done_when(&mut merged, subtask);
             let mut block = def.format_required_execution(&merged);
-            if !subtask.goal.is_empty() {
-                block.push_str(&format!("\nContext goal: {}\n", subtask.goal));
+            let policy = def.resolved_tool_policy();
+            if !policy.allow.is_empty() || !policy.deny.is_empty() {
+                block.push_str(&policy.format_for_mission());
             }
-            block
+            if !def.mission_append.trim().is_empty() {
+                block.push_str("\n");
+                block.push_str(def.mission_append.trim());
+                block.push('\n');
+            }
+            (
+                block,
+                def.include_user_reference,
+                String::new(),
+            )
         } else {
-            format!(
-                "Goal: {}\nDone when: {}\n",
-                subtask.goal,
-                subtask.done_when
+            (
+                format!(
+                    "Goal: {}\nDone when: {}\n",
+                    subtask.goal, subtask.done_when
+                ),
+                true,
+                String::new(),
             )
         };
 
-        Ok(format!(
-            "Original request:\n{original}\n\n\
-             Plan summary: {}\n\n\
-             All subtasks:\n{subtask_list}\n\
-             Prior subtask results:\n{}\n\
-             Current subtask: {}\n\n\
-             {body}\n\
-             Execute required methods in order, then answer. Do not replan.",
-            plan.summary,
+        let mut mission = format!(
+            "## Subtask\n{}\n\n\
+             ## Task contract\n{body}\n\n\
+             ## Prior subtask results\n{}",
+            format_subtask_node(subtask),
             progress.format_for_mission(),
-            subtask.id,
-        ))
+        );
+
+        if include_user_reference {
+            let reference = strip_leading_system_block(original);
+            if !reference.trim().is_empty() {
+                mission.push_str("\n\n## User request (reference)\n");
+                mission.push_str(reference.trim());
+                mission.push('\n');
+            }
+        }
+
+        if !mission_append.is_empty() {
+            mission.push_str("\n\n");
+            mission.push_str(mission_append.trim());
+            mission.push('\n');
+        }
+
+        mission.push_str(
+            "\nComplete ONLY this subtask. Execute required methods in order, then answer. \
+             Do not replan or work ahead to other subtasks.",
+        );
+
+        Ok(mission)
+    }
+
+    /// サブタスク用の解決済みツールポリシー（`task` id があるときのみ）。
+    pub fn tool_policy_for_subtask(&self, subtask: &Subtask) -> Option<SubtaskToolPolicy> {
+        let task_id = subtask.task.as_ref()?;
+        let def = self.get(task_id)?;
+        Some(def.resolved_tool_policy())
     }
 
     /// 実行 trace がタスクの必須順序を満たすか照合する。
@@ -214,17 +250,37 @@ impl TaskRegistry {
         Some(audit_trace(def, &params, trace))
     }
 
-    pub fn resolve_plan(&self, plan: &mut PlanArtifact) {
+    pub fn resolve_plan(&self, plan: &mut PlanArtifact, user_input: &str) {
         for st in &mut plan.subtasks {
-            if let Some(task_id) = &st.task {
-                if let Some(def) = self.get(task_id) {
-                    if st.goal.is_empty() {
-                        st.goal = def.summary.clone();
-                    }
-                    if st.done_when.is_empty() && !def.done_when.is_empty() {
-                        st.done_when = def.done_when.clone();
-                    }
-                    st.params = merge_params(&def.default_params, &st.params);
+            let Some(task_id) = st.task.clone() else {
+                continue;
+            };
+            let Some(def) = self.get(&task_id) else {
+                // LLM が実行層ツール名を task id と誤認した場合 → 自由記述サブタスクへ
+                let hint = format!(
+                    "Execute with ReAct tools (not a registered task id): {task_id}"
+                );
+                st.goal = if st.goal.is_empty() {
+                    hint
+                } else {
+                    format!("{hint}. {}", st.goal)
+                };
+                st.task = None;
+                st.params = Value::Object(Default::default());
+                continue;
+            };
+            if st.goal.is_empty() {
+                st.goal = def.summary.clone();
+            }
+            if st.done_when.is_empty() && !def.done_when.is_empty() {
+                st.done_when = def.done_when.clone();
+            }
+            st.params = merge_params(&def.default_params, &st.params);
+        }
+        if let Some(uid) = extract_reference_uid(user_input) {
+            for st in &mut plan.subtasks {
+                if st.task.as_deref() == Some("compose_context") {
+                    st.params = serde_json::json!({ "uid": uid });
                 }
             }
         }
@@ -313,20 +369,41 @@ fn ensure_goal_done_when(params: &mut Value, subtask: &Subtask) {
     }
 }
 
-fn format_subtask_list(plan: &PlanArtifact) -> String {
-    let mut out = String::new();
-    for st in &plan.subtasks {
-        let tag = st
-            .task
-            .as_deref()
-            .map(|t| format!("task:{t}"))
-            .unwrap_or_else(|| "freeform".into());
-        out.push_str(&format!(
-            "- id {} [{}]: {} (done when: {})\n",
-            st.id, tag, st.goal, st.done_when
-        ));
+/// `【参照メール】` / `UID: 123` 形式から参照 UID を抜く（triage-mail チャット添付向け）。
+fn extract_reference_uid(text: &str) -> Option<i64> {
+    for line in text.lines() {
+        let line = line.trim();
+        let rest = line
+            .strip_prefix("UID:")
+            .or_else(|| line.strip_prefix("UID："))?;
+        let uid: i64 = rest.trim().parse().ok()?;
+        if uid > 0 {
+            return Some(uid);
+        }
     }
-    out
+    None
+}
+
+fn format_subtask_node(subtask: &Subtask) -> String {
+    let task = subtask
+        .task
+        .as_deref()
+        .unwrap_or("(freeform — no registered task id)");
+    format!(
+        "id: {}\ntask: {}\nparams: {}\ngoal: {}\ndone_when: {}",
+        subtask.id, task, subtask.params, subtask.goal, subtask.done_when
+    )
+}
+
+/// 計画層向けヒントなど、先頭の `[システム…]` ブロックを除いたユーザ依頼本文。
+fn strip_leading_system_block(text: &str) -> &str {
+    let trimmed = text.trim_start();
+    if trimmed.starts_with('[') {
+        if let Some(rest) = trimmed.split_once("\n\n") {
+            return rest.1.trim_start();
+        }
+    }
+    trimmed
 }
 
 #[cfg(test)]
@@ -354,6 +431,40 @@ mod tests {
             .map(|s| s.method.as_str())
             .collect();
         assert_eq!(methods, vec!["write_file", "read_file"]);
+    }
+
+    #[test]
+    fn render_mission_is_scoped_to_current_subtask_only() {
+        let reg = TaskRegistry::builtin();
+        let plan = PlanArtifact {
+            summary: "end goal".into(),
+            skip_execution: false,
+            subtasks: vec![
+                Subtask {
+                    id: 1,
+                    task: Some("list_dir".into()),
+                    params: serde_json::json!({ "path": "src" }),
+                    goal: "list".into(),
+                    done_when: "listed".into(),
+                },
+                Subtask {
+                    id: 2,
+                    task: Some("write_file_verify".into()),
+                    params: serde_json::json!({}),
+                    goal: "write".into(),
+                    done_when: "verified".into(),
+                },
+            ],
+        };
+        let st = plan.subtasks[0].clone();
+        let m = reg
+            .render_mission("user asks for much", &plan, &st, &PlanProgress::default())
+            .unwrap();
+        assert!(m.contains("id: 1"));
+        assert!(!m.contains("id: 2"));
+        assert!(!m.contains("end goal"));
+        assert!(!m.contains("All subtasks"));
+        assert!(!m.contains("write_file_verify"));
     }
 
     #[test]
@@ -398,5 +509,26 @@ mod tests {
         let reg = TaskRegistry::builtin();
         let cat = reg.catalog_for_planner();
         assert!(cat.contains("write_file → read_file"));
+    }
+
+    #[test]
+    fn resolve_plan_strips_unknown_task_id_as_freeform() {
+        let reg = TaskRegistry::builtin();
+        let mut plan = PlanArtifact {
+            summary: "compose".into(),
+            skip_execution: false,
+            subtasks: vec![Subtask {
+                id: 1,
+                task: Some("get_compose_form".into()),
+                params: serde_json::json!({}),
+                goal: "read form".into(),
+                done_when: "done".into(),
+            }],
+        };
+        reg.resolve_plan(&mut plan, "UID: 42\n");
+        let st = &plan.subtasks[0];
+        assert!(st.task.is_none());
+        assert!(st.goal.contains("get_compose_form"));
+        assert!(st.goal.contains("read form"));
     }
 }
