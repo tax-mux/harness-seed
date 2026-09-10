@@ -8,11 +8,12 @@ use crate::tasks::TaskRegistry;
 use super::parse_step::parse_plan_agent_step;
 use super::PlanArtifact;
 
-/// 計画層用 ReAct system（`thought` / `answer` のみ。ツールは不可）。
+/// 計画層用 ReAct system（`thought` / `recall` / `answer`。ツールは不可）。
 pub const PLAN_REACT_SYSTEM_CORE: &str = r#"You are a planning agent in a ReAct-style loop. Reply with ONE JSON object only (no markdown).
 
 Schema:
 - {"step":"thought","content":"<reasoning>"}
+- {"step":"recall","query":"<read-only memory search query>"}
 - {"step":"answer","content":"<作業指示書 — structured plan JSON or numbered text steps>"}
 
 The harness parses your answer into internal JSON (HarnessState). Prefer ONE of:
@@ -34,9 +35,15 @@ Rules:
 - Instruction contract: "Take data ONLY from INPUT. Write result ONLY to OUTPUT. Think ONLY about the in-between procedure."
 - Your job is the PROCEDURE in between: emit ordered `steps` that transform INPUT into OUTPUT.
 - Prefer emitting `answer` with the work instructions (JSON plan or numbered steps) when clear; use `thought` only for brief decomposition if needed.
+- If Recalled context is insufficient and you need prior project knowledge, emit `recall` with a short query (read-only; limited rounds). Then plan with the new hits.
 - Do NOT emit action / tools in the plan layer.
 - Use only task ids from the task catalog that match the data contract.
-- Use skip_execution: true only when the contract says so (trivial chat).
+- Greetings, chit-chat, and Q&A that need no tools: one answer step with STRING plan JSON:
+  {"step":"answer","content":"{\"summary\":\"short label\",\"skip_execution\":true,\"subtasks\":[],\"output\":\"<final reply to the user>\"}"}
+  Put the user-facing reply in `output` (required when skip_execution is true). Do NOT invent subtasks from bullet lists.
+- Recalled context: if relevant to the question, ground the plan/output on it (do not overwrite with conflicting generalities). If Recalled is irrelevant, general knowledge is fine — do not claim it came from memory. For project-specific gaps, use `recall` or leave for tools.
+- content MUST be a JSON string (escaped quotes), never a nested object.
+- When a later step depends on results not yet known, emit a step with task `replan` and a goal describing what to decide after prior steps finish.
 - When ready, use step answer with the full work instructions (JSON or text) in content.
 "#;
 

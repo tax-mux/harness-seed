@@ -57,6 +57,8 @@ pub enum AgentStep {
     Action(Action),
     /// ユーザーへの最終応答。
     Answer(String),
+    /// 計画層専用: 読み取り専用メモリ検索（`MemoryBridge::search`）。実行層では無視される。
+    Recall(String),
 }
 
 /// 1ターンの途中経過（Thought / Observation の蓄積）。

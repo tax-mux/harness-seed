@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -10,6 +11,7 @@ use crate::context_log::default_log_path;
 use crate::llm::{LlmConfig, LlmProvider};
 use crate::brave_search::BraveSearchConfig;
 use crate::advance::AdvanceConfig;
+use crate::memory::{build_memory_bridge, MemoryBridge, MemoryRuntimeConfig};
 use crate::react::ReActConfig;
 use crate::session::SessionMemory;
 use crate::tool::{default_packs, packs_from_names, ToolPack};
@@ -29,6 +31,75 @@ pub struct AppConfig {
     pub prompt: PromptSection,
     #[serde(default)]
     pub tools: ToolsSection,
+    #[serde(default)]
+    pub memory: MemorySection,
+}
+
+/// `memory` セクション（外部記憶ブリッジ）。
+///
+/// **local は外部で置き換えない。** プロセス内 diary（`local`）の上に
+/// `backends` のアダプタを重ねる。固有設定は `providers.<名前>`。
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct MemorySection {
+    /// プロセス内 diary を使うか（`local` / `backends` 指定時の既定は `true`）。
+    pub local: Option<bool>,
+    /// 追加バックエンド名（例: `["mempalace"]`）。local の**後**に重ねる。
+    #[serde(default)]
+    pub backends: Vec<String>,
+    /// プロバイダ名 → 固有設定 JSON。本体は中身を解釈しない。
+    #[serde(default)]
+    pub providers: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub recent_work: MemoryRecentWorkSection,
+    #[serde(default)]
+    pub search: MemorySearchSection,
+    /// 記憶 RAG（アダプタ手前の分岐・検索語）。
+    #[serde(default)]
+    pub rag: MemoryRagSection,
+    /// 計画層 `recall` ステップの上限（既定 2、0 で無効）。
+    pub recall_max_rounds: Option<usize>,
+    /// 旧形式（後方互換）。`mempalace` 指定時も **local は残す**。
+    pub provider: Option<String>,
+    /// 後方互換: `providers.mempalace` が無いときだけ参照。
+    #[serde(default)]
+    pub mempalace: Option<MempalaceSection>,
+}
+
+/// 旧形式 `memory.mempalace`（`providers.mempalace` 推奨）。
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct MempalaceSection {
+    pub base_url: Option<String>,
+    pub agent_name: Option<String>,
+    pub wing: Option<String>,
+    pub room: Option<String>,
+    pub timeout_secs: Option<u64>,
+    /// `"mcp_stdio"`（既定）| `"tools_path"` | `"mcp_jsonrpc"`。
+    pub protocol: Option<String>,
+    pub api_key: Option<String>,
+    pub command: Option<String>,
+    pub args: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct MemoryRecentWorkSection {
+    pub enabled: Option<bool>,
+    pub max_entries: Option<usize>,
+    pub max_chars: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct MemorySearchSection {
+    pub enabled: Option<bool>,
+    pub top_k: Option<usize>,
+    pub max_chars: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct MemoryRagSection {
+    /// `"rule"` | `"llm"`（LLM 不可時は rule にフォールバック）。
+    pub router: Option<String>,
+    /// 知識検索クエリの上限。
+    pub max_queries: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -337,7 +408,75 @@ impl AppConfig {
                 show_phases: self.react.advance.show_phases.unwrap_or(true),
             },
             monitor_plan_html: false,
+            memory: self.memory_runtime_config(),
         }
+    }
+
+    /// `memory` セクションから実行時注入設定を組み立てる。
+    pub fn memory_runtime_config(&self) -> MemoryRuntimeConfig {
+        let defaults = MemoryRuntimeConfig::default();
+        MemoryRuntimeConfig {
+            recent_work_enabled: self
+                .memory
+                .recent_work
+                .enabled
+                .unwrap_or(defaults.recent_work_enabled),
+            recent_work_max_entries: self
+                .memory
+                .recent_work
+                .max_entries
+                .unwrap_or(defaults.recent_work_max_entries)
+                .max(1),
+            recent_work_max_chars: self
+                .memory
+                .recent_work
+                .max_chars
+                .unwrap_or(defaults.recent_work_max_chars)
+                .clamp(80, 16_000),
+            search_enabled: self
+                .memory
+                .search
+                .enabled
+                .unwrap_or(defaults.search_enabled),
+            search_top_k: self
+                .memory
+                .search
+                .top_k
+                .unwrap_or(defaults.search_top_k)
+                .max(1),
+            search_max_chars: self
+                .memory
+                .search
+                .max_chars
+                .unwrap_or(defaults.search_max_chars)
+                .clamp(80, 32_000),
+            recall_max_rounds: self
+                .memory
+                .recall_max_rounds
+                .unwrap_or(defaults.recall_max_rounds),
+            rag_router: self
+                .memory
+                .rag
+                .router
+                .clone()
+                .unwrap_or(defaults.rag_router),
+            rag_max_queries: self
+                .memory
+                .rag
+                .max_queries
+                .unwrap_or(defaults.rag_max_queries)
+                .max(1),
+        }
+    }
+
+    /// `memory` レイヤ構成に応じたブリッジ（工場は [`crate::memory::build_memory_bridge`]）。
+    pub fn memory_bridge(&self) -> Box<dyn MemoryBridge> {
+        build_memory_bridge(&self.memory)
+    }
+
+    /// 解決済みレイヤ表示名（例: `local` / `local+mempalace` / `noop`）。
+    pub fn memory_provider_name(&self) -> String {
+        crate::memory::resolve_memory_layers(&self.memory).label()
     }
 
     pub fn llm_provider(&self) -> LlmProvider {

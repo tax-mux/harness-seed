@@ -1,6 +1,17 @@
-# mempalace 連携（未実装）
+# mempalace 連携
 
-HarnessSeed と **mempalace**（外部記憶・検索・KG）を接続する案。現状は `PromptBlocks::recalled` の**差し込み口だけ**あり、MCP / API 呼び出しは未接続。
+HarnessSeed と **mempalace**（外部記憶・検索・KG）を接続する。
+
+**実装状況（2026-07）**: Phase 1–2 相当。アダプタは疎結合（Cargo feature `mempalace`）。
+
+| 部品 | 場所 |
+|------|------|
+| HTTP クライアント | [`adapters/mempalace-adapter`](../../adapters/mempalace-adapter/)（optional dep） |
+| `MemoryBridge` 工場 | `src/memory/factory.rs`（`config.memory.provider` で切替） |
+| 薄いラッパ | `src/memory/mempalace.rs`（feature 時のみ） |
+| 設定 | `"memory": { "provider": "mempalace", "providers": { "mempalace": { ... } } }` |
+
+未実装: session 溢れ退避、専用ツール `memory_search`、KG 参照。
 
 > **代替候補**: 企業文書コーパスの想起は [corpus2skill-integration.md](corpus2skill-integration.md)（Corpus2Skill）の方が適合する可能性が高い。本 doc は diary / 動的 search / KG 寄りの経路として残す。
 

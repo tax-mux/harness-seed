@@ -31,6 +31,9 @@ Rules:
 - For coding tasks in this repo: grep or list_dir → read_file → write_file → run_cmd (e.g. cargo check) as needed.
 - For simple greetings, you may answer directly without tools.
 - All filesystem paths must stay inside the project workspace.
+- Recalled context: if it contains material relevant to the user question, use it as evidence (do not overwrite with conflicting generalities).
+- If Recalled has nothing relevant, you may use general knowledge, but do not claim it came from memory.
+- For project-specific facts missing from Recalled and tools, say so or gather them with tools — do not invent them.
 "#;
 
 /// Brave Search が有効なときだけ system に追記する Web 検索 ReAct 指針。
@@ -361,18 +364,36 @@ mod tests {
     #[test]
     fn render_includes_previous_turns_and_user_input() {
         let mut session = SessionMemory::new(4);
-        session.push_turn("first", "one");
+        session.push_turn("first question", "one answer");
+        session.set_prompt_policy(crate::session::SessionPromptPolicy::IncludePrior);
         let blocks = PromptBlocks::default();
         let trace = TurnTrace::default();
-        let ctx = TurnPromptContext::new(&blocks, "second", &trace, &session);
+        let ctx = TurnPromptContext::new(&blocks, "first question follow-up", &trace, &session);
         let messages = ctx.render();
         let user = messages
             .iter()
             .find(|m| m.role == "user")
             .expect("user");
         assert!(user.content.as_text().contains("Previous turns:"));
-        assert!(user.content.as_text().contains("User: first"));
-        assert!(user.content.as_text().contains("User input:\nsecond"));
+        assert!(user.content.as_text().contains("User: first question"));
+        assert!(user.content.as_text().contains("User input:\nfirst question follow-up"));
+    }
+
+    #[test]
+    fn render_omits_previous_turns_without_work_log_policy() {
+        let mut session = SessionMemory::new(4);
+        session.push_turn("このプロジェクトについて", "HarnessSeed の説明");
+        session.set_prompt_policy(crate::session::SessionPromptPolicy::OmitPrior);
+        let blocks = PromptBlocks::default();
+        let trace = TurnTrace::default();
+        let ctx = TurnPromptContext::new(&blocks, "ファルモってなんじゃ", &trace, &session);
+        let user = ctx
+            .render()
+            .into_iter()
+            .find(|m| m.role == "user")
+            .expect("user");
+        assert!(!user.content.as_text().contains("Previous turns:"));
+        assert!(!user.content.as_text().contains("HarnessSeed"));
     }
 
     #[test]
