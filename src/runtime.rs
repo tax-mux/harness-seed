@@ -5,6 +5,10 @@ use std::fmt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+/// Windows GUI アプリからサブプロセスを spawn する際にコンソールウィンドウを抑制するフラグ。
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 /// OS ファミリ（プロンプト・コマンド方針用）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OsFamily {
@@ -172,6 +176,11 @@ impl RuntimeEnvironment {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
         cmd.output()
             .map_err(|e| format!("run_cmd spawn failed ({}): {e}", self.shell_program))
     }
@@ -184,12 +193,17 @@ impl fmt::Display for RuntimeEnvironment {
 }
 
 fn program_runs(program: &str, args: &[&str]) -> bool {
-    Command::new(program)
-        .args(args)
+    let mut cmd = Command::new(program);
+    cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd.status()
         .map(|s| s.success())
         .unwrap_or(false)
 }
