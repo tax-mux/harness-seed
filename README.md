@@ -216,7 +216,7 @@ If the LLM is not running or the model is not installed, the corresponding test 
 }
 ```
 
-Appends each turn as a single-line JSON (`logs/` is already in `.gitignore`). For each LLM call, the full prompt text (in `system:` / `user:` format) sent to the API is saved in `steps[].prompt`. This is recorded automatically via a measurement hook, so `-v` is not required.
+Default path is **`~/.config/harness-seed/logs/context.jsonl`** (or under `$XDG_CONFIG_HOME/harness-seed/logs/` when set). Relative `context_metrics` values are resolved against that same `harness-seed` config directory (next to `config.json`), not the crate root. Appends each turn as a single-line JSON; the directory is created on write if missing. For each LLM call, the full prompt text (in `system:` / `user:` format) sent to the API is saved in `steps[].prompt`. This is recorded automatically via a measurement hook, so `-v` is not required.
 
 To run the built binary directly:
 

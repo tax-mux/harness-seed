@@ -9,12 +9,12 @@ use crate::config::LogRotationConfig;
 use crate::context_metrics::{ContextUsage, TokenSource, TurnContextSummary};
 use crate::react::TurnResult;
 
-/// コンテキスト計測ログの既定パス（クレートルート相対）。
+/// コンテキスト計測ログの既定相対パス（[`crate::config::user_config_dir`] 基準）。
 pub const DEFAULT_CONTEXT_LOG_REL: &str = "logs/context.jsonl";
 
-/// 既定の JSON Lines ログパス（`CARGO_MANIFEST_DIR` 基準）。
+/// 既定の JSON Lines ログパス（`…/harness-seed/logs/context.jsonl`）。
 pub fn default_log_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(DEFAULT_CONTEXT_LOG_REL)
+    crate::config::user_config_dir().join(DEFAULT_CONTEXT_LOG_REL)
 }
 
 /// 1 ターン分のコンテキスト計測ログ（JSON Lines）。

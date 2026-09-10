@@ -51,9 +51,10 @@ pub use agent_assets::{
 pub use brain::{AgentBrain, BrainMode, BrainPair, SimpleRuleBrain};
 pub use brave_search::{BraveSearchConfig, BraveSearchError, WebSearchHit};
 pub use config::{
-    default_config_path, user_config_path, AppConfig, BraveSearchSection, ConfigError, LlmSection, LogRotationConfig,
-    LogRotationSection, LogSection, MemoryRecentWorkSection, MemorySearchSection, MemorySection,
-    MempalaceSection, PromptSection, ReactSection, ToolsSection,
+    default_config_path, resolve_user_config_rel, user_config_dir, user_config_path, AppConfig,
+    BraveSearchSection, ConfigError, LlmSection, LogRotationConfig, LogRotationSection, LogSection,
+    MemoryRecentWorkSection, MemorySearchSection, MemorySection, MempalaceSection, PromptSection,
+    ReactSection, ToolsSection,
 };
 pub use context::{
     format_plan_rule_prompt_preview, format_trace, ContextError, PromptBlocks, TurnPromptContext,

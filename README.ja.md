@@ -216,7 +216,7 @@ LLM が未起動、またはモデル未インストールの場合は該当テ�
 }
 ```
 
-各ターンを 1 行の JSON として追記します（`logs/` は `.gitignore` 済み）。LLM 呼び出しごとに `steps[].prompt` に API へ送った全文（`system:` / `user:` 形式）が入ります。計測フックで自動記録され、`-v` は不要です。
+既定パスは **`~/.config/harness-seed/logs/context.jsonl`**（`XDG_CONFIG_HOME` があればその下の `harness-seed/logs/`）。相対の `context_metrics` はクレートルートではなく、同じ `harness-seed` 設定ディレクトリ（`config.json` の隣）基準で解決します。各ターンを 1 行の JSON として追記し、ディレクトリが無ければ書き込み時に作成します。LLM 呼び出しごとに `steps[].prompt` に API へ送った全文（`system:` / `user:` 形式）が入ります。計測フックで自動記録され、`-v` は不要です。
 
 ビルド済みバイナリを直接実行する場合:
 

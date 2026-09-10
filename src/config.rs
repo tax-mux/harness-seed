@@ -69,10 +69,12 @@ impl AppConfig {
     }
 
     /// コンテキスト計測ログパス（未設定時は [`DEFAULT_CONTEXT_LOG_REL`]、空文字で無効）。
+    ///
+    /// 相対パスは [`user_config_dir`]（`…/harness-seed/`）基準。クレートルートではない。
     pub fn resolved_context_log_path(&self) -> Option<PathBuf> {
         match self.log.context_metrics.as_deref() {
             Some("") => None,
-            Some(path) => Some(resolve_workspace_path(path)),
+            Some(path) => Some(resolve_user_config_rel(path)),
             None => Some(default_log_path()),
         }
     }
@@ -580,9 +582,23 @@ pub fn default_config_path() -> PathBuf {
     )
 }
 
+/// `$XDG_CONFIG_HOME/harness-seed`（未設定時は `~/.config/harness-seed`）。
+pub fn user_config_dir() -> PathBuf {
+    config_home().join(USER_CONFIG_DIR)
+}
+
 /// `$XDG_CONFIG_HOME/harness-seed/config.json`（未設定時は `~/.config/harness-seed/config.json`）。
 pub fn user_config_path() -> PathBuf {
-    config_home().join(USER_CONFIG_DIR).join(USER_CONFIG_FILE)
+    user_config_dir().join(USER_CONFIG_FILE)
+}
+
+/// 相対パスを [`user_config_dir`] 基準に解決する（絶対パスはそのまま）。
+pub fn resolve_user_config_rel(path: &str) -> PathBuf {
+    let p = PathBuf::from(path);
+    if p.is_absolute() {
+        return p;
+    }
+    user_config_dir().join(p)
 }
 
 /// テスト可能なパス解決（ファイル存在でユーザ設定と cwd を切り替える）。

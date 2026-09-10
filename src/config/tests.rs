@@ -75,6 +75,55 @@ fn user_config_path_uses_xdg_config_home() {
 }
 
 #[test]
+fn default_log_path_is_inside_user_config_dir() {
+    let dir = temp_unique_dir("log-xdg");
+    let prev_xdg = std::env::var_os("XDG_CONFIG_HOME");
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", &dir) };
+    let got = default_log_path();
+    assert_eq!(
+        got,
+        dir.join("harness-seed").join("logs").join("context.jsonl")
+    );
+    match prev_xdg {
+        Some(v) => unsafe { std::env::set_var("XDG_CONFIG_HOME", v) },
+        None => unsafe { std::env::remove_var("XDG_CONFIG_HOME") },
+    }
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn resolved_context_log_relative_uses_user_config_dir() {
+    let dir = temp_unique_dir("log-rel");
+    let prev_xdg = std::env::var_os("XDG_CONFIG_HOME");
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", &dir) };
+    let mut cfg = AppConfig::default();
+    cfg.log.context_metrics = Some("logs/context.jsonl".into());
+    let got = cfg.resolved_context_log_path().expect("path");
+    assert_eq!(
+        got,
+        dir.join("harness-seed").join("logs").join("context.jsonl")
+    );
+    match prev_xdg {
+        Some(v) => unsafe { std::env::set_var("XDG_CONFIG_HOME", v) },
+        None => unsafe { std::env::remove_var("XDG_CONFIG_HOME") },
+    }
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn resolved_context_log_empty_disables_and_absolute_kept() {
+    let mut cfg = AppConfig::default();
+    cfg.log.context_metrics = Some(String::new());
+    assert!(cfg.resolved_context_log_path().is_none());
+
+    cfg.log.context_metrics = Some("/tmp/harness-seed-abs.jsonl".into());
+    assert_eq!(
+        cfg.resolved_context_log_path().unwrap(),
+        PathBuf::from("/tmp/harness-seed-abs.jsonl")
+    );
+}
+
+#[test]
 fn loads_ollama_sample() {
     let cfg = AppConfig::load_path("config/samples/config.ollama.json").unwrap();
     assert_eq!(cfg.llm.provider.as_deref(), Some("ollama"));
