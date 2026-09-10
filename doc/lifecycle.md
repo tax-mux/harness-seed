@@ -215,6 +215,8 @@ impl TurnLifecycle for PmSync {
 - 波と波の間は常に直列
 - 同一波内は互いに依存しない → `react.parallel_subtasks: true` のとき **ステップドライバ契約タスク**をスレッド並列実行
 - 同一波の ReAct（LLM）サブタスクはメインスレッドで直列（脳・プロンプトが共有 `&mut` のため）
+- 並列ドライバ内のパニックはスレッド側で `catch_unwind` し、ドライバ失敗と同じくメインで ReAct フォールバック（他 subtask やターン全体は巻き込まない）
+- `TurnLifecycle` hook はスレッド生成の前後でメインスレッドから逐次呼び出し（ホスト実装はスレッドセーフ不要）
 - `HostScratch` の子ノードは subtask id キーなので、並列ドライバ完了後の `on_subtask_finished` でも枝が衝突しない
 
 ```json
