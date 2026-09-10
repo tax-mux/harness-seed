@@ -1,20 +1,36 @@
-# Memory Layer (Memory RAG + MemoryBridge)
+# Memory Layer
 
-Implementation source of truth for how the embedded agent joins host / external memory.
+## What this is
 
-- Development principles: [development-principles.md](../development-principles.md) (prefer general solutions)
+How the agent **recalls past work or knowledge** and **persists a record** after a turn. Not “paste the whole chat history”: only what seems relevant goes into the prompt; a summary is saved when done.
+
+External stores (local diary, mempalace, and so on) are reached only through a **bridge (`MemoryBridge`)**, never by calling product APIs from the core.
+
+Glossary: [glossary.md](glossary.md)
+
+## When to use / not use
+
+- Use: continuous requests need context, or you want searchable knowledge in the prompt
+- Skip: fully stateless one-shot runs with memory disabled
+
+## Plain flow
+
+Turn start → choose work-log vs knowledge → fetch via bridge → fill the “recalled” prompt slot → (plan / exec) → write diary at end
+
+Principles: [development-principles.md](../development-principles.md)
+
 - Design history (stub): [ideas/memory-and-replan-architecture.md](../../ja/ideas/memory-and-replan-architecture.md)
 - mempalace adapter: [adapters/mempalace-adapter/README.md](../../../adapters/mempalace-adapter/README.md)
 - Config: `memory` section in [config/README.md](../../../config/README.md)
-- Japanese version: [03_記憶層.md](../../ja/architecture/03_記憶層.md)
+- Japanese: [03_記憶層.md](../../ja/architecture/03_記憶層.md)
 
 ## 1. Roles
 
-| Layer | Responsibility |
-|-------|----------------|
-| **Memory RAG** (`src/memory/rag.rs`) | At turn start, branch **work log vs knowledge**, call the Bridge, build `recalled` |
-| **MemoryBridge** | I/O only: `recent_work` / `search` / `diary`. Backend-specific logic stays in adapters |
-| **Plan / exec** | Do not know the Bridge. Consume `recalled` and `Previous turns` only |
+| Layer | Plain responsibility | Implementation |
+|-------|----------------------|----------------|
+| **Memory RAG** | At turn start, branch work log vs knowledge and build the recalled prompt slot | `src/memory/rag.rs` |
+| **MemoryBridge** | I/O only: recent work / search / diary; product logic stays in adapters | `recent_work` / `search` / `diary` |
+| **Plan / exec** | Do not know the Bridge; consume assembled recalled (and prior-turn summary if any) | planning / execution |
 
 Never call mempalace (etc.) directly from the core. Always go through `MemoryBridge` (e.g. factory-built `LayeredMemoryBridge`).
 

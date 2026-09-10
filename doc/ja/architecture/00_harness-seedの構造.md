@@ -1,24 +1,55 @@
-# harness-seed の構造（計画層・実行層）
+# harness-seed の構造
 
-HarnessSeed は **「プロンプト受取 → 計画層 → 実行層 → 終了」** という直列構成を中核とする ReAct ハーネスである。計画層と実行層はいずれも同じ ReAct ループ部品（`run_layer_loop`）を共有するが、**ツールの有無**と**出力の型**が異なる。
+## これは何か
 
-開発方針（汎用解を常に優先する）: [development-principles.md](../development-principles.md)
+HarnessSeed は、ホストアプリに埋め込む **エージェント実行エンジン** である。ユーザーが 1 回依頼すると、エンジンはだいたい次のように進む。
 
-記憶層（Memory RAG・Bridge・diary）: [memory.md](03_記憶層.md)
+1. （任意）過去の作業や知識を思い出す  
+2. **計画**: 何をどの順でやるかを決める（ここではツールを使わない）  
+3. **実行**: 計画の各作業を進め、必要ならツールを使い、最終回答を返す  
+4. 記録を残し、ホストがチケット更新などの副作用を挟める
 
-ホスト拡張（lifecycle hook・HostScratch）: [lifecycle.md](04_ホスト拡張.md)
+計画と実行は同じ「考えて（必要なら）動く」ループ部品を共有するが、**ツールの有無**と**出力の形**（計画か、ユーザー向け回答か）が違う。
 
+用語の定義: [用語集.md](用語集.md) · 開発方針: [development-principles.md](../development-principles.md)
+
+## いつ読むか
+
+- リポジトリ全体の地図が欲しいとき（最初に読む章）
+- 「計画と実行がなぜ分かれているか」を説明したいとき
+
+細かい契約や設定は下の関連章へ。
+
+## 平易な流れ
+
+```mermaid
+flowchart TB
+    A["ユーザーの依頼"] --> M["記憶を載せる"]
+    M --> B["計画を立てる"]
+    B --> C{"すぐ答えられる？"}
+    C -->|はい| D["最終回答"]
+    C -->|いいえ| E["作業を順に実行"]
+    D --> F["記録・ホスト通知"]
+    E --> F
+```
+
+実装寄りの同じ図（シンボル付き）は次節。
+
+関連:
+
+- 記憶: [03_記憶層.md](03_記憶層.md)
+- ホスト副作用: [04_ホスト拡張.md](04_ホスト拡張.md)
 - 全体像（SVG）: [full_agent_architecture_v2.svg](full_agent_architecture_v2.svg)
 - 索引: [README.md](README.md)
-- 最少行動単位: [agent-minimum-action-unit.md](10_最少行動単位.md)
-- ReAct 実装詳細: [react-implementation.md](08_ReAct実装.md)
-- 外側推進ループ: [advance-loop.md](07_推進ループ.md)
-- タスクレジストリ: [task-registry.md](05_タスクレジストリ.md)
-- English version: [00_harness-seed-structure.md](../../en/architecture/00_harness-seed-structure.md)
-- 計画層の詳細: [01_計画層.md](01_計画層.md) / [EN](../../en/architecture/01_planning-layer.md)
-- 実行層の詳細: [02_実行層.md](02_実行層.md) / [EN](../../en/architecture/02_execution-layer.md)
+- 最少行動単位: [10_最少行動単位.md](10_最少行動単位.md)
+- ReAct 実装詳細: [08_ReAct実装.md](08_ReAct実装.md)
+- 外側推進ループ: [07_推進ループ.md](07_推進ループ.md)
+- タスクレジストリ: [05_タスクレジストリ.md](05_タスクレジストリ.md)
+- English: [00_harness-seed-structure.md](../../en/architecture/00_harness-seed-structure.md)
+- 計画層: [01_計画層.md](01_計画層.md) / [EN](../../en/architecture/01_planning-layer.md)
+- 実行層: [02_実行層.md](02_実行層.md) / [EN](../../en/architecture/02_execution-layer.md)
 
-## 1. 全体フロー
+## 1. 全体フロー（実装対応）
 
 ```mermaid
 flowchart TB
@@ -33,7 +64,7 @@ flowchart TB
     E --> F
 ```
 
-記憶の詳細: [memory.md](03_記憶層.md)。ホスト副作用: [lifecycle.md](04_ホスト拡張.md)。
+記憶の詳細: [03_記憶層.md](03_記憶層.md)。ホスト副作用: [04_ホスト拡張.md](04_ホスト拡張.md)。
 
 `src/plan.rs` の冒頭コメント:
 
@@ -61,7 +92,7 @@ flowchart TB
 }
 ```
 
-`skip_execution: true` は `knowledge_sufficient: true` のときだけ許可（[memory.md](03_記憶層.md) §3）。
+`skip_execution: true` は `knowledge_sufficient: true` のときだけ許可（[03_記憶層.md](03_記憶層.md) §3）。
 
 - `skip_execution: true` … 挨拶・ヘルプなど、ツール不要な単純 Q&A
 - 登録タスク id（`tasks/*.json`）を参照するサブタスクもここで列挙される
@@ -156,7 +187,7 @@ flowchart TD
 | `react.two_phase` | `false` | 計画層 → 実行層の直列（サンプル config では `true`） |
 | `react.advance.enabled` | `false` | 外側推進ループ（`two_phase` より優先）。サンプルでは `true` |
 | `react.use_step_driver` | `true` | 契約付き・`react_only: false` のタスクを LLM なしで順次実行 |
-| `react.arg_audit_mode` | `soft` | 引数監査（[task-registry.md](05_タスクレジストリ.md)） |
+| `react.arg_audit_mode` | `soft` | 引数監査（[05_タスクレジストリ.md](05_タスクレジストリ.md)） |
 
 `advance.enabled: true` のときは `two_phase` より **advance が優先**されるが、いずれも **計画層（`run_plan_layer`）を最初に通る**点は同じ。
 

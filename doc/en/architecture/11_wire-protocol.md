@@ -1,6 +1,19 @@
 # Wire Protocol (JSON)
 
-Contract between CUI / GUI / other-language hosts and `ReActLoop`. Protocol version: **1** (`WIRE_VERSION`).
+## What this is
+
+How CUI / GUI / other-language hosts talk to the engine (`ReActLoop`) as **one JSON object per line**. Protocol version: **1** (`WIRE_VERSION`).
+
+Glossary: [glossary.md](glossary.md)
+
+## When to use / not use
+
+- Use: `--json` machine integration, or the same contract from another process/language
+- Skip: human text REPL only
+
+## Plain flow
+
+Host sends one JSON line → engine runs → one JSON line back
 
 Japanese version: [11_ワイヤプロトコル.md](../../ja/architecture/11_ワイヤプロトコル.md)
 

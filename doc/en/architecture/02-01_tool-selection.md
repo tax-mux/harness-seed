@@ -1,11 +1,26 @@
 # Tool Selection (Execution Layer)
 
-In the execution layer, **which tool to use** is determined by the **execution path** (step driver vs ReAct) and **three layers of constraints** (candidate set → subtask policy → runtime verification).
+## What this is
 
-- Execution layer overview: [02_execution-layer.md](02_execution-layer.md)
-- Task registry: [task-registry.md](05_task-registry.md)
-- Built-in tool specs: [builtin_tools/README.md](../builtin_tools/README.md)
-- Japanese version: [02-01_ツールの選択.md](../../ja/architecture/02-01_ツールの選択.md)
+Rules for **which tools may be used** during execution: catalog → per-subtask policy → runtime checks.
+
+Glossary: [glossary.md](glossary.md)
+
+## When to use / not use
+
+- Use: understand or change available tools per path (step driver / ReAct)
+- Skip: you only care about the planning layer (normally no tools)
+
+## Plain flow
+
+Catalog (what exists) → subtask policy narrows further → verify the actual call
+
+Related:
+
+- Execution layer: [02_execution-layer.md](02_execution-layer.md)
+- Task registry: [05_task-registry.md](05_task-registry.md)
+- Built-in tools: [builtin_tools/README.md](../builtin_tools/README.md)
+- Japanese: [02-01_ツールの選択.md](../../ja/architecture/02-01_ツールの選択.md)
 
 ## 1. Overview
 

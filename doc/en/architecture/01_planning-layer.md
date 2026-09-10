@@ -1,13 +1,30 @@
 # Planning Layer
 
-The planning layer receives the user prompt and **designs an ordered list of subtasks (work instructions)**. In HarnessSeed it runs as a ReAct-derived loop (`run_plan_layer`), **without tools**, and has no side effects on the environment.
+## What this is
+
+Reads the user request and decides **what to do in what order** (a list of small work items / subtasks). No tools; no environment changes. Closest analogy: writing a work order sheet.
+
+Glossary: [glossary.md](glossary.md)
+
+## When to use / not use
+
+- Use: you want to fix a procedure before acting (standard two_phase)
+- Thinner planning LLM is fine if the host already supplies the full plan
+
+## Plain flow
+
+Request → (think without tools) → subtask list + summary → hand off to execution (or skip execution when knowledge alone is enough)
+
+Implementation: ReAct-derived loop (`run_plan_layer`); output is `PlanArtifact`.
+
+Related:
 
 - Overall structure: [00_harness-seed-structure.md](00_harness-seed-structure.md)
 - Execution layer: [02_execution-layer.md](02_execution-layer.md)
-- Full overview (SVG): [full_agent_architecture_v2.svg](../../ja/architecture/full_agent_architecture_v2.svg)
-- Minimum action unit: [agent-minimum-action-unit.md](10_agent-minimum-action-unit.md)
-- Task registry: [task-registry.md](05_task-registry.md)
-- Japanese version: [01_計画層.md](../../ja/architecture/01_計画層.md)
+- Overview (SVG): [full_agent_architecture_v2.svg](../../ja/architecture/full_agent_architecture_v2.svg)
+- Minimum action unit: [10_agent-minimum-action-unit.md](10_agent-minimum-action-unit.md)
+- Task registry: [05_task-registry.md](05_task-registry.md)
+- Japanese: [01_計画層.md](../../ja/architecture/01_計画層.md)
 
 ## 1. Role of the Planning Layer
 

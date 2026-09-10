@@ -1,13 +1,32 @@
 # Execution Layer
 
-The execution layer receives `PlanArtifact` (the subtask list) from the planning layer and is the **only phase that causes side effects on the environment**. In HarnessSeed it consists mainly of a **ReAct loop** (`run_layer_loop` + `ToolRuntime`) and, for contract-backed tasks, a **step driver** (no LLM).
+## What this is
+
+Carries out the planned work, **uses tools when needed**, and produces a user-facing answer. If planning writes the work order, execution is the shop floor.
+
+Glossary: [glossary.md](glossary.md)
+
+## When to use / not use
+
+- Use: the plan has subtasks that need tools or investigation
+- Skip: the plan decided knowledge alone is enough (`skip_execution`)
+
+## Plain flow
+
+Take subtasks in order → (contract task: fixed steps / else: LLM picks tools) → assemble the answer
+
+Two main paths: **ReAct loop** (think and choose tools) and **step driver** (mechanical contract execution).
+
+Related:
 
 - Overall structure: [00_harness-seed-structure.md](00_harness-seed-structure.md)
 - Planning layer: [01_planning-layer.md](01_planning-layer.md)
-- Minimum action unit: [agent-minimum-action-unit.md](10_agent-minimum-action-unit.md)
-- ReAct implementation: [react-implementation.md](08_react-implementation.md)
-- Task registry: [task-registry.md](05_task-registry.md)
-- Outer advance loop: [advance-loop.md](07_advance-loop.md)
+- Minimum action unit: [10_agent-minimum-action-unit.md](10_agent-minimum-action-unit.md)
+- ReAct implementation: [08_react-implementation.md](08_react-implementation.md)
+- Task registry: [05_task-registry.md](05_task-registry.md)
+- Advance loop: [07_advance-loop.md](07_advance-loop.md)
+- Tool selection: [02-01_tool-selection.md](02-01_tool-selection.md)
+- Japanese: [02_実行層.md](../../ja/architecture/02_実行層.md)
 - Tool selection: [02-01_tool-selection.md](02-01_tool-selection.md)
 - Japanese version: [02_実行層.md](../../ja/architecture/02_実行層.md)
 

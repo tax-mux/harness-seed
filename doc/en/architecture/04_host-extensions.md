@@ -1,6 +1,19 @@
 # Lifecycle hooks and HostScratch
 
-Extension surface for host applications (triage-mail, development agents, etc.) to integrate externally **without changing the core ReAct loop**.
+## What this is
+
+An extension surface so the host can run **external side effects** (tickets, notifications, and so on) at fixed points **without rewriting** planning, execution, or the final answer. Those callbacks are **hooks**. Full definition in §1.
+
+Glossary: [glossary.md](glossary.md)
+
+## When to use / not use
+
+- Use: PM / chat / billing side effects aligned with turn progress
+- Skip: you need to change tool choice or planning itself (that belongs in core config / task contracts)
+
+## Plain flow
+
+Turn start → plan ready (e.g. parent ticket) → each work item start/finish → turn end. Keep ticket IDs in HostScratch; **never show that bag to the LLM**.
 
 - Implementation: `src/lifecycle.rs`, task-tracking API: `src/lifecycle/tracking.rs`
 - Registration: `ReActLoop::set_lifecycle` / `lifecycle_from_tracking` / `seed_host_scratch` / `host_scratch`

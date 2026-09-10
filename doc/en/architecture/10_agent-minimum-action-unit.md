@@ -1,11 +1,26 @@
 # Minimum action unit
 
-In most agent implementations, the smallest operation that affects the real world is **one tool call (Tool Call)**. Reasoning text, plan JSON, and user-facing replies are not "actions"; tool execution and its result (Observation) are the basic units for harness design and logging.
+## What this is
+
+Treat the smallest real-world effect as **one tool call**. Reasoning text and plan JSON are not “actions”; tool execution and its Observation are the harness and logging unit.
+
+Glossary: [glossary.md](glossary.md)
+
+## When to use / not use
+
+- Use: align Action / Observation / Answer boundaries; design logs
+- Skip: only layer roles → [00](00_harness-seed-structure.md)
+
+## Plain flow
+
+Think → call one tool (action) → see result (observation) → think again or answer
+
+Related:
 
 - ReAct implementation (current): [08_react-implementation.md](08_react-implementation.md)
-- Architecture (planning · execution layers): [README.md](README.md)
+- Architecture index: [README.md](README.md)
 - Context layers: [09_context-memory-mapping.md](09_context-memory-mapping.md)
-- Japanese version: [10_最少行動単位.md](../../ja/architecture/10_最少行動単位.md)
+- Japanese: [10_最少行動単位.md](../../ja/architecture/10_最少行動単位.md)
 
 ## 1. Hierarchy overview
 
