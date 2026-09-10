@@ -7,7 +7,7 @@ HarnessSeed is an **embeddable agent execution engine** for existing apps (not a
 3. Use tools and answer (execution)
 4. Persist a record and optionally notify the host (diary / hooks)
 
-Principles: [development-principles.md](../development-principles.md) · Ideas: [ideas/](../ideas/README.md) · Japanese: [ja/architecture/README.md](../../ja/architecture/README.md)
+Principles: [development-principles.md](../development-principles.md) (openings state what and why in prose) · Ideas: [ideas/](../ideas/README.md) · Japanese: [ja/architecture/README.md](../../ja/architecture/README.md)
 
 ## Start here
 

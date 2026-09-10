@@ -1,25 +1,11 @@
 # Tool Plugins and Packaging
 
-## What this is
 
-How execution-layer tools register as **in-process plugins** and are enabled in groups via pack names in config.
+How execution tools register as in-process plugins and enable in packs via config. Tools scattered through the loop core make swaps and tests heavy; packs keep them additive. Host domain APIs should not bypass the tool surface.
 
-Glossary: [glossary.md](glossary.md)
+Read when changing the built-in set or adding a tool. For per-tool args only, see [builtin_tools/README.md](../builtin_tools/README.md).
 
-## When to use / not use
-
-- Use: change the built-in tool set or add a custom tool
-- Skip: default packs are enough and you only need per-tool args → [builtin_tools](../builtin_tools/README.md)
-
-## Plain flow
-
-Pack config → register `Tool`s → catalog appears in prompts / execution
-
-HarnessSeed ReAct tools register as **in-process plugins**. Built-ins are enabled via **tool packs** (`tools.packs`).
-
-Per-tool args and failure rules: [builtin_tools/README.md](../builtin_tools/README.md)
-
-Japanese version: [06_ツールプラグイン.md](../../ja/architecture/06_ツールプラグイン.md)
+Glossary: [glossary.md](glossary.md) · [JP](../../ja/architecture/06_ツールプラグイン.md)
 
 ## Layout
 

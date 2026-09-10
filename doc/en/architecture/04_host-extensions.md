@@ -1,24 +1,11 @@
 # Lifecycle hooks and HostScratch
 
-## What this is
 
-An extension surface so the host can run **external side effects** (tickets, notifications, and so on) at fixed points **without rewriting** planning, execution, or the final answer. Those callbacks are **hooks**. Full definition in §1.
+Host-facing callbacks at fixed points in a turn—hooks—so external systems (tickets, notifications, billing) can react without rewriting planning, execution, or the final answer. Mixing that into the core loop couples products and risks re-entry. Side effects stay on the host; the engine keeps control. Hooks must not re-enter `run_turn` or rewrite Answer / trace.
 
-Glossary: [glossary.md](glossary.md)
+Use them for turn-aligned side effects. Changing tool choice or planning itself belongs in core config and task contracts. Ticket IDs live in HostScratch and never go to the LLM. Details follow.
 
-## When to use / not use
-
-- Use: PM / chat / billing side effects aligned with turn progress
-- Skip: you need to change tool choice or planning itself (that belongs in core config / task contracts)
-
-## Plain flow
-
-Turn start → plan ready (e.g. parent ticket) → each work item start/finish → turn end. Keep ticket IDs in HostScratch; **never show that bag to the LLM**.
-
-- Implementation: `src/lifecycle.rs`, task-tracking API: `src/lifecycle/tracking.rs`
-- Registration: `ReActLoop::set_lifecycle` / `lifecycle_from_tracking` / `seed_host_scratch` / `host_scratch`
-- Development principles: [development-principles.md](../development-principles.md) (domain vocabulary lives on the host side)
-- Japanese version: [04_ホスト拡張.md](../../ja/architecture/04_ホスト拡張.md)
+Code: `src/lifecycle.rs` / `tracking.rs`. Register via `set_lifecycle` / `lifecycle_from_tracking` / `seed_host_scratch`. Glossary: [glossary.md](glossary.md) · [JP](../../ja/architecture/04_ホスト拡張.md)
 
 ## 1. What is a hook?
 
@@ -40,12 +27,16 @@ Related but different:
 
 Hosts implement “what to do when called,” not “which tool to run next.”
 
+The hook is triggered by the engine at a known lifecycle point. It performs host work such as creating or updating an external record, while tool selection stays in the execution layer.
+
 ## 2. Responsibility split
 
 | Side | Owns |
 |------|------|
 | **Engine (harness-seed)** | Plan / execution loop, **when** hooks run, `RunStatus` / outcomes, per-turn bag `HostScratch` |
 | **Host** | [`TaskTracking`] (preferred) or raw `TurnLifecycle`, bag key design, external APIs |
+
+The engine owns timing and the outcomes it reports. The host owns the meaning of those events, the external API calls they trigger, and its own stored identifiers.
 
 The engine does **not** know about Redmine / Paperclip / LINE WORKS / Stripe, and so on. The host mounts those on the same surface.
 
@@ -61,6 +52,10 @@ flowchart TB
     HOOK --> EXT["External systems<br/>PM / chat / billing …"]
     CORE -.->|does not use| SCR
 ```
+
+The host adapts its business integration to the lifecycle interface before starting a turn. During the turn, the core continues planning and execution while hooks receive progress events separately.
+
+Hooks may write host-only state or call external systems. That state is deliberately outside prompt construction, so the model cannot read or alter host identifiers.
 
 ## 3. Prohibited actions (do not break the core path)
 
@@ -105,6 +100,8 @@ If a turn aborts with an error or cancel, **started but unfinished subtasks** an
 | `SubtaskOutcome` | `status` + `message` (answer on success, reason otherwise) + `steps_used` |
 | `TurnOutcome` | `status` + `answer` + `steps_used` |
 
+Completion callbacks receive a stable status plus enough detail to close or update host-side work. The same shape represents success, failure, and cancellation, preventing unfinished external records from being silently ignored.
+
 `on_subtask_finished` / `on_turn_finished` always receive these outcomes.
 
 ### 5.2 Preferred: `TaskTracking`
@@ -118,6 +115,8 @@ For PM integration, implement [`TaskTracking`] instead of wiring raw `TurnLifecy
 | `on_work_started` | `on_subtask_started` | create / start child work item |
 | `on_work_finished` | `on_subtask_finished` | close child (ok / fail / cancel) |
 | `on_turn_finished` | same | close parent |
+
+`TaskTracking` names the common business lifecycle without exposing the raw engine callback details. A host can create a parent item when planning finishes, then track each child work item through its outcome.
 
 ```rust
 use harness_seed::{lifecycle_from_tracking, HostView, PlanArtifact, TaskTracking, WorkFinishedEvent, WorkStartedEvent};
@@ -154,6 +153,8 @@ The engine does **not** pass full rules / recalled / tool catalog / observation 
 | `on_subtask_finished` | above + `outcome: SubtaskOutcome`, `host` | `subtasks.{subtask.id}` |
 | `on_turn_finished` | `user_input`, `plan?`, `outcome: TurnOutcome`, `host` | `turn` |
 
+Hooks receive only the information needed for lifecycle integration, not the full prompt or tool transcript. Their write scope follows the event: turn-wide hooks write the turn node, while subtask hooks write only their own node.
+
 ## 6. HostScratch (per-turn nested bag)
 
 Nested JSON scoped to one turn. **Never used for prompt assembly or LLM input.**
@@ -176,6 +177,8 @@ Nested JSON scoped to one turn. **Never used for prompt assembly or LLM input.**
 |--------|------|------------------------|
 | `turn` | host-defined | `on_turn_started` / `on_plan_finished` / `on_turn_finished` (and seed) |
 | `subtasks.{id}` | **subtask id** (not an array index) | only `on_subtask_started` / `on_subtask_finished` for that id |
+
+Turn-level values are shared across the lifecycle, such as a host's parent identifier. Each subtask has a separate branch keyed by its stable id, which keeps child updates isolated.
 
 **Reads use the whole bag** (`host.to_value()` / `turn_get_*` / `subtask_get_*`). **Writes are limited to the caller's node** (`HostView::insert`). Under parallelism, sibling subtasks use different branches, so contention is unlikely.
 
@@ -277,6 +280,8 @@ Multiple integrations can be chained with `CompositeLifecycle` (same bag, same w
 | granularity | turn, plan, subtask | one LLM call, one tool call |
 | state bag | `HostScratch` | none |
 | mutation | side effects only (core path unchanged) | observation only |
+
+Lifecycle hooks coordinate host business work at coarse turn and subtask boundaries. Observers are lighter-weight reporting callbacks for individual model and tool steps; neither changes the core result.
 
 Both may be registered.
 

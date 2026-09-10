@@ -1,34 +1,11 @@
 # Execution Layer
 
-## What this is
 
-Carries out the planned work, **uses tools when needed**, and produces a user-facing answer. If planning writes the work order, execution is the shop floor.
+The execution layer carries out planned work, uses tools when needed, and produces a user-facing answer. A plan alone does not read files or search, so side effects and the final answer stay here. It does not call memory backends directly or own replan duties.
 
-Glossary: [glossary.md](glossary.md)
+It runs when the plan has subtasks; skipped turns that answer from knowledge alone never enter it. Subtasks run in order—fixed steps for contract tasks, otherwise the LLM picks tools. The two main paths are the ReAct loop and the step driver.
 
-## When to use / not use
-
-- Use: the plan has subtasks that need tools or investigation
-- Skip: the plan decided knowledge alone is enough (`skip_execution`)
-
-## Plain flow
-
-Take subtasks in order → (contract task: fixed steps / else: LLM picks tools) → assemble the answer
-
-Two main paths: **ReAct loop** (think and choose tools) and **step driver** (mechanical contract execution).
-
-Related:
-
-- Overall structure: [00_harness-seed-structure.md](00_harness-seed-structure.md)
-- Planning layer: [01_planning-layer.md](01_planning-layer.md)
-- Minimum action unit: [10_agent-minimum-action-unit.md](10_agent-minimum-action-unit.md)
-- ReAct implementation: [08_react-implementation.md](08_react-implementation.md)
-- Task registry: [05_task-registry.md](05_task-registry.md)
-- Advance loop: [07_advance-loop.md](07_advance-loop.md)
-- Tool selection: [02-01_tool-selection.md](02-01_tool-selection.md)
-- Japanese: [02_実行層.md](../../ja/architecture/02_実行層.md)
-- Tool selection: [02-01_tool-selection.md](02-01_tool-selection.md)
-- Japanese version: [02_実行層.md](../../ja/architecture/02_実行層.md)
+Glossary: [glossary.md](glossary.md) · Structure: [00_harness-seed-structure.md](00_harness-seed-structure.md) · Planning: [01_planning-layer.md](01_planning-layer.md) · Tools: [02-01_tool-selection.md](02-01_tool-selection.md) · [JP](../../ja/architecture/02_実行層.md)
 
 ## 1. Role of the Execution Layer
 
@@ -41,6 +18,10 @@ flowchart LR
     RN --> OUT["TurnResult"]
 ```
 
+Execution takes the planned work items one at a time. Each completed item contributes to the final turn result before the next one begins.
+
+The chain represents time order, not parallel work. A later subtask can therefore use the outcome of an earlier one.
+
 | Aspect | Planning layer | Execution layer |
 |--------|----------------|-----------------|
 | Brain | `PlanBrainMode` | exec `BrainMode` (`exec_brain`) |
@@ -48,6 +29,10 @@ flowchart LR
 | Tools | **disabled** | **enabled** (`ToolRuntime`) |
 | Output | `PlanArtifact` | Per-subtask `Answer` → final turn response |
 | Side effects | none | **yes** (`Action` only) |
+
+Planning describes the work without affecting the environment. Execution is the only layer allowed to use tools, and each tool operation occurs as an action.
+
+The resulting subtask answers are combined into the reply for the whole turn.
 
 **Principle**: file operations, shell, web search, and other external changes happen only through execution-layer `Action`s.
 
@@ -85,6 +70,10 @@ flowchart TD
     RETRY --> CHK
     CHK -->|complete| NEXT["Push result to PlanProgress<br/>next subtask"]
 ```
+
+Every subtask first receives its current context and tool limits. The engine then prefers a fixed contract when one is available.
+
+On that path, a driver performs the prescribed steps without an LLM. Otherwise the ReAct path chooses tools while working. Both paths are audited; an incomplete result is retried through ReAct, and a complete result becomes input for the next subtask.
 
 ### 3.1 Harness State Updates
 
@@ -141,12 +130,18 @@ sequenceDiagram
     end
 ```
 
+For each iteration, the execution brain decides whether to think, use a tool, or finish. A tool action runs through the runtime and its observation becomes evidence for the next decision.
+
+An answer ends this subtask. The trace retains every decision and observation so the result can later be checked and merged.
+
 | Setting | Value (exec) |
 |---------|--------------|
 | `tools_enabled` | `true` |
 | `context_label` | `"step"` |
 | `max_thoughts` | 1 (2nd+ rejected via `__thought_limit`) |
 | `max_steps` | `react.max_steps` (default 16) |
+
+Tools are enabled here, unlike in planning. The limits cap reasoning and total iterations so one subtask cannot run indefinitely.
 
 One step:
 
@@ -170,6 +165,10 @@ flowchart LR
     AUD --> ANS["StepDriverResult.answer"]
 ```
 
+The registered contract identifies the required operations before execution starts. The driver expands its parameters and performs those operations in order without asking a model to select them.
+
+If the contract path fails, execution switches to ReAct so the agent can attempt the work with the available evidence. Tasks without steps always use that flexible path.
+
 - No LLM; runs `execute_action` in `steps[]` `order`
 - Args expanded from `params` templates (`{path}`, etc.)
 - On failure, **falls back to ReAct**
@@ -186,6 +185,9 @@ Example (`list_dir.json`):
 }
 ```
 
+The planner trace and each subtask trace remain separate while work is underway. At the end, they are appended into one ordered history for the turn.
+
+That combined trace supports the final answer, audit details, and a per-subtask result summary.
 ## 5. Tool Policy
 
 On the ReAct path, `tool_policy` from the task definition **restricts available tools**. For the full selection model (step driver / catalog / mission / runtime checks), see [02-01_tool-selection.md](02-01_tool-selection.md).
@@ -223,7 +225,7 @@ flowchart TB
     MERGE --> FINAL["TurnResult.trace<br/>all Thoughts / Actions / Observations"]
 ```
 
-At turn end, `TurnResult` includes:
+While work is underway, the planner’s history and each subtask’s history stay separate. At the end they are appended into one ordered record for the turn, so a reader can follow planning decisions and then each executed item in sequence.
 
 | Field | Content |
 |-------|---------|
@@ -231,6 +233,8 @@ At turn end, `TurnResult` includes:
 | `trace` | Merged planning + all subtask traces |
 | `subtask_results` | Per subtask: id / answer / steps_used / used_step_driver |
 | `steps_used` | Total steps (plan + execution) |
+
+The answer is the last response produced for the turn. The remaining fields preserve how that response was obtained.
 
 ## 8. Configuration
 
@@ -243,6 +247,8 @@ At turn end, `TurnResult` includes:
 | `react.show_tool_output` | `true` | Print tool I/O to stderr |
 | `react.two_phase` | `false` | Serial plan → execute when on |
 | `react.advance.enabled` | `false` | Phased execution + `recalled` carry-forward ([advance-loop.md](07_advance-loop.md)) |
+
+The first three settings control the amount and style of work within each subtask. The display settings affect diagnostics only, while the final two choose whether planning and phased execution wrap the work.
 
 ## 9. Source Code Map
 
@@ -260,6 +266,9 @@ At turn end, `TurnResult` includes:
 | Task definitions | `tasks/*.json`, `src/tasks/registry.rs` |
 | Action / observation | `src/action.rs` — `Action`, `Observation`, `TurnTrace` |
 
+Start in `react.rs` to follow the turn into subtask execution. The layer module runs the free-form loop, while the driver and audit modules own contract execution and verification.
+
+The plan and harness modules build the per-subtask context. Tool and action modules perform operations and record their outcomes.
 ## 10. Summary
 
 - The execution layer **runs PlanArtifact subtasks serially** and owns all environment side effects.

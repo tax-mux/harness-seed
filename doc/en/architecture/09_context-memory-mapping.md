@@ -1,26 +1,11 @@
 # Context memory mapping
 
-## What this is
 
-A map of **what goes into one LLM request, why, and at what length**—so short chat, recalled snippets, and long knowledge are not confused.
+A map of what goes into one LLM request—purpose, length, and placement—so short chat, recalled snippets, and long knowledge are not confused. It does not replace memory-backend detail ([03_memory-layer.md](03_memory-layer.md)).
 
-Glossary: [glossary.md](glossary.md)
+Use it when prompts balloon and you need a shared language for what the model sees. Assembly is mainly `TurnPromptContext::render`.
 
-## When to use / not use
-
-- Use: prompts grew too large; you need to see what the LLM sees
-- Skip: only the memory fetch path → [03_memory-layer.md](03_memory-layer.md)
-
-## Plain flow
-
-Break one Chat request into purpose-based sections (mainly `TurnPromptContext::render`).
-
-Related:
-
-- ReAct implementation: [08_react-implementation.md](08_react-implementation.md)
-- Minimum action unit: [10_agent-minimum-action-unit.md](10_agent-minimum-action-unit.md)
-- Built-in tools: [../builtin_tools/README.md](../builtin_tools/README.md)
-- Japanese: [09_コンテキストマッピング.md](../../ja/architecture/09_コンテキストマッピング.md)
+Glossary: [glossary.md](glossary.md) · ReAct: [08_react-implementation.md](08_react-implementation.md) · [JP](../../ja/architecture/09_コンテキストマッピング.md)
 
 **Status (as of 2026-07)**
 
@@ -32,6 +17,8 @@ Related:
 | External memory (search / diary) | **Implemented** — [03_memory-layer.md](03_memory-layer.md) (memory RAG + `MemoryBridge`) |
 | Rules file injection (`prompt.rules_paths`) | **Implemented** (`PromptBlocks`) |
 | trace / session summarization | Not implemented |
+
+The current implementation keeps in-turn trace, selected previous turns, metrics, external recall, and rules injection. It does not yet compress a long trace or session into a summary, so those inputs still need their existing limits.
 
 ---
 
@@ -72,12 +59,16 @@ flowchart TB
     usr_parts -.-> USR
 ```
 
+The system message carries rules and tool descriptions that change infrequently. The user message carries recalled evidence, the current request, and the trace that changes as work proceeds.
+
 **Principles**
 
 | Layer | Primary placement | Change frequency |
 |-------|-------------------|------------------|
 | Near-invariant policy | **system** | Low |
 | Current request · in-progress work | **user** (block split) | High |
+
+Stable policy belongs in the system message so it is consistently applied. Current work belongs in the user message, where the prompt can refresh it for each decision.
 
 ---
 
@@ -118,6 +109,10 @@ flowchart LR
     ST2 --> ST3
 ```
 
+Short-term memory keeps the current turn’s trace and recent conversation in process. Those pieces are ready for the next decision, but they disappear when the session ends.
+
+Longer-lived material stays in external memory or canonical documents. At turn start the engine pulls only what is needed into the prompt, so it does not resend entire histories every time.
+
 | Memory layer | Role | Storage (recommended) | HarnessSeed today |
 |--------------|------|----------------------|-------------------|
 | **Short-term** | Current turn · recent utterances | Heap `TurnTrace` / `SessionMemory` → **user block** | trace + **SessionMemory** (`Previous turns`, reset on REPL `clear`) |
@@ -127,8 +122,6 @@ flowchart LR
 ---
 
 ## 3. Order within the user block (recommended layout)
-
-Top to bottom: **stable → request → latest facts** reads best.
 
 ```mermaid
 block-beta
@@ -163,6 +156,8 @@ block-beta
         next["Next step JSON:"]
 ```
 
+First come recalled excerpts that frame the request, then recent conversation so continuity is not lost. After that the current goal is stated, followed by the operations and observations already gathered in this turn. A short output cue closes the block so the model answers in the expected format.
+
 | Order | Section | Purpose | Typical source |
 |-------|---------|---------|----------------|
 | 1 | Recalled context | Quotes from long/mid-term | External store, rules files |
@@ -171,7 +166,7 @@ block-beta
 | 4 | Turn trace so far | **In-progress facts** | `TurnTrace` |
 | 5 | Next step JSON | Output-format reminder | Harness fixed text |
 
-HarnessSeed **current** (`src/llm/brain.rs`): **2 + 3 + 4 + 5** (`Previous turns` present. 1 · external memory / rules injection not connected).
+HarnessSeed currently assembles previous turns, the user input, the trace, and the response cue. Recalled context and rule injection are added when those configured sources provide material.
 
 ---
 
@@ -189,6 +184,10 @@ flowchart TB
 
     style E stroke-dasharray: 5 5
 ```
+
+The system block first fixes output format and standing constraints. It then lists available tools and their arguments so the model does not invent operations that do not exist.
+
+Optional long-term policy may be appended here, but the current request itself stays in the user message. That keeps durable rules separate from the turn’s goal.
 
 | Content | Placement | Update frequency |
 |---------|-----------|------------------|
@@ -231,6 +230,8 @@ sequenceDiagram
     H-->>U: Answer
 ```
 
+At startup the host may load durable rules. At turn start it optionally searches external memory and reads previous turns, then builds each model call from that material plus the growing in-turn trace. When the answer is fixed, the session store is updated and an optional diary write closes the turn.
+
 | Timing | Short-term | Mid-term | Long-term |
 |--------|------------|----------|-----------|
 | Process startup | — | — | Load rules / canonical (optional · not yet) |
@@ -261,6 +262,8 @@ flowchart LR
     MP["Evacuate to external store"] -.->|before turn end| OLD
 ```
 
+As the prompt grows, older material can fall outside the window and stop affecting decisions. Keeping a short summary, or writing important results out before they are dropped, preserves evidence that would otherwise be lost.
+
 | Phenomenon | Cause | Mitigation |
 |------------|-------|------------|
 | Old observations stop working in-turn | trace grows linearly | Summarize trace · keep last N steps only |
@@ -286,6 +289,8 @@ Check metrics via `[context step]` / `prompt_tokens` in `logs/context.jsonl`.
 | Raw tool output | observation in trace | Short-term | TurnTrace |
 | Cross-session diary | (injection or tool) | Mid-term | External diary |
 | Entity relations | user excerpt or tool | Long-term | External KG |
+
+Use the purpose to choose placement: enduring instructions belong in system, current work and retrieved evidence belong in user, and durable history belongs outside the prompt until it is needed.
 
 ---
 
@@ -313,6 +318,8 @@ flowchart TB
     I5 -.->|metrics log; not inference input| LOG["File"]
 ```
 
+What is already wired builds system rules and the active user context for each call. Metrics go to a file for diagnosis and are not fed back into the model. Compression and broader external memory remain recommended next steps, without changing that separation.
+
 | Mapping element | Source |
 |-----------------|--------|
 | system rules · tools | `src/llm/brain.rs` `SYSTEM_PROMPT` + `tools_catalog()` |
@@ -321,7 +328,6 @@ flowchart TB
 | Short-term in-turn | `src/action.rs` `TurnTrace` |
 | Short-term cross-session | `src/session.rs` `SessionMemory` / `src/react.rs` |
 | Metrics | `src/context_metrics.rs`, `src/context_log.rs` |
-
 ---
 
 ## 10. Short-term memory (SessionMemory) implementation
@@ -340,6 +346,8 @@ flowchart LR
     PT --> U["user_input"]
     PT --> A["answer (final response only)"]
 ```
+
+The loop owns one session store. That store keeps completed user/answer pairs and intentionally omits in-turn reasoning and raw tool output, so the next turn starts from a compact conversational record.
 
 | Type | File | Contents |
 |------|------|----------|
@@ -367,6 +375,9 @@ Turn trace so far:
 Next step JSON:
 ```
 
+During a turn, the session contains only earlier completed turns. Each model decision receives that history together with the current trace, which grows independently.
+
+Once the answer is fixed, the loop appends the completed pair and removes the oldest entry when the configured limit is exceeded.
 `Previous turns` format (`SessionMemory::format_for_prompt`):
 
 ```text
@@ -400,6 +411,8 @@ sequenceDiagram
     Note over S: overflow removed from front via remove(0)
 ```
 
+During the turn the loop only reads previous completed turns into each decide. After the answer is fixed it appends the new pair, dropping the oldest when the session limit is exceeded. REPL clear empties the store entirely.
+
 | Operation | Timing | Code |
 |-----------|--------|------|
 | Read | Each `decide` | `TurnPromptContext { blocks, input, trace, session }` |
@@ -415,6 +428,7 @@ The third argument `session` to `AgentBrain::decide` is **accepted by all brains
 | Turns retained | 8 | `react.session_max_turns` (`config/config.json`) |
 | Max chars per field | 2000 | Code constant `SessionMemory::DEFAULT_MAX_CHARS_PER_FIELD` (overflow truncated with `…`) |
 
+The retention count limits how many completed turns remain available. The per-field cap limits the size of any one contribution, preventing a single long exchange from consuming the entire prompt.
 `ReActConfig::session_max_turns` ← resolved via `AppConfig::react_config()`. `SessionMemory::new(...)` is created in `ReActLoop::new`.
 
 ### 10.5 Observation · verification
@@ -432,6 +446,7 @@ The third argument `session` to `AgentBrain::decide` is **accepted by all brains
 | Persistence | `SessionMemory` is lost on process exit (file / external store not wired) |
 | Rule brain | `SimpleRuleBrain` responses that reference session (demo · optional) |
 
+These are future compression and persistence improvements. Current behavior retains a bounded in-process history only for the LLM path, then loses it when the process exits.
 ---
 
 ## 11. Related documents
@@ -442,3 +457,5 @@ The third argument `session` to `AgentBrain::decide` is **accepted by all brains
 | [10_agent-minimum-action-unit.md](10_agent-minimum-action-unit.md) | Action = 1 Tool Call |
 | [../builtin_tools/README.md](../builtin_tools/README.md) | Tool specifications |
 | [../../config/README.md](../../../config/README.md) | Runtime config (includes `session_max_turns`) |
+
+Use the implementation page for the loop itself and the memory-layer page for retrieval and diary behavior. This page connects those mechanisms to the sections of one model request.
