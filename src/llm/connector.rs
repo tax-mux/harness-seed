@@ -327,6 +327,8 @@ pub enum ConnectorError {
     Config(String),
     Http { status: u16, body: String },
     Request(reqwest::Error),
+    /// ストリーミング応答の逐次読み込み中に失敗。
+    Stream(std::io::Error),
     InvalidResponse(String),
 }
 
@@ -340,6 +342,7 @@ impl fmt::Display for ConnectorError {
             Self::Config(msg) => write!(f, "config error: {msg}"),
             Self::Http { status, body } => write!(f, "HTTP {status}: {body}"),
             Self::Request(e) => write!(f, "request error: {}", format_error_chain(e)),
+            Self::Stream(e) => write!(f, "stream read error: {e}"),
             Self::InvalidResponse(msg) => write!(f, "invalid response: {msg}"),
         }
     }
@@ -356,16 +359,92 @@ impl From<reqwest::Error> for ConnectorError {
 use super::completion::CompletionResult;
 
 /// LLM API への抽象接続。
+/// ストリーミング応答の統計情報。
+///
+/// - `prompt_tokens` / `completion_tokens`: プロバイダが `usage`（OpenAI /
+///   Ollama `prompt_eval_count`・`eval_count` 等）を報告した場合のみSome。
+/// - `chunks`: `on_token` を発火したトークンスライスの数。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StreamStats {
+    pub prompt_tokens: Option<u32>,
+    pub completion_tokens: Option<u32>,
+    pub chunks: u32,
+}
+
+/// LLM API への抽象接続。
 pub trait LlmConnector {
     fn complete(&self, messages: &[ChatMessage]) -> Result<CompletionResult, ConnectorError>;
     fn provider(&self) -> LlmProvider {
         LlmProvider::OpenAi
+    }
+
+    /// 真のストリーミング（逐次トークン出力）に対応できるか。
+    ///
+    /// 既定は `false`。Chat Completions 系（OpenAI/Ollama/LM Studio）のみ `true`。
+    fn can_stream(&self) -> bool {
+        false
+    }
+
+    /// LLM 応答をストリームで出力する。
+    ///
+    /// トークンが到着するたびに `on_token` が呼ばれる（実装が `true` の場合）。
+    /// **既定実装（後方互換）**: `can_stream() == false` のコネクタにはこのメソッドが
+    /// `complete()` を呼び、その全文を **1 回だけ** `on_token` に渡す単発出力として振る舞う。
+    /// そのため既存の `run_turn()` 経路は `complete_stream` を経ても壊れない。
+    ///
+    /// 返値は `Some(stats)`（usage 等の統計）。既定実装は統計を持たないため `None`。
+    fn complete_stream(
+        &self,
+        messages: &[ChatMessage],
+        on_token: &mut dyn FnMut(&str),
+    ) -> Result<Option<StreamStats>, ConnectorError> {
+        let result = self.complete(messages)?;
+        on_token(&result.content);
+        Ok(None)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context_metrics::ContextUsage;
+
+    /// 後方互換検証用スタブ。`complete()` のみ実装し stream メソッドは既定実装を踏む。
+    struct StubCompleteConnector;
+
+    impl LlmConnector for StubCompleteConnector {
+        fn complete(
+            &self,
+            messages: &[ChatMessage],
+        ) -> Result<CompletionResult, ConnectorError> {
+            Ok(CompletionResult {
+                content: "full answer".into(),
+                usage: ContextUsage::measure_messages(messages, "full answer"),
+            })
+        }
+    }
+
+    #[test]
+    fn default_can_stream_is_false() {
+        let c = StubCompleteConnector;
+        assert!(!c.can_stream(), "既定の can_stream は false");
+    }
+
+    #[test]
+    fn default_complete_stream_delegates_to_complete_and_fires_on_token_once() {
+        let c = StubCompleteConnector;
+        let msgs = [ChatMessage::user("hi")];
+        let mut calls: Vec<String> = Vec::new();
+        let stats = c
+            .complete_stream(&msgs, &mut |t| calls.push(t.to_owned()))
+            .unwrap();
+        assert!(stats.is_none(), "既定実装は統計を持たず None");
+        assert_eq!(
+            calls, vec!["full answer".to_string()],
+            "complete() の全文を 1 回だけ on_token に渡す"
+        );
+        assert_eq!(calls[0], c.complete(&msgs).unwrap().content);
+    }
 
     #[test]
     fn normalize_ollama_host_adds_v1() {

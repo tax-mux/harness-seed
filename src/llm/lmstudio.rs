@@ -37,4 +37,16 @@ impl LlmConnector for LmStudioConnector {
     fn complete(&self, messages: &[ChatMessage]) -> Result<CompletionResult, ConnectorError> {
         self.0.complete(messages)
     }
+
+    fn can_stream(&self) -> bool {
+        self.0.can_stream()
+    }
+
+    fn complete_stream(
+        &self,
+        messages: &[ChatMessage],
+        on_token: &mut dyn FnMut(&str),
+    ) -> Result<Option<super::connector::StreamStats>, ConnectorError> {
+        self.0.complete_stream(messages, on_token)
+    }
 }

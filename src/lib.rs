@@ -98,7 +98,7 @@ pub use llm::{
     parse_agent_step, require_absolute_http_base, AnthropicConnector, ChatMessage,
     CompletionResult, ConnectorError, GeminiConnector, LlmBrain, LlmConfig, LlmConnector,
     LlmConnectorKind, LlmProvider, LmStudioConnector, MockLlmConnector, OpenAiConnector,
-    ParseError,
+    ParseError, StreamStats,
 };
 #[cfg(feature = "mempalace")]
 pub use memory::MempalaceBridge;
