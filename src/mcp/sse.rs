@@ -106,7 +106,10 @@ impl SseMcpTransport {
                 if let Err(err) =
                     sse_session_loop_from_response(get_resp, &base, post_url_tx, reader_pending)
                 {
-                    eprintln!("[mcp] sse session ended: {err}");
+                    // サーバ側アイドル切断・ソケット閉じはよくある。コンソールを汚さない。
+                    if !is_benign_sse_session_end(&err) {
+                        eprintln!("[mcp] sse session ended: {err}");
+                    }
                 }
             })
             .map_err(|e| McpError::Io(format!("spawn sse session: {e}")))?;
@@ -541,6 +544,24 @@ fn truncate(s: &str, max: usize) -> String {
     s.chars().take(max).collect::<String>() + "…"
 }
 
+/// SSE 読取スレッド終了時の「よくある切断」か。真ならコンソールに出さない。
+fn is_benign_sse_session_end(err: &McpError) -> bool {
+    let msg = err.to_string().to_ascii_lowercase();
+    const MARKERS: &[&str] = &[
+        "request or response body error",
+        "error decoding response body",
+        "connection reset",
+        "connection closed",
+        "broken pipe",
+        "unexpected eof",
+        "eof while",
+        "os error 54", // Connection reset by peer (darwin)
+        "os error 104", // Connection reset by peer (linux)
+        "sse closed before endpoint",
+    ];
+    MARKERS.iter().any(|m| msg.contains(m))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -565,6 +586,16 @@ mod tests {
         let body = "event: message\ndata: {\"result\":{\"ok\":true},\"jsonrpc\":\"2.0\",\"id\":2}\n\n";
         let result = parse_rpc_response(body, 2).unwrap();
         assert_eq!(result, json!({"ok": true}));
+    }
+
+    #[test]
+    fn benign_sse_end_silences_body_errors() {
+        let err = McpError::Io("sse read: request or response body error".into());
+        assert!(is_benign_sse_session_end(&err));
+        let bad = McpError::Io("sse connect http://x -> 401 Unauthorized".into());
+        assert!(!is_benign_sse_session_end(&bad));
+        let rpc = McpError::Rpc("method not found".into());
+        assert!(!is_benign_sse_session_end(&rpc));
     }
 
     #[test]
