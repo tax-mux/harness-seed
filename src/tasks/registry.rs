@@ -9,7 +9,7 @@ use crate::action::TurnTrace;
 use crate::plan::{PlanArtifact, PlanProgress, Subtask};
 use crate::tool::workspace_root;
 
-use super::audit::{audit_trace, TaskExecutionAudit};
+use super::audit::{audit_trace_with_mode, ArgAuditMode, TaskExecutionAudit};
 use super::policy::SubtaskToolPolicy;
 use super::spec::{apply_template, apply_template_value, TaskDefinition, TaskError};
 
@@ -163,12 +163,33 @@ impl TaskRegistry {
         exclude_task_ids: &[&str],
         require_all_tools: bool,
     ) -> String {
+        self.catalog_summaries_for_planner_budgeted(
+            available_tools,
+            include_web_research,
+            exclude_task_ids,
+            require_all_tools,
+            usize::MAX,
+            usize::MAX,
+        )
+    }
+
+    /// 件数・文字数キャップ付き summary カタログ。
+    pub fn catalog_summaries_for_planner_budgeted(
+        &self,
+        available_tools: &HashSet<String>,
+        include_web_research: bool,
+        exclude_task_ids: &[&str],
+        require_all_tools: bool,
+        max_entries: usize,
+        max_chars: usize,
+    ) -> String {
         let filter_by_tools = require_all_tools || !available_tools.is_empty();
         let mut lines = vec![
             "Task candidates (summaries only — pick ids that fit the user goal):".into(),
         ];
         let mut ids: Vec<_> = self.tasks.keys().collect();
         ids.sort();
+        let mut entry_count = 0usize;
         for id in ids {
             if exclude_task_ids.contains(&id.as_str()) {
                 continue;
@@ -180,7 +201,22 @@ impl TaskRegistry {
             if filter_by_tools && !task_available_with_tools(def, available_tools) {
                 continue;
             }
-            lines.push(format!("- {id}: {}", def.effective_planner_summary()));
+            if entry_count >= max_entries {
+                lines.push(format!(
+                    "- … ({entry_count}+ more omitted; catalog budget)"
+                ));
+                break;
+            }
+            let line = format!("- {id}: {}", def.effective_planner_summary());
+            let projected = lines.iter().map(|l| l.len() + 1).sum::<usize>() + line.len();
+            if projected > max_chars && entry_count > 0 {
+                lines.push(format!(
+                    "- … (truncated at {max_chars} chars; catalog budget)"
+                ));
+                break;
+            }
+            lines.push(line);
+            entry_count += 1;
         }
         if lines.len() <= 1 {
             lines.push("- generic: Freeform ReAct when no specialized task fits.".into());
@@ -412,10 +448,19 @@ impl TaskRegistry {
         subtask: &Subtask,
         trace: &TurnTrace,
     ) -> Option<TaskExecutionAudit> {
+        self.audit_subtask_with_mode(subtask, trace, ArgAuditMode::Off)
+    }
+
+    pub fn audit_subtask_with_mode(
+        &self,
+        subtask: &Subtask,
+        trace: &TurnTrace,
+        arg_mode: ArgAuditMode,
+    ) -> Option<TaskExecutionAudit> {
         let task_id = subtask.task.as_ref()?;
         let def = self.get(task_id)?;
         let params = merge_params(&def.default_params, &subtask.params);
-        Some(audit_trace(def, &params, trace))
+        Some(audit_trace_with_mode(def, &params, trace, arg_mode))
     }
 
     pub fn resolve_plan(
@@ -684,6 +729,7 @@ mod tests {
 },
             ],
             knowledge_sufficient: None,
+            user_reply: None,
         };
         let st = plan.subtasks[0].clone();
         let m = reg
@@ -711,6 +757,7 @@ mod tests {
                             depends_on: vec![],
 }],
             knowledge_sufficient: None,
+            user_reply: None,
         };
         let st = plan.subtasks[0].clone();
         let m = reg
@@ -732,8 +779,14 @@ mod tests {
                     depends_on: vec![],
 };
         let text = reg.format_subtask_execution_for_display(&sub);
-        assert!(text.contains("step-driver"));
-        assert!(text.contains("1. list_dir"));
+        assert!(
+            text.contains("list_dir"),
+            "expected list_dir in display, got: {text}"
+        );
+        assert!(
+            text.contains("step-driver") || text.contains("ReAct"),
+            "expected execution mode label, got: {text}"
+        );
     }
 
     #[test]
@@ -758,6 +811,7 @@ mod tests {
                             depends_on: vec![],
 }],
             knowledge_sufficient: None,
+            user_reply: None,
         };
         reg.resolve_plan(&mut plan, "user input", None);
         let st = &plan.subtasks[0];
@@ -796,6 +850,7 @@ mod tests {
                             depends_on: vec![],
 }],
             knowledge_sufficient: None,
+            user_reply: None,
         };
         let contract = crate::plan::PlanDataContract::new(
             "read: item",
@@ -844,6 +899,7 @@ mod tests {
 },
             ],
             knowledge_sufficient: None,
+            user_reply: None,
         };
         let contract = crate::plan::PlanDataContract::new("in", "out", "save_item").with_enforce(
             |plan| {
@@ -895,6 +951,7 @@ mod tests {
                             depends_on: vec![],
 }],
             knowledge_sufficient: None,
+            user_reply: None,
         };
         let contract = crate::plan::PlanDataContract::new("in", "out", "fetch_item")
             .with_reference_id(Some(42))

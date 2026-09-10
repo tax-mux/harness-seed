@@ -83,10 +83,12 @@ pub use llm::{
 pub use layer::{run_layer_loop, run_plan_layer, LayerLoopOptions};
 pub use plan::{
     artifact_from_plan_turn, format_mission, format_plan_for_display, harness_state_from_plan_turn,
-    parse_plan, parse_plan_agent_step, plan_artifact_from_answer, PlanArtifact, PlanBrainMode,
-    PlanDataContract, PlanEnforceFn, PlanLlmBrain,
-    PlanParseError, PlanProgress, PlanPromptContext, PlanStepParseError,
-    RulePlanBrain, Subtask, PLAN_REACT_SYSTEM_CORE, PLAN_SYSTEM_CORE,
+    normalize_candidates, parse_candidate_selection, parse_plan, parse_plan_agent_step,
+    plan_artifact_from_answer, select_and_register_plan_candidates,
+    select_and_register_plan_candidates_with_budget, PlanArtifact, PlanBrainMode, PlanDataContract,
+    PlanEnforceFn, PlanLlmBrain, PlanParseError, PlanProgress, PlanPromptContext, PlanStepParseError,
+    RulePlanBrain, Subtask, CANDIDATE_SELECTION_SYSTEM, PLAN_CATALOG_SUMMARY_MAX_CHARS,
+    PLAN_CATALOG_SUMMARY_MAX_ENTRIES, PLAN_REACT_SYSTEM_CORE, PLAN_SYSTEM_CORE,
     build_plan_layer_messages, format_plan_fixed_zone_system, format_plan_layer_prompt,
     format_plan_zone_after_preview, format_plan_zone_prompt_preview,
     format_planner_fixed_zone_html, execution_waves, is_replan_subtask, PlanQueue, PlanQueueError,
@@ -105,9 +107,8 @@ pub use react::{
     run_repl, PlanPreviewResult, ReActConfig, ReActError, ReActLoop, SubtaskExecResult, TurnResult,
 };
 pub use turn_observer::{
-    emit_llm_step, emit_observation_step, emit_phase_started, emit_plan_artifact, AgentStepDto,
-    TurnObserver,
-    TurnStepEvent,
+    emit_candidates, emit_llm_step, emit_observation_step, emit_phase_started, emit_plan_artifact,
+    AgentStepDto, TurnObserver, TurnStepEvent,
 };
 pub use context_manifest::{
     apply_scoped_entry, format_apply_error_hint, note_manifest_available, ContextManifestError,
@@ -116,9 +117,9 @@ pub use context_manifest::{
 pub use runtime::{OsFamily, RuntimeEnvironment, ShellKind};
 pub use session::{PastTurn, SessionMemory, SessionPromptPolicy};
 pub use tasks::{
-    apply_template, apply_template_value, audit_trace, ContextManifestSpec, ExecStep,
-    MissionRenderContext, StepAudit, SubtaskToolPolicy, TaskDefinition,
-    TaskError, TaskExecutionAudit, TaskLoadError, TaskRegistry, ToolPolicySpec,
+    apply_template, apply_template_value, audit_trace, audit_trace_with_mode, expected_args,
+    ArgAuditMode, ContextManifestSpec, ExecStep, MissionRenderContext, StepAudit, SubtaskToolPolicy,
+    TaskDefinition, TaskError, TaskExecutionAudit, TaskLoadError, TaskRegistry, ToolPolicySpec,
 };
 pub use tool::{
     apply_packs, default_packs, execute_action, format_tool_catalog, full_builtin_registry,

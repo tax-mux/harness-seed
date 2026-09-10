@@ -942,6 +942,7 @@ mod tests {
                                     depends_on: vec![],
 }],
                 knowledge_sufficient: None,
+                user_reply: None,
             },
         );
         let html = format_planner_fixed_zone_html(
@@ -999,6 +1000,7 @@ mod tests {
                                     depends_on: vec![],
 }],
                 knowledge_sufficient: None,
+                user_reply: None,
             },
         );
         let html = format_planner_fixed_zone_html(
@@ -1062,6 +1064,7 @@ mod tests {
                                     depends_on: vec![],
 }],
                 knowledge_sufficient: None,
+                user_reply: None,
             },
         );
         let html = format_planner_fixed_zone_html(

@@ -70,6 +70,7 @@ fn format_current_step_for_prompt_lists_contract() {
                     depends_on: vec![],
 }],
         knowledge_sufficient: Some(false),
+        user_reply: None,
     };
     let mut hs = HarnessState::new("1. list src", plan);
     hs.begin_execution();

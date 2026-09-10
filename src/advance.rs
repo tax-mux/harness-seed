@@ -208,6 +208,7 @@ mod tests {
 },
             ],
             knowledge_sufficient: None,
+            user_reply: None,
         };
         let mut progress = AdvanceProgress::new("mission", "two steps");
         progress.push(1, "step one", "answer one");

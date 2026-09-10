@@ -92,19 +92,29 @@ fn parse_plan_value(trimmed: &str) -> Result<PlanArtifact, PlanParseError> {
     let value: Value =
         serde_json::from_str(trimmed).map_err(|e| PlanParseError::InvalidJson(e.to_string()))?;
 
-    let (summary, skip_execution, knowledge_sufficient, step_values): (
+    let (summary, skip_execution, knowledge_sufficient, step_values, user_reply): (
         String,
         bool,
         Option<bool>,
         Vec<Value>,
+        Option<String>,
     ) = if value.get("steps").is_some()
         || value.get("input").is_some()
         || value.get("output").is_some()
     {
         let flow: PlanFlowJsonLoose = serde_json::from_value(value)
             .map_err(|e| PlanParseError::InvalidJson(e.to_string()))?;
-        let summary = if !flow.output.trim().is_empty() {
-            flow.output
+        let output = flow.output.trim().to_string();
+        let user_reply = if flow.skip_execution
+            && !output.is_empty()
+            && !is_placeholder_plan_label(&output)
+        {
+            Some(output.clone())
+        } else {
+            None
+        };
+        let summary = if !output.is_empty() {
+            output
         } else if flow.input.is_empty() {
             "planned task".into()
         } else {
@@ -115,6 +125,7 @@ fn parse_plan_value(trimmed: &str) -> Result<PlanArtifact, PlanParseError> {
             flow.skip_execution,
             flow.knowledge_sufficient,
             flow.steps,
+            user_reply,
         )
     } else {
         let plan: PlanJsonLoose = serde_json::from_value(value)
@@ -124,11 +135,17 @@ fn parse_plan_value(trimmed: &str) -> Result<PlanArtifact, PlanParseError> {
         } else {
             plan.summary
         };
+        let user_reply = if plan.skip_execution && !is_placeholder_plan_label(&summary) {
+            Some(summary.clone())
+        } else {
+            None
+        };
         (
             summary,
             plan.skip_execution,
             plan.knowledge_sufficient,
             plan.subtasks,
+            user_reply,
         )
     };
 
@@ -155,6 +172,7 @@ fn parse_plan_value(trimmed: &str) -> Result<PlanArtifact, PlanParseError> {
         skip_execution,
         subtasks,
         knowledge_sufficient,
+        user_reply,
     };
     plan.enforce_knowledge_sufficiency();
 
@@ -163,6 +181,18 @@ fn parse_plan_value(trimmed: &str) -> Result<PlanArtifact, PlanParseError> {
     }
 
     Ok(plan)
+}
+
+/// 計画 JSON の短い内部ラベル。ユーザー向け `user_reply` にしない。
+fn is_placeholder_plan_label(text: &str) -> bool {
+    matches!(
+        text.trim(),
+        "" | "direct"
+            | "direct chat"
+            | "direct execution"
+            | "planned task"
+            | "single task"
+    )
 }
 
 /// LLM が `id` にタスク名（`"list_dir"`）を入れる・番号を文字列にする等を吸収する。

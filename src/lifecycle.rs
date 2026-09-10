@@ -532,6 +532,7 @@ mod tests {
                             depends_on: vec![],
 }],
             knowledge_sufficient: None,
+            user_reply: None,
         };
         composite.on_turn_started("hi", HostView::new(&mut scratch, WriteScope::Turn));
         composite.on_plan_finished("hi", &plan, HostView::new(&mut scratch, WriteScope::Turn));

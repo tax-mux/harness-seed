@@ -285,7 +285,11 @@ mod tests {
             )
             .1;
         assert!(obs.ok, "{}", obs.output);
-        assert!(obs.output.contains("react.rs"));
+        assert!(
+            obs.output.contains("react.rs") || obs.output.contains("react/mod.rs"),
+            "{}",
+            obs.output
+        );
     }
 
     #[test]
