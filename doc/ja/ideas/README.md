@@ -17,6 +17,7 @@
 | [shell-hook-rtk.md](shell-hook-rtk.md) | `run_cmd` の ShellHook チェーン、RTK を PreCommand で載せる案 |
 | [corpus2skill-integration.md](corpus2skill-integration.md) | Corpus2Skill（ナビ型 Skill ツリー）。知識想起の代替候補 |
 | [context-colormap.md](context-colormap.md) | カラーマップ HTML / ヒートマップ等（stderr v0 は実装済み） |
+| [verify-layer-and-harness-efficacy.md](verify-layer-and-harness-efficacy.md) | 検証層・差し戻し先・単層+Hook・ハーネス効き検証（ローカル前提） |
 
 ## 正本へ移動済み（スタブ）
 
