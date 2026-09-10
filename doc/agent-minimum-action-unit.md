@@ -3,6 +3,7 @@
 多くのエージェント実装では、実世界に効く最小の操作は **「1回のツール呼び出し（Tool Call）」** である。推論テキスト・計画 JSON・ユーザー向け返答は「行動」ではなく、ツール実行とその結果（Observation）がハーネス設計・ログ記録の基本単位になる。
 
 - ReAct 実装（現行）: [react-implementation.md](react-implementation.md)
+- アーキテクチャ（計画層・実行層）: [architecture/README.md](architecture/README.md)
 - コンテキストの層: [context-memory-mapping.md](context-memory-mapping.md)
 
 ## 1. 階層の全体像

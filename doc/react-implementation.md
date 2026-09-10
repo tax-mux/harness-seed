@@ -3,6 +3,7 @@
 本ドキュメントは **2026-05 時点のソースコード**に基づく、HarnessSeed における ReAct ループの実装スナップショットである。
 
 - 概念の背景: [agent-minimum-action-unit.md](agent-minimum-action-unit.md)
+- **アーキテクチャ（計画層・実行層）**: [architecture/README.md](architecture/README.md) / [architecture-en/README.md](architecture-en/README.md)
 - **コンテキストの用途別マッピング（短期/中期/長期）**: [context-memory-mapping.md](context-memory-mapping.md)
 - **組み込みツールの仕様（引数・挙動・失敗条件）**: [builtin_tools/README.md](builtin_tools/README.md)
 

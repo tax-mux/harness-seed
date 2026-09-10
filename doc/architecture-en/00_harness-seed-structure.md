@@ -3,6 +3,7 @@
 HarnessSeed is a ReAct harness built around a **serial pipeline: prompt intake → planning layer → execution layer → end**. Both layers share the same ReAct loop primitive (`run_layer_loop`), but differ in **whether tools are enabled** and **what type of output they produce**.
 
 - Full overview (SVG): [full_agent_architecture_v2.svg](../full_agent_architecture_v2.svg)
+- Index: [README.md](README.md)
 - Minimum action unit: [agent-minimum-action-unit.md](../agent-minimum-action-unit.md)
 - ReAct implementation details: [react-implementation.md](../react-implementation.md)
 - Outer advance loop: [advance-loop.md](../advance-loop.md)

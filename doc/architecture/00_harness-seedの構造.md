@@ -3,6 +3,7 @@
 HarnessSeed は **「プロンプト受取 → 計画層 → 実行層 → 終了」** という直列構成を中核とする ReAct ハーネスである。計画層と実行層はいずれも同じ ReAct ループ部品（`run_layer_loop`）を共有するが、**ツールの有無**と**出力の型**が異なる。
 
 - 全体像（SVG）: [full_agent_architecture_v2.svg](../full_agent_architecture_v2.svg)
+- 索引: [README.md](README.md)
 - 最少行動単位: [agent-minimum-action-unit.md](../agent-minimum-action-unit.md)
 - ReAct 実装詳細: [react-implementation.md](../react-implementation.md)
 - 外側推進ループ: [advance-loop.md](../advance-loop.md)
