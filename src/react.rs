@@ -120,6 +120,11 @@ pub struct SubtaskExecResult {
     pub used_step_driver: bool,
 }
 
+/// 回答合成に渡す evidence の 1 件あたり上限（文字数）。
+const SYNTHESIS_EVIDENCE_ITEM_MAX_CHARS: usize = 600;
+/// 回答合成に渡す evidence の総量上限（文字数）。
+const SYNTHESIS_EVIDENCE_TOTAL_MAX_CHARS: usize = 4000;
+
 /// 計画層のみ実行したプレビュー結果（`--plan-zone` 用）。
 #[derive(Debug)]
 pub struct PlanPreviewResult {
@@ -976,11 +981,12 @@ impl<E: AgentBrain> ReActLoop<E> {
         Ok(result)
     }
 
-    /// 最後のサブタスクがステップドライバだけのとき、観測を踏まえたユーザー向け回答を合成する。
+    /// 最後のサブタスクがステップドライバで、かつ生の answer がユーザー向けでないときだけ合成する。
     fn needs_user_answer_synthesis(results: &[SubtaskExecResult]) -> bool {
-        results
-            .last()
-            .is_some_and(|r| r.used_step_driver)
+        let Some(last) = results.last() else {
+            return false;
+        };
+        last.used_step_driver && !answer_looks_user_ready(&last.answer)
     }
 
     fn maybe_synthesize_user_answer(
@@ -993,6 +999,14 @@ impl<E: AgentBrain> ReActLoop<E> {
         total_steps: &mut usize,
     ) -> Result<(), ReActError> {
         if !Self::needs_user_answer_synthesis(results) {
+            if self.config.verbose || self.config.show_task_execution {
+                if results
+                    .last()
+                    .is_some_and(|r| r.used_step_driver && answer_looks_user_ready(&r.answer))
+                {
+                    eprintln!("[exec] skipping answer synthesis — step-driver answer already user-ready");
+                }
+            }
             return Ok(());
         }
         if self.is_stop_requested() {
@@ -1002,22 +1016,12 @@ impl<E: AgentBrain> ReActLoop<E> {
             eprintln!("[exec] synthesizing user-facing answer from step-driver evidence");
         }
 
-        let mut evidence = String::new();
-        for r in results {
-            evidence.push_str(&format!("### subtask {}\n{}\n\n", r.id, r.answer));
-        }
-        for obs in &combined_trace.observations {
-            if !obs.ok {
-                continue;
-            }
-            let snippet = if obs.output.chars().count() > 600 {
-                let s: String = obs.output.chars().take(600).collect();
-                format!("{s}…")
-            } else {
-                obs.output.clone()
-            };
-            evidence.push_str(&format!("- observation: {snippet}\n"));
-        }
+        let evidence = build_synthesis_evidence(
+            results,
+            &combined_trace.observations,
+            SYNTHESIS_EVIDENCE_ITEM_MAX_CHARS,
+            SYNTHESIS_EVIDENCE_TOTAL_MAX_CHARS,
+        );
 
         let mission = format!(
             "User request:\n{user_input}\n\nPlan summary: {}\n\n\
@@ -1733,6 +1737,76 @@ pub fn run_repl<E: AgentBrain>(
     Ok(())
 }
 
+/// ステップドライバの生 answer がそのままユーザー向けに十分そうなら true。
+fn answer_looks_user_ready(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.contains('\n') || trimmed.contains('\r') {
+        return false;
+    }
+    const STRUCTURED_MARKERS: &[char] = &['{', '[', '\t'];
+    !trimmed.chars().any(|c| STRUCTURED_MARKERS.contains(&c))
+}
+
+fn truncate_evidence_chars(text: &str, max_chars: usize) -> String {
+    let max_chars = max_chars.max(1);
+    let count = text.chars().count();
+    if count <= max_chars {
+        return text.to_string();
+    }
+    format!("{}…", text.chars().take(max_chars).collect::<String>())
+}
+
+fn append_evidence_budget(out: &mut String, budget: &mut usize, piece: &str) -> bool {
+    if *budget == 0 {
+        return false;
+    }
+    let count = piece.chars().count();
+    if count <= *budget {
+        out.push_str(piece);
+        *budget -= count;
+        return true;
+    }
+    let truncated: String = piece.chars().take(*budget).collect();
+    out.push_str(&truncated);
+    out.push('…');
+    *budget = 0;
+    false
+}
+
+fn build_synthesis_evidence(
+    results: &[SubtaskExecResult],
+    observations: &[crate::action::Observation],
+    item_max_chars: usize,
+    total_max_chars: usize,
+) -> String {
+    let mut out = String::new();
+    let mut budget = total_max_chars.max(1);
+
+    for r in results {
+        let body = truncate_evidence_chars(&r.answer, item_max_chars.min(budget));
+        let piece = format!("### subtask {}\n{body}\n\n", r.id);
+        if !append_evidence_budget(&mut out, &mut budget, &piece) {
+            break;
+        }
+    }
+
+    for obs in observations {
+        if !obs.ok || budget == 0 {
+            continue;
+        }
+        let snippet = truncate_evidence_chars(&obs.output, item_max_chars.min(budget));
+        let piece = format!("- observation: {snippet}\n");
+        if !append_evidence_budget(&mut out, &mut budget, &piece) {
+            break;
+        }
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1972,5 +2046,62 @@ mod tests {
         assert!(!second.answer.is_empty());
         // host recalled はターン終了後に復元される
         assert!(react.blocks.recalled.is_empty());
+    }
+
+    #[test]
+    fn answer_looks_user_ready_accepts_plain_sentence() {
+        assert!(answer_looks_user_ready("実装可能です。"));
+        assert!(answer_looks_user_ready("  hello world  "));
+    }
+
+    #[test]
+    fn answer_looks_user_ready_rejects_structured_or_multiline() {
+        assert!(!answer_looks_user_ready(""));
+        assert!(!answer_looks_user_ready("line1\nline2"));
+        assert!(!answer_looks_user_ready(r#"{"step":"answer"}"#));
+        assert!(!answer_looks_user_ready("a\tb"));
+        assert!(!answer_looks_user_ready("[a, b]"));
+    }
+
+    #[test]
+    fn needs_user_answer_synthesis_skips_when_driver_answer_is_ready() {
+        let results = vec![SubtaskExecResult {
+            id: 1,
+            answer: "一覧を取得しました。".into(),
+            steps_used: 1,
+            used_step_driver: true,
+        }];
+        assert!(!ReActLoop::<SimpleRuleBrain>::needs_user_answer_synthesis(&results));
+    }
+
+    #[test]
+    fn needs_user_answer_synthesis_when_driver_output_is_raw() {
+        let results = vec![SubtaskExecResult {
+            id: 1,
+            answer: "README.md\nCargo.toml\nsrc/".into(),
+            steps_used: 1,
+            used_step_driver: true,
+        }];
+        assert!(ReActLoop::<SimpleRuleBrain>::needs_user_answer_synthesis(&results));
+    }
+
+    #[test]
+    fn build_synthesis_evidence_caps_total_chars() {
+        let results = vec![
+            SubtaskExecResult {
+                id: 1,
+                answer: "a".repeat(500),
+                steps_used: 1,
+                used_step_driver: true,
+            },
+            SubtaskExecResult {
+                id: 2,
+                answer: "b".repeat(500),
+                steps_used: 1,
+                used_step_driver: true,
+            },
+        ];
+        let evidence = build_synthesis_evidence(&results, &[], 600, 400);
+        assert!(evidence.chars().count() <= 401);
     }
 }
