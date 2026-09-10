@@ -98,7 +98,8 @@ pub fn run_layer_loop<B: AgentBrain>(
             };
             emit_phase_started(turn_observer, opts.context_label, label);
         }
-        let prompt_ctx = TurnPromptContext::new(blocks, user_input, &trace, session);
+        let prompt_ctx = TurnPromptContext::new(blocks, user_input, &trace, session)
+            .with_step_budget(steps_used, opts.max_steps);
         let step = brain.decide(&prompt_ctx);
         if stop_requested
             .map(|t| t.load(Ordering::Relaxed))
@@ -270,14 +271,116 @@ pub fn run_layer_loop<B: AgentBrain>(
         );
     }
 
-    Err(ReActError::MaxStepsExceeded {
-        limit: opts.max_steps,
-    })
+    // 実行層: 上限到達でも硬失敗せず、trace 根拠で一度だけ answer を強制する。
+    finalize_exec_without_answer(
+        brain,
+        blocks,
+        session,
+        user_input,
+        &mut trace,
+        opts.max_steps,
+        plan,
+        subtask_results,
+        turn_observer,
+        show_prompt,
+        verbose,
+    )
 }
 
 const PLAN_FINALIZE_DIRECTIVE: &str = "\
 Plan step limit reached. Emit {\"step\":\"answer\",\"content\":...} now \
 with a plan that appropriately solves the user request. Do not emit thought or recall.";
+
+const EXEC_FINALIZE_DIRECTIVE: &str = "\
+Exec step limit reached. Emit {\"step\":\"answer\",\"content\":...} now \
+using evidence already in the turn trace. Do not emit thought or action.";
+
+fn fallback_answer_from_trace(user_input: &str, trace: &TurnTrace) -> String {
+    let mut out = String::from(
+        "Reached the step limit before a dedicated final answer. \
+Evidence gathered so far (may be incomplete):\n\n",
+    );
+    let mut budget = 2_400usize;
+    let ok_obs: Vec<_> = trace.observations.iter().filter(|o| o.ok).collect();
+    if ok_obs.is_empty() {
+        out.push_str("(No successful tool observations were recorded.)\n");
+        out.push_str(&format!("\nUser request was: {user_input}\n"));
+        return out;
+    }
+    for obs in ok_obs.iter().rev().take(4).rev() {
+        if budget == 0 {
+            break;
+        }
+        let snippet: String = obs.output.chars().take(budget.min(600)).collect();
+        let used = snippet.chars().count();
+        budget = budget.saturating_sub(used);
+        out.push_str(&format!("- {}\n", snippet.replace('\n', " ")));
+    }
+    out.push_str(&format!("\nUser request was: {user_input}\n"));
+    out
+}
+
+fn finalize_exec_without_answer<B: AgentBrain>(
+    brain: &mut B,
+    blocks: &mut crate::context::PromptBlocks,
+    session: &SessionMemory,
+    user_input: &str,
+    trace: &mut TurnTrace,
+    max_steps: usize,
+    plan: Option<PlanArtifact>,
+    subtask_results: Vec<SubtaskExecResult>,
+    turn_observer: Option<&TurnObserver>,
+    show_prompt: bool,
+    verbose: bool,
+) -> Result<TurnResult, ReActError> {
+    let steps_used = max_steps.saturating_add(1);
+    trace.push_thought(EXEC_FINALIZE_DIRECTIVE.into());
+    let prompt_ctx = TurnPromptContext::new(blocks, user_input, trace, session)
+        .with_step_budget(steps_used, max_steps);
+    let step = brain.decide(&prompt_ctx);
+    if let Some(usage) = brain.poll_context_usage() {
+        if show_prompt {
+            eprintln_step_prompt("exec", steps_used, &usage.prompt_body);
+        }
+        eprintln!("[context exec] {usage}");
+        emit_llm_step(turn_observer, "exec", steps_used, &usage, &step);
+        trace.push_context_usage(usage);
+    }
+    if verbose {
+        eprintln!("[exec] finalize decide: {step:?}");
+    }
+
+    let answer = match step {
+        AgentStep::Answer(answer) => {
+            eprintln!("[exec] finalized via mandatory answer after step limit");
+            answer
+        }
+        other => {
+            let kind = match &other {
+                AgentStep::Thought(_) => "thought",
+                AgentStep::Action(_) => "action",
+                AgentStep::Recall(_) => "recall",
+                AgentStep::Answer(_) => "answer",
+            };
+            eprintln!(
+                "[exec] no answer after finalize prompt (got {kind}) — falling back to trace evidence"
+            );
+            fallback_answer_from_trace(user_input, trace)
+        }
+    };
+
+    let context = TurnContextSummary::from_usages(&trace.context_usages);
+    Ok(TurnResult {
+        answer,
+        trace: std::mem::take(trace),
+        steps_used,
+        context,
+        plan,
+        harness: None,
+        subtask_results,
+        advance_phases: vec![],
+    })
+}
 
 fn finalize_plan_without_answer<B: AgentBrain>(
     brain: &mut B,
@@ -736,5 +839,70 @@ mod tests {
         assert!(harness.plan.skip_execution);
         assert_eq!(harness.plan.knowledge_sufficient, Some(true));
         assert!(harness.plan.subtasks.is_empty());
+    }
+
+    #[test]
+    fn exec_loop_finalizes_instead_of_max_steps_error() {
+        let mut brain = SeqBrain {
+            steps: vec![
+                AgentStep::Action(Action::new(
+                    1,
+                    "echo",
+                    serde_json::json!({ "message": "one" }),
+                )),
+                AgentStep::Action(Action::new(
+                    2,
+                    "echo",
+                    serde_json::json!({ "message": "two" }),
+                )),
+                AgentStep::Action(Action::new(
+                    3,
+                    "echo",
+                    serde_json::json!({ "message": "three" }),
+                )),
+                // finalize decide still refuses to answer → trace fallback
+                AgentStep::Action(Action::new(
+                    4,
+                    "echo",
+                    serde_json::json!({ "message": "four" }),
+                )),
+            ],
+            index: 0,
+        };
+        let mut tools = ToolRuntime::from_registry(
+            crate::runtime::RuntimeEnvironment::detect(),
+            None,
+            crate::tool::full_builtin_registry(false),
+        );
+        let mut blocks = PromptBlocks::default();
+        let session = SessionMemory::default();
+
+        let turn = run_layer_loop(
+            &mut brain,
+            &mut tools,
+            &mut blocks,
+            &session,
+            "summarize evidence",
+            LayerLoopOptions::exec(3, 1),
+            false,
+            false,
+            false,
+            None,
+            vec![],
+            None,
+            None,
+            None,
+            0,
+        )
+        .expect("exec should finalize, not MaxStepsExceeded");
+
+        assert!(
+            turn.answer.contains("step limit") || turn.answer.contains("Evidence"),
+            "got: {}",
+            turn.answer
+        );
+        assert!(turn.answer.contains("summarize evidence"));
+        assert_eq!(turn.steps_used, 4);
+        assert!(!turn.trace.observations.is_empty());
     }
 }

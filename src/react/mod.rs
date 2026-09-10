@@ -640,7 +640,11 @@ impl<E: AgentBrain> ReActLoop<E> {
 
     fn prepare_harness_for_subtask(&mut self, harness: &mut HarnessState, subtask: &Subtask) {
         harness.current_step = subtask.id;
-        let policy = self.task_registry.tool_policy_for_subtask(subtask);
+        let available: std::collections::HashSet<String> =
+            self.tools.registry().names().into_iter().collect();
+        let policy = self
+            .task_registry
+            .tool_policy_for_subtask_with_tools(subtask, Some(&available));
         harness.set_tool_set_from_policy(policy.as_ref());
         self.sync_harness_step_to_blocks(harness);
     }

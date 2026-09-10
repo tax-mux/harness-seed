@@ -246,6 +246,8 @@ On parse failure, JSON repair and multi-object extraction (`extract_json_objects
 | `skip_execution` | If `true`, skip execution layer and reply directly |
 | `subtasks` | Serial subtasks (ids start at 1, must be unique) |
 
+`task: replan` is a control-plane id (not a skill JSON). Include it when later steps depend on unknown results; the advance loop restarts the plan layer. It is not an exec tool name.
+
 The summary describes the intended work, while the subtask list determines whether there is work to run. Marking execution as skipped routes the request to a direct reply instead of the subtask executor.
 
 `needs_execution()` = `!skip_execution && !subtasks.is_empty()`

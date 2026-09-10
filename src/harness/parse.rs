@@ -3,7 +3,7 @@
 use serde_json::json;
 
 use super::state::HarnessState;
-use crate::plan::{parse_plan, PlanArtifact, PlanParseError, Subtask};
+use crate::plan::{parse_plan, strengthen_weak_done_when, PlanArtifact, PlanParseError, Subtask};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum HarnessParseError {
@@ -112,13 +112,17 @@ fn parse_numbered_steps(text: &str) -> Option<PlanArtifact> {
             task: None,
             params: json!({}),
             goal: body,
-            done_when: "step completed".into(),
-                    depends_on: vec![],
-});
+            done_when: crate::plan::EVIDENCE_ORIENTED_DONE_WHEN.into(),
+            depends_on: vec![],
+        });
     }
 
     if subtasks.is_empty() {
         return None;
+    }
+
+    for st in &mut subtasks {
+        strengthen_weak_done_when(st);
     }
 
     let summary = text
@@ -183,5 +187,9 @@ mod tests {
         let raw = "1. doc ディレクトリを確認する\n2. 結果を要約する";
         let state = parse_harness_strict(raw, "fallback").unwrap();
         assert_eq!(state.plan.subtasks.len(), 2);
+        assert!(
+            state.plan.subtasks.iter().all(|s| s.done_when.contains("concrete evidence")),
+            "weak step-completed defaults should be strengthened"
+        );
     }
 }

@@ -195,7 +195,7 @@ ReAct の `web_search` ツールが有効になるのは API キーが解決で�
 
 | キー | 意味 | 既定 |
 |------|------|------|
-| `max_steps` | **1 回の REPL 入力**あたりの最大 `decide` 回数（Thought/Action のループ。溢れたら `MaxStepsExceeded`） | `16` |
+| `max_steps` | **1 回の REPL 入力**あたりの最大 `decide` 回数（Thought/Action のループ。溢れたら一度 answer を強制し、だめなら trace 根拠でフォールバック） | `16` |
 | `session_max_turns` | **完了ターン**を `Previous turns` に残す件数（超過分は古い順に破棄） | `8` |
 | `verbose` | Thought/Action/Observation を stderr に出す（CLI の `-v` でも ON） | `false` |
 | `show_prompt` | 各 ReAct ステップのプロンプト全文を stderr に出す（CLI の `--show-prompt` でも ON） | `false` |

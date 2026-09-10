@@ -162,27 +162,98 @@ impl<E: AgentBrain> ReActLoop<E> {
             }
             return Ok(());
         }
+        self.synthesize_grounded_answer(
+            user_input,
+            plan,
+            results,
+            final_answer,
+            combined_trace,
+            total_steps,
+            false,
+        )
+    }
+
+    /// 推進ループでフェーズが 2 以上あるとき、最終回答をフェーズ証拠へ再接地する。
+    pub(super) fn maybe_synthesize_advance_answer(
+        &mut self,
+        user_input: &str,
+        plan: &PlanArtifact,
+        results: &[SubtaskExecResult],
+        final_answer: &mut String,
+        combined_trace: &mut TurnTrace,
+        total_steps: &mut usize,
+    ) -> Result<(), ReActError> {
+        if !synthesis::needs_advance_answer_synthesis(results) {
+            return Ok(());
+        }
+        self.synthesize_grounded_answer(
+            user_input,
+            plan,
+            results,
+            final_answer,
+            combined_trace,
+            total_steps,
+            true,
+        )
+    }
+
+    fn synthesize_grounded_answer(
+        &mut self,
+        user_input: &str,
+        plan: &PlanArtifact,
+        results: &[SubtaskExecResult],
+        final_answer: &mut String,
+        combined_trace: &mut TurnTrace,
+        total_steps: &mut usize,
+        advance_style: bool,
+    ) -> Result<(), ReActError> {
         if self.is_stop_requested() {
             return Err(ReActError::Cancelled);
         }
         if self.config.verbose || self.config.show_task_execution {
-            eprintln!("[exec] synthesizing user-facing answer from step-driver evidence");
+            if advance_style {
+                eprintln!("[advance] synthesizing user-facing answer from multi-phase evidence");
+            } else {
+                eprintln!("[exec] synthesizing user-facing answer from step-driver evidence");
+            }
         }
 
-        let evidence = synthesis::build_synthesis_evidence(
-            results,
-            &combined_trace.observations,
-            SYNTHESIS_EVIDENCE_ITEM_MAX_CHARS,
-            SYNTHESIS_EVIDENCE_TOTAL_MAX_CHARS,
-        );
+        let evidence = if advance_style {
+            synthesis::build_advance_phase_evidence(
+                results,
+                SYNTHESIS_EVIDENCE_ITEM_MAX_CHARS,
+                SYNTHESIS_EVIDENCE_TOTAL_MAX_CHARS,
+            )
+        } else {
+            synthesis::build_synthesis_evidence(
+                results,
+                &combined_trace.observations,
+                SYNTHESIS_EVIDENCE_ITEM_MAX_CHARS,
+                SYNTHESIS_EVIDENCE_TOTAL_MAX_CHARS,
+            )
+        };
 
-        let mission = format!(
-            "User request:\n{user_input}\n\nPlan summary: {}\n\n\
+        let grounding = crate::advance::evidence_grounding_rules();
+        let mission = if advance_style {
+            format!(
+                "User request:\n{user_input}\n\nPlan summary: {}\n\n\
+Evidence from completed phases (do not invent beyond this):\n{evidence}\n\n\
+{grounding}\n\
+Produce the final user-facing reply in clear language based only on the evidence. \
+Prefer claims that cite paths or prior-phase findings. \
+Mark anything not supported as an unverified candidate. \
+Prefer {{\"step\":\"answer\",\"content\":\"...\"}} with no tools.",
+                plan.summary
+            )
+        } else {
+            format!(
+                "User request:\n{user_input}\n\nPlan summary: {}\n\n\
 Evidence from completed work (do not invent beyond this):\n{evidence}\n\n\
 Reply to the user in clear language based only on the evidence. \
 Prefer {{\"step\":\"answer\",\"content\":\"...\"}} with no tools if evidence is sufficient.",
-            plan.summary
-        );
+                plan.summary
+            )
+        };
 
         let synth = self.run_turn_single(&mission, false, None, vec![])?;
         *final_answer = synth.answer;
@@ -601,7 +672,11 @@ Prefer {{\"step\":\"answer\",\"content\":\"...\"}} with no tools if evidence is 
             }
         }
         let saved_catalog = self.blocks.tool_catalog.clone();
-        let policy = self.task_registry.tool_policy_for_subtask(subtask);
+        let available: std::collections::HashSet<String> =
+            self.tools.registry().names().into_iter().collect();
+        let policy = self
+            .task_registry
+            .tool_policy_for_subtask_with_tools(subtask, Some(&available));
         if let Some(ref p) = policy {
             self.blocks.tool_catalog = self.tools.format_catalog_filtered(Some(p));
             self.tools.set_exec_policy(Some(p.clone()));

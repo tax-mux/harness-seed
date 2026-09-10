@@ -107,11 +107,23 @@ impl std::error::Error for PlanQueueError {}
 /// 予約タスク id: 実行層ではなく計画層を再起動する。
 pub const REPLAN_TASK_ID: &str = "replan";
 
+/// 制御プレーン用タスク id（スキル JSON には載せず、ハーネスが解釈する）。
+pub fn is_reserved_control_task(task_id: &str) -> bool {
+    task_id.eq_ignore_ascii_case(REPLAN_TASK_ID)
+}
+
 pub fn is_replan_subtask(subtask: &Subtask) -> bool {
     subtask
         .task
         .as_deref()
-        .is_some_and(|t| t.eq_ignore_ascii_case(REPLAN_TASK_ID))
+        .is_some_and(is_reserved_control_task)
+}
+
+/// 計画カタログ末尾に載せる制御プレーン説明（スキル一覧とは別枠）。
+pub fn control_plane_catalog_footer() -> &'static str {
+    "\n\nControl-plane tasks (harness-handled; not exec tools; do not invent as Action tools):\n\
+     - replan: After prior steps finish, restart planning for remaining work. \
+Set goal to what must be decided next from completed-phase evidence."
 }
 
 #[cfg(test)]
@@ -228,5 +240,8 @@ mod tests {
                     depends_on: vec![],
 };
         assert!(is_replan_subtask(&s));
+        assert!(is_reserved_control_task("replan"));
+        assert!(is_reserved_control_task("RePlan"));
+        assert!(!is_reserved_control_task("web_research"));
     }
 }

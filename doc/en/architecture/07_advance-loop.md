@@ -62,6 +62,13 @@ sequenceDiagram
 The advance loop makes one plan, then handles its subtasks as successive phases. Before each phase, it restores the accumulated phase notes into recalled context.
 
 The execution result becomes both the phase outcome and evidence for the following phase. When no phases remain, their work is returned as one turn result.
+
+When the plan emits `task: replan`, treat it as control-plane work, not an exec tool. `resolve_plan` keeps the id (it is not demoted to freeform); the advance loop restarts the plan layer. The exec layer must not invent an Action tool named `replan`.
+
+Later phases receive an **evidence grounding** rule in Recalled (and in the mission when prior results exist): claims must cite prior-phase evidence; unsupported points are unverified candidates or need more tools. After two or more phases finish, the harness runs a final **answer synthesis** pass that rewrites the user reply from phase evidence only.
+
+When successful tool observations are still thin before the next phase, the harness inserts one **evidence-deepening** subtask (also after an empty `replan`). Weak `done_when` values such as `step completed` are raised to an evidence-oriented criterion at plan resolve.
+
 ## Library
 
 - `AdvanceConfig`, `AdvanceProgress` — `harness_seed::advance`

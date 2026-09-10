@@ -25,9 +25,11 @@ Schema:
 
 Rules:
 - Prefer `action` or `answer` directly; use `thought` only when you truly need brief reasoning before the next step.
-- Use only tools listed in the Tool catalog below (exact names and args).
+- Use only tools listed in the Tool catalog below (exact names and args). Never invent tool names (including control-plane words like replan).
 - If the user needs a tool, return action (not answer yet).
 - After observations appear in the trace, use them and return answer when done.
+- If observations do not clearly support the goal, gather more evidence with another listed tool or a refined query before answering that something does not exist or cannot be found. Prefer calibrated uncertainty over false negatives.
+- Respect the step budget in the user message: when near the limit, prefer `answer` with evidence already in the trace over starting broad new exploration.
 - Avoid wasteful re-exploration: if the trace already has a successful observation for the same tool and arguments and you have not changed relevant state since, do not repeat that call—use the observation and advance (narrower evidence, act, or answer). Re-running the same command after you changed something (verify / heal loops) is appropriate.
 - For coding tasks in this repo: grep or list_dir → read_file → write_file → run_cmd (e.g. cargo check) as needed.
 - For simple greetings, you may answer directly without tools.
@@ -42,6 +44,7 @@ pub const REACT_WEB_SEARCH_GUIDANCE: &str = r#"
 Web search ReAct (Brave Search API is enabled):
 - Use web_search when the user asks about current events, external APIs, documentation not in the repo, or facts you cannot verify from workspace files alone.
 - Typical flow: thought → web_search with a short focused query (and optional count) → read observations → answer citing titles/URLs from results.
+- If the first result page is thin or off-target, try one alternate query (spelling, alias, site, language) before concluding that no match exists.
 - You may combine web_search with local tools: e.g. web_search then read_file to compare upstream docs with this codebase.
 - Do not use web_search for pure local edits, grep-only exploration, or greetings unless the user explicitly wants web lookup.
 - If web_search fails (missing key / API error), say so in the answer and continue with local tools only if still useful.
@@ -191,6 +194,8 @@ pub struct TurnPromptContext<'a> {
     pub user_input: &'a str,
     pub trace: &'a TurnTrace,
     pub session: &'a SessionMemory,
+    /// 実行層ループのステップ予算（`used` / `max`）。未設定なら予算行を出さない。
+    pub step_budget: Option<(usize, usize)>,
 }
 
 impl<'a> TurnPromptContext<'a> {
@@ -205,7 +210,13 @@ impl<'a> TurnPromptContext<'a> {
             user_input,
             trace,
             session,
+            step_budget: None,
         }
+    }
+
+    pub fn with_step_budget(mut self, used: usize, max: usize) -> Self {
+        self.step_budget = Some((used, max));
+        self
     }
 
     /// LLM コネクタへ渡す `system` + `user` メッセージ列。
@@ -286,9 +297,22 @@ impl<'a> TurnPromptContext<'a> {
         } else {
             format!("{previous}\n")
         };
+        let budget_block = match self.step_budget {
+            Some((used, max)) => {
+                let remaining = max.saturating_sub(used);
+                if remaining <= 2 {
+                    format!(
+                        "Step budget: {used}/{max} (near limit — prefer answer with current evidence; do not start broad new exploration).\n\n"
+                    )
+                } else {
+                    format!("Step budget: {used}/{max}.\n\n")
+                }
+            }
+            None => String::new(),
+        };
         let trace_text = format_trace(self.trace);
         format!(
-            "{previous_block}User input:\n{}\n\nTurn trace so far:\n{trace_text}\n\nNext step JSON:",
+            "{previous_block}{budget_block}User input:\n{}\n\nTurn trace so far:\n{trace_text}\n\nNext step JSON:",
             self.user_input
         )
     }
@@ -320,27 +344,69 @@ pub fn format_plan_rule_prompt_preview(ctx: &TurnPromptContext<'_>) -> String {
 }
 
 pub fn format_trace(trace: &TurnTrace) -> String {
+    format_trace_with_limits(
+        trace,
+        TRACE_PROMPT_KEEP_RECENT_OBSERVATIONS,
+        TRACE_PROMPT_RECENT_OBSERVATION_CHARS,
+        TRACE_PROMPT_OLDER_OBSERVATION_CHARS,
+        TRACE_PROMPT_THOUGHT_CHARS,
+    )
+}
+
+/// Prompt 向け trace 整形の既定: 直近 observation を厚め、古いものは短くする。
+pub const TRACE_PROMPT_KEEP_RECENT_OBSERVATIONS: usize = 2;
+pub const TRACE_PROMPT_RECENT_OBSERVATION_CHARS: usize = 2_000;
+pub const TRACE_PROMPT_OLDER_OBSERVATION_CHARS: usize = 400;
+pub const TRACE_PROMPT_THOUGHT_CHARS: usize = 400;
+
+pub fn format_trace_with_limits(
+    trace: &TurnTrace,
+    keep_recent_obs: usize,
+    recent_obs_chars: usize,
+    older_obs_chars: usize,
+    thought_chars: usize,
+) -> String {
     let mut trace_text = String::new();
     for (i, t) in trace.thoughts.iter().enumerate() {
-        trace_text.push_str(&format!("[thought {i}] {t}\n"));
+        let body = clip_chars(t, thought_chars);
+        trace_text.push_str(&format!("[thought {i}] {body}\n"));
     }
     for action in &trace.actions {
+        let args = clip_chars(&action.args.to_string(), 500);
         trace_text.push_str(&format!(
             "[action {}] {} {}\n",
-            action.invoke_id, action.tool, action.args
+            action.invoke_id, action.tool, args
         ));
     }
-    for obs in &trace.observations {
+    let obs_count = trace.observations.len();
+    let recent_start = obs_count.saturating_sub(keep_recent_obs);
+    for (idx, obs) in trace.observations.iter().enumerate() {
         let status = if obs.ok { "ok" } else { "err" };
+        let limit = if idx >= recent_start {
+            recent_obs_chars
+        } else {
+            older_obs_chars
+        };
+        let body = clip_chars(&obs.output, limit);
         trace_text.push_str(&format!(
-            "[observation {}] {status}: {}\n",
-            obs.invoke_id, obs.output
+            "[observation {}] {status}: {body}\n",
+            obs.invoke_id
         ));
     }
     if trace_text.is_empty() {
         trace_text.push_str("(empty trace — first step this turn)\n");
     }
     trace_text
+}
+
+fn clip_chars(s: &str, max_chars: usize) -> String {
+    let count = s.chars().count();
+    if count <= max_chars {
+        return s.to_string();
+    }
+    let keep = max_chars.saturating_sub(24);
+    let head: String = s.chars().take(keep).collect();
+    format!("{head}…[clipped {count} chars]")
 }
 
 #[derive(Debug)]
@@ -474,6 +540,24 @@ mod tests {
         let text = format_trace(&trace);
         assert!(text.contains("[observation 1] ok:"));
         assert!(text.contains("ok out"));
+    }
+
+    #[test]
+    fn format_trace_compresses_older_observations() {
+        let mut trace = TurnTrace::default();
+        let old = "あ".repeat(2_000);
+        let recent = "い".repeat(100);
+        trace.push_observation(Observation::success(1, old));
+        trace.push_observation(Observation::success(2, "mid"));
+        trace.push_observation(Observation::success(3, recent.clone()));
+        let text = format_trace_with_limits(&trace, 1, 200, 80, 100);
+        assert!(text.contains("clipped") || text.contains("…"));
+        assert!(text.contains(&recent));
+        let old_line = text
+            .lines()
+            .find(|l| l.contains("[observation 1]"))
+            .expect("old obs line");
+        assert!(old_line.chars().count() < 200);
     }
 
     #[test]
