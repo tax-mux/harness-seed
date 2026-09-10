@@ -110,7 +110,7 @@ mod tests {
         assert!(openai.can_stream());
         assert!(ollama.can_stream());
 
-        // Gemini は #661 で実装済で true、Anthropic は既定 false（#662 で実装予定）
+        // 全 provider がストリーミング対応（#660-#662 完成）
         let gemini =
             LlmConnectorKind::from_config(cfg(LlmProvider::Gemini, "https://generativelanguage.googleapis.com"))
                 .unwrap();
@@ -120,6 +120,6 @@ mod tests {
         ))
         .unwrap();
         assert!(gemini.can_stream(), "Gemini は #661 でストリーミング実装済み");
-        assert!(!anthropic.can_stream(), "Anthropic は #662 で実装予定");
+        assert!(anthropic.can_stream(), "Anthropic は #662 でストリーミング実装済み");
     }
 }
