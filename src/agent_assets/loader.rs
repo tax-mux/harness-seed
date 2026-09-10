@@ -328,6 +328,7 @@ mod tests {
 
     #[test]
     fn load_agent_assets_reads_rules_skills_tools() {
+        let _env_lock = crate::test_env::lock_env();
         let root = std::env::temp_dir().join(format!("hs-agent-load-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();

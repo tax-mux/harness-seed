@@ -247,6 +247,7 @@ mod tests {
 
     #[test]
     fn seed_builder_merges_agent_and_registers_plugins() {
+        let _env_lock = crate::test_env::lock_env();
         let root = std::env::temp_dir().join(format!("hs-seed-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();

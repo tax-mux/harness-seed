@@ -28,6 +28,8 @@ pub mod react;
 pub mod runtime;
 pub mod seed;
 pub mod session;
+#[cfg(test)]
+pub(crate) mod test_env;
 pub mod tasks;
 pub mod text_match;
 pub mod tool;
