@@ -37,13 +37,16 @@ pub use agent_assets::{
     ScriptToolDefinition, DEFAULT_FILENAME,
 };
 pub use advance::{
-    apply_citation_gate, build_phase_note, count_ok_tool_observations,
-    count_substantive_ok_observations, evidence_deepening_subtask, evidence_grounding_rules,
-    evidence_paths_from_notes, evidence_paths_from_texts, format_recalled_progress,
-    is_substantive_evidence_tool, prepare_phase_recalled, prior_evidence_is_thin,
-    restore_base_recalled, unverified_cited_paths, AdvanceConfig, AdvancePhaseNote,
-    AdvancePhaseSummary, AdvanceProgress, MIN_OK_TOOL_OBSERVATIONS_BEFORE_JUDGMENT,
-    MIN_SUBSTANTIVE_OK_OBSERVATIONS_BEFORE_JUDGMENT, SUBSTANTIVE_EVIDENCE_TOOLS,
+    apply_absence_gate, apply_citation_gate, build_phase_note, claim_audit_rules,
+    claim_falsification_retry_subtask, claim_falsification_subtask, classify_absence_claims,
+    count_ok_tool_observations, count_substantive_ok_observations, evidence_deepening_subtask,
+    evidence_grounding_rules, evidence_paths_from_notes, evidence_paths_from_texts,
+    extract_absence_claims, format_recalled_progress, is_substantive_evidence_tool,
+    looks_like_absence_claim, prepare_phase_recalled, prior_evidence_is_thin,
+    prior_has_auditable_claims, restore_base_recalled, unverified_cited_paths, AbsenceClaimVerdict,
+    AdvanceConfig, AdvancePhaseNote, AdvancePhaseSummary, AdvanceProgress,
+    MIN_OK_TOOL_OBSERVATIONS_BEFORE_JUDGMENT, MIN_SUBSTANTIVE_OK_OBSERVATIONS_BEFORE_JUDGMENT,
+    SUBSTANTIVE_EVIDENCE_TOOLS,
 };
 pub use brain::{AgentBrain, BrainMode, BrainPair, SimpleRuleBrain};
 pub use brave_search::{BraveSearchConfig, BraveSearchError, WebSearchHit};

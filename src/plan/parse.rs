@@ -34,7 +34,7 @@ struct SubtaskJson {
 
 #[derive(Debug, Deserialize)]
 struct PlanJsonLoose {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_flex_string")]
     summary: String,
     #[serde(default)]
     skip_execution: bool,
@@ -46,16 +46,76 @@ struct PlanJsonLoose {
 
 #[derive(Debug, Deserialize)]
 struct PlanFlowJsonLoose {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_flex_string_list")]
     input: Vec<String>,
     #[serde(default)]
     steps: Vec<Value>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_flex_string")]
     output: String,
     #[serde(default)]
     skip_execution: bool,
     #[serde(default)]
     knowledge_sufficient: Option<bool>,
+}
+
+/// LLM が string の代わりに array / object / number を返してもテキスト化する。
+fn deserialize_flex_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    Ok(flex_value_to_string(value))
+}
+
+/// `input` が文字列1本・配列・混在でも `Vec<String>` にする。
+fn deserialize_flex_string_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    Ok(match value {
+        Value::Null => Vec::new(),
+        Value::String(s) => {
+            if s.trim().is_empty() {
+                Vec::new()
+            } else {
+                vec![s]
+            }
+        }
+        Value::Array(items) => items
+            .into_iter()
+            .map(flex_value_to_string)
+            .filter(|s| !s.trim().is_empty())
+            .collect(),
+        other => {
+            let s = flex_value_to_string(other);
+            if s.trim().is_empty() {
+                Vec::new()
+            } else {
+                vec![s]
+            }
+        }
+    })
+}
+
+fn flex_value_to_string(value: Value) -> String {
+    match value {
+        Value::Null => String::new(),
+        Value::String(s) => s,
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::Array(items) => items
+            .into_iter()
+            .map(flex_value_to_string)
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        other @ Value::Object(_) => value_to_compact_json(&other),
+    }
+}
+
+fn value_to_compact_json(value: &Value) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| value.to_string())
 }
 
 /// LLM の生テキストから [`PlanArtifact`] を復元する。
@@ -228,14 +288,12 @@ fn parse_subtask_value(value: &Value, fallback_id: u32) -> Option<SubtaskJson> {
     let params = obj.get("params").cloned().unwrap_or(Value::Object(Default::default()));
     let goal = obj
         .get("goal")
-        .and_then(|g| g.as_str())
-        .unwrap_or("")
-        .to_string();
+        .map(|g| flex_value_to_string(g.clone()))
+        .unwrap_or_default();
     let done_when = obj
         .get("done_when")
-        .and_then(|g| g.as_str())
-        .unwrap_or("")
-        .to_string();
+        .map(|g| flex_value_to_string(g.clone()))
+        .unwrap_or_default();
     let depends_on = obj
         .get("depends_on")
         .and_then(|v| v.as_array())
@@ -477,6 +535,43 @@ next", "done_when": "done"}
         let plan = parse_plan(raw).expect("string id");
         assert_eq!(plan.subtasks[0].id, 2);
         assert_eq!(plan.subtasks[0].task.as_deref(), Some("list_dir"));
+    }
+
+    #[test]
+    fn accepts_summary_and_goal_as_arrays() {
+        // LLM が string の代わりに sequence を返すと旧実装は InvalidJson で落ちた
+        let raw = r#"{
+  "summary": ["調査", "改良点を提案"],
+  "skip_execution": false,
+  "subtasks": [
+    {
+      "id": 1,
+      "task": "list_dir",
+      "goal": ["トップを見る", "src を確認"],
+      "done_when": ["一覧取得"]
+    }
+  ]
+}"#;
+        let plan = parse_plan(raw).expect("array fields");
+        assert!(plan.summary.contains("調査"));
+        assert!(plan.summary.contains("改良点"));
+        assert!(plan.subtasks[0].goal.contains("トップ"));
+        assert!(plan.subtasks[0].goal.contains("src"));
+        assert!(plan.subtasks[0].done_when.contains("一覧"));
+    }
+
+    #[test]
+    fn accepts_flow_output_as_array_and_input_as_string() {
+        let raw = r#"{
+  "input": "user request",
+  "steps": [
+    {"id": 1, "goal": "gather", "done_when": "done"}
+  ],
+  "output": ["phase1", "phase2"]
+}"#;
+        let plan = parse_plan(raw).expect("flex flow");
+        assert!(plan.summary.contains("phase1"));
+        assert_eq!(plan.subtasks.len(), 1);
     }
 }
 

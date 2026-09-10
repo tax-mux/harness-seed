@@ -101,10 +101,17 @@ The standard turn shape: **plan first, then execute** (two stages).
 
 ### Advance loop
 
-Splits a long request into **multiple phases**, carries summaries of finished phases into the next prompt. Similar to `two_phase`, with thicker hand-off between phases.
+Splits a long request into **multiple phases**, carries summaries of finished phases into the next prompt. Similar to `two_phase`, with thicker hand-off between phases. Also hosts general gates: evidence deepening, claim falsification, and citation checks.
 
 - Details: [07_advance-loop.md](07_advance-loop.md)
-- Typical symbols: config `react.advance`, `run_turn_advance`
+- Typical symbols: config `react.advance` (`claim_check` / `citation_check` / `min_substantive_obs`, …), `run_turn_advance`
+
+### Claim falsification
+
+An injected phase that re-reads cited Paths and once seeks contradictory evidence for prior Claims, labeling each supported / falsified / unverified. Synthesis drops falsified claims.
+
+- Details: [07_advance-loop.md](07_advance-loop.md) (Claim falsification)
+- Typical symbols: `claim_falsification_subtask`, `react.advance.claim_check`
 
 ---
 

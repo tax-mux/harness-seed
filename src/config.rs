@@ -163,6 +163,10 @@ pub struct AdvanceSection {
     pub min_substantive_obs: Option<usize>,
     /// 最終合成後にパス引用を証拠 Paths と照合する。
     pub citation_check: Option<bool>,
+    /// 結論前に先行 Claims の否定証拠を一度探す。
+    pub claim_check: Option<bool>,
+    /// 最終回答の不在主張を trace と照合する。
+    pub absence_check: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -447,6 +451,8 @@ impl AppConfig {
                     .unwrap_or(3)
                     .max(1),
                 citation_check: self.react.advance.citation_check.unwrap_or(true),
+                claim_check: self.react.advance.claim_check.unwrap_or(true),
+                absence_check: self.react.advance.absence_check.unwrap_or(true),
             },
             monitor_plan_html: false,
             memory: self.memory_runtime_config(),
