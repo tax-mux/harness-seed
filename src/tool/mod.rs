@@ -1,6 +1,7 @@
 //! ツール実行: プラグイン [`Tool`] + [`ToolRegistry`] + [`ToolPack`]。
 
 mod builtin;
+mod edit;
 mod pack;
 mod registry;
 mod traits;

@@ -4,13 +4,14 @@ use super::builtin::{
     EchoTool, GrepTool, ListDirTool, ReadFileTool, RunCmdTool, TimeTool, WebSearchTool,
     WriteFileTool,
 };
+use super::edit::EditFileTool;
 use super::registry::ToolRegistry;
 /// あらかじめ定義したツール束。複数指定で合成できる。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ToolPack {
     /// `echo`, `time`
     Basic,
-    /// `list_dir`, `grep`, `read_file`, `write_file`, `run_cmd`
+    /// `edit_file`, `list_dir`, `grep`, `read_file`, `write_file`, `run_cmd`
     Coding,
     /// `web_search`（Brave API キーがあるときのみ登録）
     WebSearch,
@@ -51,6 +52,7 @@ impl ToolPack {
                 registry.register(Box::new(GrepTool));
                 registry.register(Box::new(ReadFileTool));
                 registry.register(Box::new(WriteFileTool));
+                registry.register(Box::new(EditFileTool));
                 registry.register(Box::new(RunCmdTool));
             }
             Self::WebSearch => {

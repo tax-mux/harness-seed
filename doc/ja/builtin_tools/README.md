@@ -12,6 +12,7 @@ HarnessSeed が `ToolRuntime`（`src/tool/`）に実装しているツール。L
 | `grep` | [grep.md](grep.md) | ワークスペース内テキスト検索 |
 | `read_file` | [read_file.md](read_file.md) | ファイル読み取り |
 | `write_file` | [write_file.md](write_file.md) | ファイル書き込み |
+| `edit_file` | [edit_file.md](edit_file.md) | ファイルの中身を差し替え（部分書き換え） |
 | `run_cmd` | [run_cmd.md](run_cmd.md) | シェルコマンド実行 |
 | `web_search` | [web_search.md](web_search.md) | Brave Search API による Web 検索 |
 
