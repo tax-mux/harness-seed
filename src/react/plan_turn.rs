@@ -34,7 +34,8 @@ impl<E: AgentBrain> ReActLoop<E> {
             self.config.verbose,
             self.config.show_prompt,
             self.config.show_tool_output,
-            true,
+            self.config.show_thinking,
+            self.config.verbose,
             self.turn_observer.as_ref(),
             self.stop_requested.as_deref(),
             Some(self.memory.as_ref()),
@@ -49,6 +50,12 @@ impl<E: AgentBrain> ReActLoop<E> {
         let plan = harness.plan.clone();
         self.notify_plan_artifact(&plan);
         self.emit_plan_finished(user_input, &plan);
+        if self.config.show_thinking {
+            eprintln!("[plan] {}", plan.summary);
+            for st in &plan.subtasks {
+                eprintln!("[plan] #{} {}", st.id, st.goal);
+            }
+        }
         if self.config.show_plan {
             println!("{}", format_plan_for_display(&plan, &self.task_registry));
         }

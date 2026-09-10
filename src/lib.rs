@@ -14,6 +14,7 @@ pub mod context_map;
 pub mod context_metrics;
 pub mod grep;
 pub mod harness;
+pub mod io_utf8;
 pub mod layer;
 pub mod lifecycle;
 pub mod line_io;
@@ -79,6 +80,7 @@ pub use context_map::{
 pub use context_metrics::{
     format_messages_body, ContextUsage, TextSize, TokenSource, TurnContextSummary,
 };
+pub use io_utf8::{apply_utf8_child_env, ensure_utf8_stdio, Utf8StreamDecoder};
 pub use harness::{
     format_references_for_prompt, parse_harness, HarnessMailRefKind, HarnessParseError,
     HarnessReference, HarnessState, HarnessStatus,

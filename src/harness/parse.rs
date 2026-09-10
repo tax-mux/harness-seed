@@ -65,6 +65,12 @@ pub fn parse_harness_strict(
                 numbered
             } else if looks_like_plain_text(trimmed) {
                 PlanArtifact::passthrough(fallback_input)
+            } else if trimmed.starts_with('{') || trimmed.starts_with('[') {
+                // 途中で切れた plan JSON など — 実行層へユーザ入力をそのまま渡す
+                eprintln!(
+                    "[harness] plan JSON parse failed: {plan_err}; falling back to single subtask"
+                );
+                PlanArtifact::single_subtask(fallback_input)
             } else {
                 return Err(HarnessParseError::Plan(plan_err));
             }
@@ -170,6 +176,19 @@ fn parse_numbered_line(line: &str) -> Option<(u32, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strict_falls_back_to_single_subtask_for_truncated_json() {
+        let raw = r##"{
+  "input": ["#196"],
+  "steps": [
+    {"id": 1, "goal": "fetch ticket", "done_when": "ok"}
+  ],
+  "output": "result"##;
+        let state = parse_harness_strict(raw, "#196").unwrap();
+        assert_eq!(state.plan.subtasks.len(), 1);
+        assert!(state.plan.subtasks[0].goal.contains("#196"));
+    }
 
     #[test]
     fn strict_falls_back_to_passthrough_for_plain_text() {

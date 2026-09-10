@@ -57,6 +57,7 @@ impl<E: AgentBrain> ReActLoop<E> {
             let registry = self.task_registry.clone();
             let verbose = self.config.verbose;
             let show_tool_output = self.config.show_tool_output;
+            let show_thinking = self.config.show_thinking;
             let arg_mode = self.config.arg_audit_mode;
             let env = self.tools.environment().clone();
             let brave = self.brave_search.clone();
@@ -83,6 +84,7 @@ impl<E: AgentBrain> ReActLoop<E> {
                                             &mut tools,
                                             verbose,
                                             show_tool_output,
+                                            show_thinking,
                                             arg_mode,
                                         )
                                         .map(|drv| {
@@ -350,6 +352,7 @@ impl<E: AgentBrain> ReActLoop<E> {
                 &mut self.tools,
                 self.config.verbose,
                 self.config.show_tool_output,
+                self.config.show_thinking,
                 self.config.arg_audit_mode,
             ) {
                 Ok(drv) => {

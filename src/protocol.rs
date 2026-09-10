@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::action::{Action, Observation, TurnTrace};
 use crate::brain::AgentBrain;
 use crate::context_metrics::{TokenSource, TurnContextSummary};
-use crate::line_io::read_line_lossy;
+use crate::line_io::{read_line_lossy, reject_lossy_line};
 use crate::plan::{PlanArtifact, Subtask};
 use crate::react::{ReActError, ReActLoop, SubtaskExecResult, TurnResult};
 use crate::runtime::RuntimeEnvironment;
@@ -408,11 +408,16 @@ pub fn run_json_repl<E: AgentBrain>(
     eprintln!("request types: turn | session_clear | ping");
 
     while let Some((line, lossy)) = read_line_lossy(&mut reader)? {
-        if lossy {
-            eprintln!("warning: stdin line was not valid UTF-8; invalid bytes replaced");
-        }
         let trimmed = line.trim();
-        if trimmed.is_empty() || (lossy && trimmed.chars().all(|c| c == '\u{FFFD}')) {
+        if reject_lossy_line(lossy) {
+            if !trimmed.is_empty() {
+                let out = protocol_error_response("stdin line was not valid UTF-8".to_string());
+                writeln!(stdout, "{out}")?;
+                stdout.flush()?;
+            }
+            continue;
+        }
+        if trimmed.is_empty() {
             continue;
         }
 

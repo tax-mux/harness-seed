@@ -5,6 +5,8 @@ use std::fmt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+use crate::io_utf8::apply_utf8_child_env;
+
 /// Windows GUI アプリからサブプロセスを spawn する際にコンソールウィンドウを抑制するフラグ。
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -177,6 +179,7 @@ impl RuntimeEnvironment {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        apply_utf8_child_env(&mut cmd);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;

@@ -80,7 +80,7 @@ pub fn preview_text(s: &str, max_chars: usize) -> String {
         return s.to_string();
     }
     let truncated: String = s.chars().take(max_chars).collect();
-    format!("{truncated}…")
+    format!("{truncated}...")
 }
 
 /// prompt 本文からフェーズを推定する。
@@ -194,6 +194,8 @@ pub struct ContextLogEntry<'a> {
     pub steps_used: usize,
     pub answer_chars: usize,
     pub answer_preview: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub thoughts: Vec<String>,
     pub phases: Vec<&'static str>,
     pub context: ContextLogSummary,
     pub steps: Vec<ContextLogStep>,
@@ -315,12 +317,12 @@ pub fn format_turn_console_summary(user_input: &str, result: &TurnResult) -> Str
                 out.push(p);
             }
         }
-        out.join("→")
+        out.join("->")
     };
     let input_preview = preview_text(user_input, 40);
     let tokens = result.context.prompt_tokens + result.context.completion_tokens;
     format!(
-        "▸ turn  steps={}  tokens={}  phase={phase_flow}  ok  | {input_preview}",
+        "> turn  steps={}  tokens={}  phase={phase_flow}  ok  | {input_preview}",
         result.steps_used, tokens
     )
 }
@@ -340,7 +342,7 @@ pub fn format_step_console_lines(result: &TurnResult) -> Vec<String> {
                 .map(|t| format!(":{t}"))
                 .unwrap_or_default();
             format!(
-                "  · #{} {phase}  {kind}{tool_bit}   {}→{}",
+                "  - #{} {phase}  {kind}{tool_bit}   {}->{}",
                 i + 1,
                 u.prompt_tokens_effective(),
                 u.completion_tokens_effective()
@@ -450,6 +452,7 @@ impl ContextLogWriter {
             steps_used: result.steps_used,
             answer_chars: result.answer.chars().count(),
             answer_preview: preview_text(&result.answer, PREVIEW_CHARS),
+            thoughts: result.trace.thoughts.clone(),
             phases,
             context: ContextLogSummary::from_summary(&result.context),
             steps,
@@ -505,8 +508,8 @@ mod tests {
     fn preview_truncates() {
         let s: String = (0..300).map(|_| 'あ').collect();
         let p = preview_text(&s, 10);
-        assert!(p.ends_with('…'));
-        assert_eq!(p.chars().count(), 11);
+        assert!(p.ends_with("..."));
+        assert_eq!(p.chars().count(), 13);
     }
 
     #[test]
@@ -533,7 +536,7 @@ mod tests {
         let mut react = ReActLoop::with_defaults(LlmBrain::new(MockLlmConnector));
         let result = react.run_turn("hello").unwrap();
         let line = format_turn_console_summary("hello", &result);
-        assert!(line.starts_with('▸'));
+        assert!(line.starts_with('>'));
         assert!(line.contains("steps="));
         assert!(line.contains("tokens="));
         assert!(line.contains("phase="));

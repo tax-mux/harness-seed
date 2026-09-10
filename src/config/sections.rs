@@ -117,6 +117,8 @@ pub struct ReactSection {
     pub show_task_execution: Option<bool>,
     /// 各ツールのコマンド・結果を stderr に表示する（`run_cmd` の `$ ...` など）。
     pub show_tool_output: Option<bool>,
+    /// Thought / ツール要約を stderr に出す（本文はログへ）。
+    pub show_thinking: Option<bool>,
     /// 外側推進ループ（`react.advance`）。
     #[serde(default)]
     pub advance: AdvanceSection,

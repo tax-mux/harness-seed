@@ -120,6 +120,7 @@ impl AppConfig {
             show_plan: self.react.show_plan.unwrap_or(true),
             show_task_execution: self.react.show_task_execution.unwrap_or(true),
             show_tool_output: self.react.show_tool_output.unwrap_or(true),
+            show_thinking: self.react.show_thinking.unwrap_or(true),
             parallel_subtasks: self.react.parallel_subtasks.unwrap_or(false),
             advance: AdvanceConfig {
                 mode: resolve_advance_mode(&self.react.advance),

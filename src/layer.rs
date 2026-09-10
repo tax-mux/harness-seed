@@ -13,7 +13,7 @@ use crate::plan::PlanArtifact;
 use crate::react::{ReActError, SubtaskExecResult, TurnResult};
 use crate::session::SessionMemory;
 use crate::tool::{execute_action, ToolRuntime};
-use crate::tool_display::eprintln_tool_execution;
+use crate::tool_display::{eprintln_thought, eprintln_tool_error, eprintln_tool_execution, eprintln_tool_summary};
 use crate::turn_observer::{
     emit_llm_step, emit_observation_step, emit_phase_started, TurnObserver,
 };
@@ -76,6 +76,7 @@ pub fn run_layer_loop<B: AgentBrain>(
     verbose: bool,
     show_prompt: bool,
     show_tool_output: bool,
+    show_thinking: bool,
     plan: Option<PlanArtifact>,
     subtask_results: Vec<SubtaskExecResult>,
     turn_observer: Option<&TurnObserver>,
@@ -135,6 +136,9 @@ pub fn run_layer_loop<B: AgentBrain>(
         match step {
             AgentStep::Thought(thought) => {
                 if trace.thoughts.len() < opts.max_thoughts {
+                    if show_thinking {
+                        eprintln_thought(opts.context_label, &thought);
+                    }
                     trace.push_thought(thought);
                 } else {
                     let id = tools.allocate_invoke_id();
@@ -154,6 +158,12 @@ pub fn run_layer_loop<B: AgentBrain>(
                             opts.context_label, opts.max_thoughts
                         );
                     }
+                    // 思考上限は常にコンソールへ
+                    eprintln!(
+                        "[{}] err thought-limit: {}",
+                        opts.context_label,
+                        thought_limit_message(opts.max_thoughts)
+                    );
                     trace.push_observation(observation);
                 }
             }
@@ -182,6 +192,10 @@ pub fn run_layer_loop<B: AgentBrain>(
                     );
                     if show_tool_output {
                         eprintln_tool_execution(&action, &observation);
+                    } else if !observation.ok {
+                        eprintln_tool_error(opts.context_label, &action, &observation);
+                    } else if show_thinking {
+                        eprintln_tool_summary(opts.context_label, &action, &observation);
                     } else if verbose {
                         eprintln!("{observation:?}");
                     }
@@ -248,7 +262,7 @@ pub fn run_layer_loop<B: AgentBrain>(
                         "recall[{recall_rounds}/{max_recall_rounds}] query={query} hits={}",
                         hits.len()
                     ));
-                    if verbose {
+                    if show_thinking || verbose {
                         eprintln!(
                             "[{}] recall query={query:?} hits={}",
                             opts.context_label,
@@ -464,6 +478,7 @@ pub fn run_plan_layer<B: AgentBrain>(
     verbose: bool,
     show_prompt: bool,
     show_tool_output: bool,
+    show_thinking: bool,
     echo_harness_parsed: bool,
     turn_observer: Option<&TurnObserver>,
     stop_requested: Option<&AtomicBool>,
@@ -528,6 +543,7 @@ pub fn run_plan_layer<B: AgentBrain>(
         verbose,
         show_prompt,
         show_tool_output,
+        show_thinking,
         None,
         vec![],
         turn_observer,

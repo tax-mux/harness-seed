@@ -124,6 +124,7 @@ impl<E: AgentBrain> ReActLoop<E> {
             self.config.verbose,
             self.config.show_prompt,
             self.config.show_tool_output,
+            self.config.show_thinking,
             false,
             self.turn_observer.as_ref(),
             self.stop_requested.as_deref(),

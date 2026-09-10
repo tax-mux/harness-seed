@@ -238,22 +238,48 @@ fn sanitize_id(raw: &str) -> String {
         .collect()
 }
 
+fn schema_required_csv(schema: &Value) -> Option<String> {
+    let req = schema.get("required")?.as_array()?;
+    let names: Vec<&str> = req.iter().filter_map(|v| v.as_str()).collect();
+    if names.is_empty() {
+        None
+    } else {
+        Some(names.join(", "))
+    }
+}
+
 pub fn spec_from_schema(schema: &Value, description: Option<&str>) -> String {
-    if let Some(desc) = description.filter(|d| !d.is_empty()) {
-        return format!("args: {desc}");
-    }
-    if let Some(desc) = schema.get("description").and_then(|d| d.as_str()) {
-        if !desc.is_empty() {
-            return format!("args: {desc}");
+    let required = schema_required_csv(schema);
+    let desc = description
+        .filter(|d| !d.is_empty())
+        .or_else(|| {
+            schema
+                .get("description")
+                .and_then(|d| d.as_str())
+                .filter(|d| !d.is_empty())
+        });
+    match (desc, required) {
+        (Some(d), Some(req)) => format!("args: required {{{req}}}. {d}"),
+        (Some(d), None) => format!("args: {d}"),
+        (None, Some(req)) => {
+            if let Some(props) = schema.get("properties").and_then(|p| p.as_object()) {
+                let keys: Vec<String> = props.keys().cloned().collect();
+                if !keys.is_empty() {
+                    return format!("args: required {{{req}}}; {{ {} }}", keys.join(", "));
+                }
+            }
+            format!("args: required {{{req}}}")
+        }
+        (None, None) => {
+            if let Some(props) = schema.get("properties").and_then(|p| p.as_object()) {
+                let keys: Vec<String> = props.keys().cloned().collect();
+                if !keys.is_empty() {
+                    return format!("args: {{ {} }}", keys.join(", "));
+                }
+            }
+            "args: {}".to_string()
         }
     }
-    if let Some(props) = schema.get("properties").and_then(|p| p.as_object()) {
-        let keys: Vec<String> = props.keys().cloned().collect();
-        if !keys.is_empty() {
-            return format!("args: {{ {} }}", keys.join(", "));
-        }
-    }
-    "args: {}".to_string()
 }
 
 #[cfg(test)]
@@ -284,5 +310,20 @@ mod tests {
         let (cmd, args) = normalize_command(&field, vec![]).unwrap();
         assert_eq!(cmd.as_deref(), Some("npx"));
         assert_eq!(args, vec!["-y", "@pavelsmith/redmine-mcp"]);
+    }
+
+    #[test]
+    fn spec_includes_required_with_description() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["method", "path"],
+            "properties": {
+                "method": { "type": "string" },
+                "path": { "type": "string" }
+            }
+        });
+        let spec = spec_from_schema(&schema, Some("Call any Redmine REST path"));
+        assert!(spec.contains("required {method, path}"));
+        assert!(spec.contains("Call any Redmine REST path"));
     }
 }

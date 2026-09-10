@@ -10,11 +10,14 @@ use harness_seed::{
         cli_flag_takes_value, is_cli_global_flag, log_agent_setup, merge_cli_agent,
         prepare_cli_agent_workspace,
     },
+    ensure_utf8_stdio,
+    line_io::read_line_lossy,
     run_json_repl, run_repl, AppConfig, BrainPair, MemoryRag, ReActConfig, SeedBuilder,
     SimpleRuleBrain, VERSION,
 };
 
 fn main() -> ExitCode {
+    ensure_utf8_stdio();
     let args: Vec<String> = env::args().skip(1).collect();
     let verbose = args
         .iter()
@@ -334,8 +337,15 @@ fn parse_plan_zone_input(args: &[String]) -> Option<String> {
         return Some(parts.join(" "));
     }
     if after_flag {
-        let mut line = String::new();
-        if io::stdin().read_line(&mut line).ok()? == 0 {
+        let stdin = io::stdin();
+        let mut reader = stdin.lock();
+        let Some((line, lossy)) = read_line_lossy(&mut reader).ok()? else {
+            return None;
+        };
+        if lossy {
+            eprintln!(
+                "warning: stdin line was not valid UTF-8; input discarded — please re-enter"
+            );
             return None;
         }
         let trimmed = line.trim();

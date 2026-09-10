@@ -80,8 +80,10 @@ pub struct ReActConfig {
     pub show_plan: bool,
     /// 各サブタスクの契約ツール／実行結果ツールを stdout に表示する。
     pub show_task_execution: bool,
-    /// 各ツールのコマンド・結果を stderr に表示する（既定 ON）。
+    /// 各ツールのコマンド・結果を stderr に表示する（既定 ON。ログがある場合は OFF 推奨）。
     pub show_tool_output: bool,
+    /// Thought とツール一行要約を stderr に出す（既定 ON）。
+    pub show_thinking: bool,
     /// 外側推進ループ（有効時は `two_phase` より優先）。
     pub advance: AdvanceConfig,
     /// 同一依存波内のサブタスクを並列実行する（`two_phase` 時）。
@@ -117,6 +119,7 @@ impl Default for ReActConfig {
             show_plan: true,
             show_task_execution: true,
             show_tool_output: true,
+            show_thinking: false,
             advance: AdvanceConfig::default(),
             parallel_subtasks: false,
             monitor_plan_html: false,
@@ -453,6 +456,7 @@ impl<E: AgentBrain> ReActLoop<E> {
             self.config.verbose,
             self.config.show_prompt,
             false,
+            self.config.show_thinking,
             false,
             self.turn_observer.as_ref(),
             self.stop_requested.as_deref(),
@@ -559,6 +563,7 @@ impl<E: AgentBrain> ReActLoop<E> {
             self.config.verbose,
             self.config.show_prompt,
             self.config.show_tool_output,
+            self.config.show_thinking,
             plan,
             subtask_results,
             self.turn_observer.as_ref(),

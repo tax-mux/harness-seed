@@ -1,9 +1,33 @@
-//! stdin 行読取（不正 UTF-8 でも REPL を落とさない）。
+//! stdin 行読取（TTY 判定・パイプ用 lossy 読取）。
 
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, IsTerminal};
+
+use crate::io_utf8::ensure_utf8_stdio;
+
+/// 対話 REPL 用: stdin が TTY か（パイプ/リダイレクトなら false）。
+pub fn stdin_is_tty() -> bool {
+    io::stdin().is_terminal()
+}
+
+/// 子プロセス UTF-8 環境を整えてから REPL を開始する。
+pub fn prepare_stdio_for_repl() {
+    ensure_utf8_stdio();
+}
+
+/// lossy 行を stderr に警告して捨てる。呼び出し側は `true` なら continue する。
+pub fn reject_lossy_line(lossy: bool) -> bool {
+    if lossy {
+        eprintln!(
+            "warning: stdin line was not valid UTF-8; input discarded — please re-enter"
+        );
+        true
+    } else {
+        false
+    }
+}
 
 /// 1 行読む。EOF は `Ok(None)`。
-/// 不正 UTF-8 は U+FFFD に置換し、`lossy == true` を返す。
+/// 不正 UTF-8 は U+FFFD に置換し、`lossy == true` を返す（呼び出し側は [`reject_lossy_line`] で捨てる）。
 pub fn read_line_lossy<R: BufRead>(reader: &mut R) -> io::Result<Option<(String, bool)>> {
     let mut buf = Vec::new();
     let n = reader.read_until(b'\n', &mut buf)?;
@@ -54,6 +78,12 @@ mod tests {
     fn eof_returns_none() {
         let mut r = Cursor::new(b"");
         assert!(read_line_lossy(&mut r).unwrap().is_none());
+    }
+
+    #[test]
+    fn reject_lossy_line_warns() {
+        assert!(!reject_lossy_line(false));
+        assert!(reject_lossy_line(true));
     }
 
     #[test]
