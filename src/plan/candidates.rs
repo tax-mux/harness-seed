@@ -178,8 +178,15 @@ pub fn select_and_register_plan_candidates<B: AgentBrain>(
 
     // コンテキスト登録
     if selected.is_empty() {
-        blocks.plan_task_catalog = prev_catalog;
+        let _ = prev_catalog;
+        blocks.plan_task_catalog = Some(String::new());
         blocks.plan_selected_candidates = Some(vec![]);
+        // allow 空は「全許可」なので、存在しない id だけ許可してカタログを空にする
+        let no_tools = crate::tasks::SubtaskToolPolicy {
+            allow: vec!["__chitchat_no_tools__".into()],
+            deny: vec![],
+        };
+        blocks.tool_catalog = tools.format_catalog_filtered(Some(&no_tools));
         return vec![];
     }
 

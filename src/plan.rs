@@ -211,10 +211,26 @@ fn usable_direct_reply(text: &str) -> bool {
     if t.chars().count() < 4 {
         return false;
     }
-    !matches!(
+    // 計画層の内部ラベル・合成 WI はユーザー向け回答に使わない（exec LLM へフォールバック）
+    if matches!(
         t,
-        "direct execution" | "direct chat" | "single task" | "planned task" | "direct"
-    )
+        "direct execution"
+            | "direct chat"
+            | "single task"
+            | "planned task"
+            | "direct"
+    ) {
+        return false;
+    }
+    let lower = t.to_lowercase();
+    if lower.contains("no task candidates")
+        || lower.contains("plan layer skipped")
+        || lower.contains("trivial chat")
+        || lower.contains("direct chat")
+    {
+        return false;
+    }
+    true
 }
 
 /// 計画層の成果物をコンソール向けに整形する。
@@ -438,5 +454,21 @@ mod direct_reply_tests {
     fn ignores_placeholder_summary() {
         let plan = PlanArtifact::passthrough("hi");
         assert!(plan.direct_reply("").is_none());
+    }
+
+    #[test]
+    fn ignores_harness_internal_work_instructions() {
+        let plan = PlanArtifact {
+            summary: "direct chat".into(),
+            skip_execution: true,
+            subtasks: vec![],
+            knowledge_sufficient: Some(true),
+        };
+        assert!(plan
+            .direct_reply("(no task candidates — direct chat)")
+            .is_none());
+        assert!(plan
+            .direct_reply("(trivial chat — plan layer skipped)")
+            .is_none());
     }
 }
