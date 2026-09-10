@@ -18,7 +18,7 @@ use crate::tasks::TaskRegistry;
 pub use brain::{
     artifact_from_plan_turn, PlanBrainMode, PlanLlmBrain, RulePlanBrain, PLAN_REACT_SYSTEM_CORE,
 };
-pub use contract::{PlanDataContract, PlanReadSource, PlanWriteTarget};
+pub use contract::{PlanDataContract, PlanEnforceFn};
 pub use parse::{parse_plan, PlanParseError};
 pub use parse_step::{
     harness_state_from_plan_answer as harness_state_from_plan_turn, parse_plan_agent_step,

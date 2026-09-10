@@ -6,6 +6,8 @@ HarnessSeed は **「プロンプト受取 → 計画層 → 実行層 → 終�
 
 記憶層（Memory RAG・Bridge・diary）: [memory.md](../memory.md)
 
+ホスト拡張（lifecycle hook・HostScratch）: [lifecycle.md](../lifecycle.md)
+
 - 全体像（SVG）: [full_agent_architecture_v2.svg](../full_agent_architecture_v2.svg)
 - 索引: [README.md](README.md)
 - 最少行動単位: [agent-minimum-action-unit.md](../agent-minimum-action-unit.md)
@@ -20,16 +22,18 @@ HarnessSeed は **「プロンプト受取 → 計画層 → 実行層 → 終�
 
 ```mermaid
 flowchart TB
-    A["プロンプト受取<br/>run_turn(user_input)"] --> M["記憶 RAG<br/>work_log / knowledge"]
+    A["プロンプト受取<br/>run_turn(user_input)"] --> H0["on_turn_started<br/>HostScratch"]
+    H0 --> M["記憶 RAG<br/>work_log / knowledge"]
     M --> B["計画層<br/>run_plan_layer"]
-    B --> C{"skip_execution?"}
+    B --> H1["on_plan_finished"]
+    H1 --> C{"skip_execution?"}
     C -->|はい| D["最終回答<br/>（実行スキップ）"]
-    C -->|いいえ| E["実行層<br/>サブタスクごとに<br/>run_layer_loop または step-driver"]
-    D --> F["終了<br/>TurnResult + diary"]
+    C -->|いいえ| E["実行層<br/>サブタスクごとに<br/>on_subtask_* + 実行"]
+    D --> F["終了<br/>TurnResult + diary<br/>on_turn_finished"]
     E --> F
 ```
 
-記憶の詳細: [memory.md](../memory.md)。
+記憶の詳細: [memory.md](../memory.md)。ホスト副作用: [lifecycle.md](../lifecycle.md)。
 
 `src/plan.rs` の冒頭コメント:
 

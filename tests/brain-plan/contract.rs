@@ -1,72 +1,6 @@
-//! 計画層データ契約（`PlanDataContract`）。
+//! 計画層データ契約（`PlanDataContract`）— ドメイン非依存の枠。
 
-use harness_seed::{
-    PlanArtifact, PlanDataContract, PlanReadSource, PlanWriteTarget, Subtask,
-};
-
-#[test]
-fn outgoing_contract_excludes_compose_and_mail_read() {
-    let c = PlanDataContract {
-        read: PlanReadSource::RevisionContext { uid: 9 },
-        write: PlanWriteTarget::OutgoingPendingDb { uid: 9 },
-        skip_execution: false,
-    };
-    let ex = c.excluded_task_ids();
-    assert!(ex.contains(&"mail_read"));
-    assert!(ex.contains(&"compose_write"));
-}
-
-#[test]
-fn enforce_outgoing_collapses_to_pending_outgoing_save() {
-    let c = PlanDataContract {
-        read: PlanReadSource::RevisionContext { uid: 9 },
-        write: PlanWriteTarget::OutgoingPendingDb { uid: 9 },
-        skip_execution: false,
-    };
-    let mut plan = PlanArtifact {
-        summary: "x".into(),
-        skip_execution: false,
-        subtasks: vec![Subtask {
-            id: 1,
-            task: Some("compose_write".into()),
-            params: serde_json::json!({}),
-            goal: "スペイン語に翻訳".into(),
-            done_when: "done".into(),
-        }],
-        knowledge_sufficient: None,
-    };
-    c.enforce_plan(&mut plan);
-    assert_eq!(plan.subtasks.len(), 1);
-    assert_eq!(
-        plan.subtasks[0].task.as_deref(),
-        Some("pending_outgoing_save")
-    );
-    assert_eq!(plan.subtasks[0].params["id"], 9);
-    assert!(plan.subtasks[0].goal.contains("スペイン語"));
-}
-
-#[test]
-fn enforce_mail_sync_collapses_to_mail_sync_task() {
-    let c = PlanDataContract {
-        read: PlanReadSource::ImapServer,
-        write: PlanWriteTarget::MailDb,
-        skip_execution: false,
-    };
-    let mut plan = PlanArtifact {
-        summary: "sync".into(),
-        skip_execution: false,
-        subtasks: vec![Subtask {
-            id: 1,
-            task: Some("mail_read".into()),
-            params: serde_json::json!({}),
-            goal: "read".into(),
-            done_when: "done".into(),
-        }],
-        knowledge_sufficient: None,
-    };
-    c.enforce_plan(&mut plan);
-    assert_eq!(plan.subtasks[0].task.as_deref(), Some("mail_sync"));
-}
+use harness_seed::{PlanArtifact, PlanDataContract, Subtask};
 
 #[test]
 fn trivial_chat_skips_execution() {
@@ -76,9 +10,9 @@ fn trivial_chat_skips_execution() {
         skip_execution: false,
         subtasks: vec![Subtask {
             id: 1,
-            task: Some("mail_sync".into()),
+            task: Some("list_dir".into()),
             params: serde_json::json!({}),
-            goal: "sync".into(),
+            goal: "list".into(),
             done_when: "done".into(),
         }],
         knowledge_sufficient: None,
@@ -90,28 +24,72 @@ fn trivial_chat_skips_execution() {
 
 #[test]
 fn format_for_planner_shows_three_layers() {
-    let c = PlanDataContract {
-        read: PlanReadSource::RevisionContext { uid: 9 },
-        write: PlanWriteTarget::OutgoingPendingDb { uid: 9 },
-        skip_execution: false,
-    };
+    let c = PlanDataContract::new(
+        "read: user_message",
+        "write: chat_only",
+        "generic or skip_execution",
+    )
+    .with_excluded_task_ids(["web_research"]);
     let text = c.format_for_planner();
     assert!(text.contains("INPUT → PROCEDURE (you) → OUTPUT"));
     assert!(text.contains("[INPUT — fixed, do not change]"));
-    assert!(text.contains("revision_context"));
+    assert!(text.contains("read: user_message"));
     assert!(text.contains("[OUTPUT — fixed, do not change]"));
-    assert!(text.contains("outgoing_pending_db"));
+    assert!(text.contains("write: chat_only"));
     assert!(text.contains("[PROCEDURE — your PlanArtifact subtasks]"));
-    assert!(text.contains("pending_outgoing_save"));
+    assert!(text.contains("generic or skip_execution"));
 }
 
 #[test]
-fn imap_reference_uid_excludes_outgoing_revision() {
-    let c = PlanDataContract {
-        read: PlanReadSource::RevisionContext { uid: 9 },
-        write: PlanWriteTarget::OutgoingPendingDb { uid: 9 },
+fn host_enforce_collapses_plan() {
+    let c = PlanDataContract::new("read: source", "write: sink", "save_item").with_enforce(|plan| {
+        let goals: Vec<String> = plan
+            .subtasks
+            .iter()
+            .filter(|st| st.task.as_deref() != Some("load_item"))
+            .map(|st| st.goal.clone())
+            .collect();
+        plan.subtasks = vec![Subtask {
+            id: 1,
+            task: Some("save_item".into()),
+            params: serde_json::json!({ "id": 9 }),
+            goal: goals.join(" → "),
+            done_when: "saved".into(),
+        }];
+    });
+    let mut plan = PlanArtifact {
+        summary: "x".into(),
         skip_execution: false,
+        subtasks: vec![
+            Subtask {
+                id: 1,
+                task: Some("load_item".into()),
+                params: serde_json::json!({}),
+                goal: "load".into(),
+                done_when: "loaded".into(),
+            },
+            Subtask {
+                id: 2,
+                task: Some("save_item".into()),
+                params: serde_json::json!({}),
+                goal: "persist".into(),
+                done_when: "done".into(),
+            },
+        ],
+        knowledge_sufficient: None,
     };
-    assert_eq!(c.imap_reference_uid(), None);
-    assert_eq!(c.outgoing_pending_uid(), Some(9));
+    c.enforce_plan(&mut plan);
+    assert_eq!(plan.subtasks.len(), 1);
+    assert_eq!(plan.subtasks[0].task.as_deref(), Some("save_item"));
+    assert_eq!(plan.subtasks[0].params["id"], 9);
+    assert!(plan.subtasks[0].goal.contains("persist"));
+}
+
+#[test]
+fn blocks_reference_fetch_is_host_flag() {
+    let c = PlanDataContract::new("in", "out", "hint")
+        .with_reference_id(Some(9))
+        .with_blocks_reference_fetch(true);
+    assert_eq!(c.reference_id, Some(9));
+    assert!(c.blocks_reference_fetch);
 }

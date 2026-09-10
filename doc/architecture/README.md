@@ -6,6 +6,8 @@ HarnessSeed の二層モデル（計画層・実行層）とツール選定の�
 
 記憶層（RAG・Bridge・diary）: [memory.md](../memory.md)
 
+ホスト拡張（lifecycle hook・HostScratch）: [lifecycle.md](../lifecycle.md)
+
 | # | ドキュメント | 内容 |
 |---|--------------|------|
 | 00 | [harness-seed の構造](00_harness-seedの構造.md) | 全体フロー、層の役割、実行モード |

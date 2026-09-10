@@ -14,6 +14,7 @@ pub mod grep;
 pub mod harness;
 pub mod context_metrics;
 pub mod layer;
+pub mod lifecycle;
 pub mod llm;
 pub mod memory;
 pub mod plan;
@@ -81,9 +82,9 @@ pub use layer::{run_layer_loop, run_plan_layer, LayerLoopOptions};
 pub use plan::{
     artifact_from_plan_turn, format_mission, format_plan_for_display, harness_state_from_plan_turn,
     parse_plan, parse_plan_agent_step, plan_artifact_from_answer, PlanArtifact, PlanBrainMode,
-    PlanDataContract, PlanLlmBrain,
-    PlanParseError, PlanProgress, PlanPromptContext, PlanReadSource, PlanStepParseError,
-    PlanWriteTarget, RulePlanBrain, Subtask, PLAN_REACT_SYSTEM_CORE, PLAN_SYSTEM_CORE,
+    PlanDataContract, PlanEnforceFn, PlanLlmBrain,
+    PlanParseError, PlanProgress, PlanPromptContext, PlanStepParseError,
+    RulePlanBrain, Subtask, PLAN_REACT_SYSTEM_CORE, PLAN_SYSTEM_CORE,
     build_plan_layer_messages, format_plan_fixed_zone_system, format_plan_layer_prompt,
     format_plan_zone_after_preview, format_plan_zone_prompt_preview,
     format_planner_fixed_zone_html, is_replan_subtask, PlanQueue, PlanQueueError, REPLAN_TASK_ID,
@@ -93,6 +94,7 @@ pub use protocol::{
     PlanDto, ProtocolError, RuntimeDto, SubtaskDto, SubtaskResultDto, TraceDto, TurnWireOptions,
     WireErrorBody, WireRequest, WireResponse, WIRE_VERSION,
 };
+pub use lifecycle::{CompositeLifecycle, HostScratch, NoopLifecycle, TurnLifecycle};
 pub use react::{
     run_repl, PlanPreviewResult, ReActConfig, ReActError, ReActLoop, SubtaskExecResult, TurnResult,
 };
@@ -109,7 +111,7 @@ pub use runtime::{OsFamily, RuntimeEnvironment, ShellKind};
 pub use session::{PastTurn, SessionMemory, SessionPromptPolicy};
 pub use tasks::{
     apply_template, apply_template_value, audit_trace, ContextManifestSpec, ExecStep,
-    MissionRenderContext, extract_reference_uid, StepAudit, SubtaskToolPolicy, TaskDefinition,
+    MissionRenderContext, StepAudit, SubtaskToolPolicy, TaskDefinition,
     TaskError, TaskExecutionAudit, TaskLoadError, TaskRegistry, ToolPolicySpec,
 };
 pub use tool::{
