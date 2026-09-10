@@ -155,6 +155,8 @@ Next step JSON:
 
 パース: `src/llm/parse.rs` の `parse_agent_step`。失敗時は `Answer` にエラー文を入れてターン終了。
 
+**ストリーミング（SSE、v0.2.0〜）**: 各プロバイダが `complete_stream` を実装し、応答トークンを Server-Sent Events（`data: ...` 行）として逐次吐く。`ReActLoop::run_turn_stream` が同じ ReAct 制御フローをトークンシンク付きで回し、`--stream`（CLI）/ `react.stream_mode`（config、既定 OFF）で有効になる。対象は実行層（Thought / 最終 Answer）のみで、計画層・ツール実行はストリームしない。
+
 ### 4.4 BrainMode（CLI 用ラッパー）
 
 `main` は `BrainMode::from_cli` で `Rule` / `Llm` を選択し、`ReActLoop<BrainMode>` に渡す。
@@ -276,7 +278,7 @@ LLM テストはホスト未起動・モデル未準備時 **SKIP**（失敗に�
 | システムプロンプトの外部設定 | `brain.rs` 定数のみ（`config.json` 非対応） |
 | 並列ツール呼び出し | 1 ステップ 1 `Action` のみ |
 | Thought の必須化 | LLM 次第で `action` / `answer` を直返し可能 |
-| ストリーミング応答 | 非対応（ブロッキング completion のみ） |
+| ストリーミング応答 | v0.2.0 で対応（SSE）。各プロバイダの `complete_stream` + `run_turn_stream`。CLI `--stream` / config `react.stream_mode`。実行層（Thought / 最終 Answer）のみ。計画層・ツール実行は非ストリーム |
 | ツールの動的登録 | `ToolPack` + `register_plugin`（[tool-plugins.md](06_ツールプラグイン.md)） |
 | `run_cmd` の安全性 | [run_cmd.md](../builtin_tools/run_cmd.md) 参照。cwd はワークスペース内のみ、コマンド内容は未制限 |
 

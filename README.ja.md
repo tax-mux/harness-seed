@@ -30,10 +30,15 @@ harness-seed/
 │   ├── lib.rs       # ライブラリ本体・公開 API
 │   ├── advance/     # 外側推進ループ（証拠・ゲート・フェーズ）
 │   ├── react/       # ReAct ループ、two-phase、ステップドライバ、advance turn
+│   ├── mcp/          # MCP クライアント＋SSE 双プロトコル transport
+│   ├── agent_assets/ # プロジェクト rules/skills/shell tools（config.agent.json）
+│   ├── lifecycle/    # ホスト lifecycle hook ＋ task tracking
+│   ├── llm/          # LLM プロバイダ（Chat Completions / Gemini / Anthropic / SSE）
+│   ├── memory/       # メモリ層（RAG ルータ、mempalace）
 │   ├── config.rs    # AppConfig（セクション型は config/）
 │   ├── tasks/       # タスクレジストリ、契約、ステップドライバ
 │   ├── plan/        # プランのパース・表示・キュー
-│   └── ...          # layer, lifecycle, llm, memory, tool, …
+│   └── ...          # layer, tool, brain, seed, session, protocol, context_*, …
 ├── tests/           # 統合テスト
 └── benches/         # ベンチマーク（必要に応じて追加）
 ```
@@ -104,6 +109,7 @@ cargo run
 # 例: help / echo hello / time / 任意の文（Thought→echo→Answer）
 # 詳細ログ: cargo run -- -v
 # JSON Lines REPL: cargo run -- --json  （doc/ja/architecture/11_ワイヤプロトコル.md）
+# ストリーム: cargo run -- --stream（実行層の出力を SSE で 1 トークンずつ逐次出力）
 
 # 初回セットアップ（ユーザ設定。秘密情報はここへ）
 mkdir -p ~/.config/harness-seed
@@ -152,6 +158,8 @@ cargo run
 | `HARNESS_SEED_LLM_PROVIDER=lmstudio` | LM Studio を明示 |
 | `LM_STUDIO_HOST` | LM Studio（既定: `http://127.0.0.1:1234`） |
 | `LM_STUDIO_MODEL` | LM Studio 上のモデル名 |
+| `HARNESS_WORKSPACE` | ファイルツールのワークスペース（`config.agent.json` でも設定可） |
+| `HARNESS_SEED_LLM_PROVIDER` | プロバイダを強制（`chat_completions` / `gemini` / `anthropic` / `ollama` / `lmstudio`） |
 
 ### 設定ファイル
 
@@ -176,6 +184,59 @@ cargo run
 環境変数は `config.json` より優先されます。別パス指定: `--config` または `HARNESS_SEED_CONFIG`（旧 `MYHARNESS_CONFIG` も可）。
 
 詳細は [config/README.md](config/README.md)。
+
+### CLI オプション
+
+| オプション | 説明 |
+--------|---------|
+| `-v`, `--verbose` | `Thought` / `Action` / `Observation` を stderr に出力 |
+| `--show-prompt` | 各 ReAct ステップの LLM プロンプト全文を stderr に出力 |
+| `--stream` | 実行層の出力を SSE で 1 トークンずつ逐次出力（既定 OFF） |
+| `--json` | JSON Lines REPL（1 行 1 JSON、ログは stderr） |
+| `--no-monitor` | `monitor/context_monitor.html` の再生成を抑制 |
+| `--plan-zone [TEXT]` | 固定ゾーン表示 → Planner 実行 → 作業指示書を stdout に出力 |
+| `--plan-zone-full [TEXT]` | 計画層 1 ステップ目のプロンプト全文のみ（LLM 未使用） |
+| `--llm` | 設定に関わらず LLM 頭脳を強制 |
+| `--no-llm` | ルール頭脳を強制（`llm` セクションを無視） |
+| `--config <PATH>` | harness-seed 設定（既定 `~/.config/harness-seed/config.json`） |
+| `--config-agent <PATH>` | プロジェクトの `config.agent.json`（既定 `./config.agent.json`） |
+| `--agent-dir <PATH>` | エージェント資産ディレクトリ（workspace は実行時 cwd） |
+
+### ストリーミング（SSE）
+
+v0.2.0 より、すべての LLM プロバイダが `complete_stream` トレイトを実装し、応答トークンを
+Server-Sent Events（`data: ...` 行）として逐次吐く。実行層のループが同じ ReAct 制御フローを
+トークンシンク付きで回す：
+
+- **CLI**: `cargo run -- --stream` で実行層のストリーム出力を有効にする。
+- **設定**: `react.stream_mode: true`（既定 OFF、後方互換）で有効化。
+- **ライブラリ**: `ReActLoop::run_turn_stream(&mut self, input, |token| { ... })` で
+   ホストがトークンを端末・UI へ流したいときに `run_turn` に置き換える。
+
+対象は**実行層**（Thought / 最終 Answer）のみ。**計画層**（Plan JSON）とツール実行は
+ストリームしない。詳細は [doc/ja/architecture/08_ReAct実装.md](doc/ja/architecture/08_ReAct実装.md)。
+
+### プロジェクト資産（`config.agent.json`）
+
+起動時に CLI は実行時 cwd から `config.agent.json` を自動読み込む。プロジェクトの
+rules・skills・shell tools に使うエージェント資産ディレクトリを指定する：
+
+```json
+{
+    "workspace": ".",
+    "agent_dir": ".agent"
+}
+```
+
+| `agent_dir` 配下 | 内容 |
+|------|---------|
+| `rules/**/*.md` | 追加ルール（再帰読込） |
+| `skills/<id>/task.json` | 計画層タスク（スキル） |
+| `skills/<id>/SKILL.md` | スキル説明（ルールへ注入） |
+| `tools/*.json` | 宣言的シェルツール |
+
+`workspace` は `HARNESS_WORKSPACE` になり、`list_dir` / `run_cmd` 等の基準になる。
+`--config-agent` / `--agent-dir` でパスを上書き可。スキーマ全般と例は [config/README.md](config/README.md)。
 
 ### コンテキストサイズ計測（LLM モード）
 
@@ -291,3 +352,6 @@ rules・ツール・タスク・lifecycle は `SeedBuilder` に載せてから `
 ## ライセンス
 
 MIT ライセンス（詳細は [LICENSE](LICENSE) を参照してください）。
+
+// 実行層を 1 トークンずつストリーム（v0.2.0〜）:
+//   react.run_turn_stream("hello", |token: &str| { /* 出力 / 転送 */ })?;

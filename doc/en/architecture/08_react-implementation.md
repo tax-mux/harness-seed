@@ -161,6 +161,8 @@ Next step JSON:
 
 Parsing: `parse_agent_step` in `src/llm/parse.rs`. On failure, the turn ends with an error message in `Answer`.
 
+**Streaming (SSE, v0.2.0+)**: Each provider implements `complete_stream`, which yields response tokens as Server-Sent Events (`data: ...` lines). `ReActLoop::run_turn_stream` drives the same ReAct control flow with a token sink; `--stream` (CLI) / `react.stream_mode` (config, default off) enable it. Only the execution layer (Thought / final Answer) is streamed; the planning layer and tool execution are not.
+
 ### 4.4 BrainMode (CLI wrapper)
 
 `main` selects `Rule` / `Llm` via `BrainMode::from_cli` and passes it to `ReActLoop<BrainMode>`.
@@ -288,11 +290,11 @@ LLM tests **SKIP** when the host is down or the model is unavailable (they do no
 | external system prompt config | constants in `brain.rs` only (not `config.json`) |
 | parallel tool calls | one `Action` per step only |
 | mandatory Thought | LLM may return `action` / `answer` directly |
-| streaming responses | not supported (blocking completion only) |
+| streaming responses | Supported since v0.2.0 (SSE): each provider's `complete_stream` + `run_turn_stream`; CLI `--stream` / config `react.stream_mode`. Execution layer (Thought / final Answer) only; planning and tool execution are not streamed |
 | dynamic tool registration | `ToolPack` + `register_plugin` ([06_tool-plugins.md](06_tool-plugins.md)) |
 | `run_cmd` safety | see [run_cmd.md](../builtin_tools/run_cmd.md). cwd restricted to workspace; command content is unrestricted |
 
-The current loop intentionally keeps one action per step and does not stream responses. Memory and prompt size controls are partial safeguards, while tool registration and command-content policy remain important deployment boundaries.
+The current loop intentionally keeps one action per step. Streaming (SSE) is supported for the execution layer since v0.2.0; the planning layer and tool execution remain non-streaming. Memory and prompt size controls are partial safeguards, while tool registration and command-content policy remain important deployment boundaries.
 ## 10. Typical patterns
 
 ### LLM + list_dir (2 steps)

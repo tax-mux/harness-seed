@@ -30,10 +30,15 @@ harness-seed/
 │   ├── lib.rs       # Library core and public API
 │   ├── advance/     # Outer advance loop (evidence, gates, phase)
 │   ├── react/       # ReAct loop, two-phase, step driver, advance turn
+│   ├── mcp/          # MCP client + SSE dual-protocol transport
+│   ├── agent_assets/ # Project rules / skills / shell tools (config.agent.json)
+│   ├── lifecycle/    # Host lifecycle hooks + task tracking
+│   ├── llm/          # LLM providers (Chat Completions / Gemini / Anthropic / SSE)
+│   ├── memory/       # Memory layer (RAG router, mempalace)
 │   ├── config.rs    # AppConfig (section types in config/)
 │   ├── tasks/       # Task registry, contracts, step driver
 │   ├── plan/        # Plan parse, display, queue
-│   └── ...          # layer, lifecycle, llm, memory, tool, …
+│   └── ...          # layer, tool, brain, seed, session, protocol, context_*, …
 ├── tests/           # Integration tests
 └── benches/         # Benchmarks (add if necessary)
 ```
@@ -104,6 +109,7 @@ cargo run
 # Example: help / echo hello / time / any text (Thought -> echo -> Answer)
 # Verbose logs: cargo run -- -v
 # JSON Lines REPL: cargo run -- --json  (doc/ja/architecture/11_ワイヤプロトコル.md)
+# Stream LLM output token-by-token over SSE: cargo run -- --stream
 
 # First-time setup (user config; keep secrets here)
 mkdir -p ~/.config/harness-seed
@@ -152,6 +158,8 @@ cargo run
 | `HARNESS_SEED_LLM_PROVIDER=lmstudio` | Explicitly use LM Studio |
 | `LM_STUDIO_HOST` | LM Studio (default: `http://127.0.0.1:1234`) |
 | `LM_STUDIO_MODEL` | Model name on LM Studio |
+| `HARNESS_WORKSPACE` | File-tool workspace (also set via `config.agent.json`) |
+| `HARNESS_SEED_LLM_PROVIDER` | Force a provider (`chat_completions` / `gemini` / `anthropic` / `ollama` / `lmstudio`) |
 
 ### Configuration File
 
@@ -176,6 +184,62 @@ cargo run
 Environment variables take precedence over settings in `config.json`. Specifying an alternative path: `--config` or `HARNESS_SEED_CONFIG` (the legacy `MYHARNESS_CONFIG` is also supported).
 
 For details, see [config/README.md](config/README.md).
+
+
+### CLI options
+
+| Option | Description |
+--------|-------------|
+| `-v`, `--verbose` | Print `Thought` / `Action` / `Observation` to stderr |
+| `--show-prompt` | Print the full LLM prompt of each ReAct step to stderr |
+| `--stream` | Stream the execution-layer output token-by-token over SSE (default off) |
+| `--json` | JSON Lines REPL (one JSON per line on stdin/stdout; logs to stderr) |
+| `--no-monitor` | Suppress regenerating `monitor/context_monitor.html` |
+| `--plan-zone [TEXT]` | Show a fixed zone, run the planner, and print the work-order to stdout |
+| `--plan-zone-full [TEXT]` | Print only the first-step planning prompt (no LLM) |
+| `--llm` | Force the LLM brain regardless of config |
+| `--no-llm` | Force the rule brain (ignores the `llm` section) |
+| `--config <PATH>` | harness-seed config (default `~/.config/harness-seed/config.json`) |
+| `--config-agent <PATH>` | Project `config.agent.json` (default `./config.agent.json`) |
+| `--agent-dir <PATH>` | Agent-asset dir (workspace is the runtime cwd) |
+
+### Streaming (SSE)
+
+Since v0.2.0, every LLM provider implements a `complete_stream` trait that yields response
+tokens as Server-Sent Events (`data: ...` lines). The execution-layer loop drives the same
+ReAct control flow with a token sink:
+
+- **CLI**: `cargo run -- --stream` enables streaming for the execution layer.
+- **Config**: `react.stream_mode: true` enables it (default off, backward compatible).
+- **Library**: `ReActLoop::run_turn_stream(&mut self, input, |token| { ... })` replaces
+   `run_turn` when a host wants to stream tokens to a terminal or UI.
+
+Streaming covers the **execution layer** (Thought / final Answer). The planning layer
+(Plan JSON) and tool execution are **not** streamed. See
+[doc/en/architecture/08_react-implementation.md](doc/en/architecture/08_react-implementation.md).
+
+### Project assets (`config.agent.json`)
+
+At startup the CLI auto-loads `config.agent.json` from the runtime cwd. It selects the
+agent-asset directory used for project rules, skills, and shell tools:
+
+```json
+{
+    "workspace": ".",
+    "agent_dir": ".agent"
+}
+```
+
+| `agent_dir` subpath | Content |
+|------|---------|
+| `rules/**/*.md` | Extra rules (loaded recursively) |
+| `skills/<id>/task.json` | Planning-layer task (skill) |
+| `skills/<id>/SKILL.md` | Skill description (injected into rules) |
+| `tools/*.json` | Declarative shell tools |
+
+`workspace` becomes `HARNESS_WORKSPACE`, which is the base for `list_dir` / `run_cmd` and
+sibling file tools. Override the path with `--config-agent` / `--agent-dir`. Full schema and
+examples are in [config/README.md](config/README.md).
 
 ### Context Size Metrics (LLM Mode)
 
@@ -291,3 +355,6 @@ Host rules, tools, tasks, and lifecycle attach on `SeedBuilder` before `build`. 
 ## License
 
 MIT License (See [LICENSE](LICENSE) for details).
+
+// Stream the execution layer token-by-token (since v0.2.0):
+//   react.run_turn_stream("hello", |token: &str| { /* print / forward */ })?;
