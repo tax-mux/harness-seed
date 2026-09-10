@@ -122,6 +122,7 @@ impl AppConfig {
             show_tool_output: self.react.show_tool_output.unwrap_or(true),
             show_thinking: self.react.show_thinking.unwrap_or(true),
             parallel_subtasks: self.react.parallel_subtasks.unwrap_or(false),
+            stream_mode: self.react.stream_mode.unwrap_or(false),
             advance: AdvanceConfig {
                 mode: resolve_advance_mode(&self.react.advance),
                 max_phases: self.react.advance.max_phases.unwrap_or(8).max(1),

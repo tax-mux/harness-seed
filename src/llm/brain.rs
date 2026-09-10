@@ -69,6 +69,27 @@ impl<C: LlmConnector> AgentBrain for LlmBrain<C> {
         }
     }
 
+    fn decide_stream(
+       &mut self,
+       ctx: &TurnPromptContext<'_>,
+       on_token: &mut dyn FnMut(&str),
+     ) -> AgentStep {
+        let messages = Self::build_messages(ctx);
+        let mut acc = String::new();
+        let mut on_chunk = |chunk: &str| {
+            acc.push_str(chunk);
+            on_token(chunk);
+         };
+        let raw = match self.connector.complete_stream(&messages, &mut on_chunk) {
+            Ok(_stats) => acc,
+            Err(err) => {
+                self.last_usage = None;
+                return AgentStep::Answer(format!("LLM connector error: {err}"));
+               }
+           };
+        self.step_from_llm(&raw)
+      }
+
     fn poll_context_usage(&mut self) -> Option<ContextUsage> {
         self.last_usage.take()
     }

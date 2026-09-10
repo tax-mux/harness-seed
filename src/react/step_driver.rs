@@ -458,6 +458,7 @@ impl<E: AgentBrain> ReActLoop<E> {
             vec![],
             max_steps,
             sterile_empty_run_cmd_limit,
+            None,
         );
         self.blocks.tool_catalog = saved_catalog;
         self.tools.set_exec_policy(None);

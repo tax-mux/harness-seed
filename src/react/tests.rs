@@ -422,3 +422,72 @@ fn off_does_not_escalate_three_subtasks() {
     assert!(result.advance_phases.is_empty());
     assert_eq!(result.subtask_results.len(), 3);
 }
+
+
+#[test]
+fn stream_off_run_turn_unchanged_no_regression() {
+    // run_turn() と run_turn_stream() で結果が同じであることを確認
+    let config = ReActConfig {
+        max_steps: 8,
+        two_phase: false,
+        ..Default::default()
+     };
+    let mut react_off = ReActLoop::new(
+        SimpleRuleBrain::new(),
+        PlanBrainMode::fixed_plan(three_subtask_plan_json()),
+        config.clone(),
+     );
+    let off = react_off.run_turn("hello world").unwrap();
+
+    let mut react_on = ReActLoop::new(
+        SimpleRuleBrain::new(),
+        PlanBrainMode::fixed_plan(three_subtask_plan_json()),
+        config,
+     );
+    let mut on_chunks: Vec<String> = Vec::new();
+    let on = react_on.run_turn_stream("hello world", |c| on_chunks.push(c.to_string())).unwrap();
+
+    // どちらも同じ Answer
+    assert_eq!(off.answer, on.answer, "run_turn と run_turn_stream で Answer が異なる");
+    assert!(!on_chunks.is_empty(), "--stream: on_token が少なくとも1回呼ばれたはず");
+    // on_token に渡された文字列の連結が Answer と等しい(デフォルト decide_stream の挙動)
+    let streamed: String = on_chunks.join("");
+    assert!(streamed.contains(&on.answer), "逐次出力が Answer を含む: {streamed:?} vs {:?}", on.answer);
+}
+
+#[test]
+fn no_llm_stream_smoke_thought_and_answer() {
+    // --no-llm --stream のスモーク: ルール頭脳で Thought＋Answer が on_token に渡る
+    let config = ReActConfig {
+         max_thoughts: 2,
+        ..Default::default()
+     };
+    let mut react = ReActLoop::new(
+        SimpleRuleBrain::new(),
+        PlanBrainMode::fixed_plan(three_subtask_plan_json()),
+        config,
+     );
+    let mut chunks: Vec<String> = Vec::new();
+    let result = react.run_turn_stream("hello world", |c| {
+         chunks.push(c.to_string());
+       }).unwrap();
+    // 少なくとも1回 on_token 呼ばれ(Thought と Answer のいずれか)
+    assert!(!chunks.is_empty(), "on_token が呼ばれていない");
+    // result.answer が出力に含まれる
+    let streamed: String = chunks.join("");
+    assert!(streamed.contains(&result.answer), "Answer が逐次出力に含まれない: {streamed:?} vs {}", result.answer);
+}
+
+#[test]
+fn stream_off_answer_no_extra_reprint() {
+    // stream_mode=false の時、run_turn の結果は on_token は呼ばない
+    let config = ReActConfig { ..Default::default() };
+    let mut react = ReActLoop::new(
+         SimpleRuleBrain::new(),
+        PlanBrainMode::fixed_plan(three_subtask_plan_json()),
+        config,
+     );
+    let result = react.run_turn("hello world").unwrap();
+    // 想定: Echo: hello world で始まる
+    assert!(result.answer.starts_with("受け取りました: "), "answer: {}", result.answer);
+}

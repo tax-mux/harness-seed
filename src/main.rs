@@ -29,6 +29,7 @@ fn main() -> ExitCode {
     let no_monitor = args.iter().any(|a| a == "--no-monitor");
     let use_llm = args.iter().any(|a| a == "--llm");
     let no_llm = args.iter().any(|a| a == "--no-llm");
+    let stream = args.iter().any(|a| a == "--stream");
     let config_path = parse_config_path(&args);
 
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -103,7 +104,10 @@ fn main() -> ExitCode {
     let mut react_config = react_config;
     react_config.monitor_plan_html = !no_monitor;
 
-    eprintln!("config: {}", config_path.display());
+    // --stream CLI switch (default off)
+    if stream {
+        react_config.stream_mode = true;
+     }
     if let Some(provider) = &app.llm.provider {
         eprintln!("llm.provider: {provider}");
     }

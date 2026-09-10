@@ -8,6 +8,25 @@ use crate::context_metrics::ContextUsage;
 pub trait AgentBrain {
     fn decide(&mut self, ctx: &TurnPromptContext<'_>) -> AgentStep;
 
+     /// 実行層向けのストリーミング決定。
+     ///
+     /// `decide()` と同様に `AgentStep` を生成しつつ、可視テキスト（`Thought`／`Answer`）を
+     /// `on_token` に逐次渡す。既定実装は生成後の可視テキストを 1 件で渡す（`complete_stream`
+     /// を実装していないコネクタ・ルール頭脳の後方互換）。ツール実行（`Action`）・`Recall` は
+     /// 逐次対象外。
+    fn decide_stream(
+         &mut self,
+        ctx: &TurnPromptContext<'_>,
+        on_token: &mut dyn FnMut(&str),
+     ) -> AgentStep {
+        let step = self.decide(ctx);
+        match &step {
+            AgentStep::Thought(text) | AgentStep::Answer(text) => on_token(text),
+             AgentStep::Action(_) | AgentStep::Recall(_) => {}
+         }
+        step
+     }
+
     /// 直近の LLM 呼び出しのコンテキスト計測（LLM 頭脳のみ）。
     fn poll_context_usage(&mut self) -> Option<ContextUsage> {
         None
@@ -78,6 +97,17 @@ impl AgentBrain for BrainMode {
         match self {
             Self::Rule(b) => b.decide(ctx),
             Self::Llm(b) => b.decide(ctx),
+        }
+    }
+
+    fn decide_stream(
+        &mut self,
+        ctx: &TurnPromptContext<'_>,
+        on_token: &mut dyn FnMut(&str),
+    ) -> AgentStep {
+        match self {
+            Self::Rule(b) => b.decide_stream(ctx, on_token),
+            Self::Llm(b) => b.decide_stream(ctx, on_token),
         }
     }
 

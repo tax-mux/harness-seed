@@ -102,6 +102,24 @@ fn handle_input<E: AgentBrain>(
         return Ok(true);
     }
 
+    if loop_engine.config.stream_mode {
+        // ストリームモード: 実行層の Thought・Answer を逐次出力。本文は再出力しない。
+        let result = loop_engine.run_turn_stream(input, |chunk| {
+            use std::io::Write;
+            let _ = std::io::Stdout::write_all(&mut std::io::stdout(), chunk.as_bytes());
+        });
+        match result {
+            Ok(result) => {
+                if verbose {
+                    eprintln!("--- trace ---\n{}", result.trace);
+                }
+                eprintln!();
+            }
+            Err(err) => eprintln!("error: {err}"),
+        }
+        return Ok(true);
+    }
+
     match loop_engine.run_turn(input) {
         Ok(result) => {
             if verbose {

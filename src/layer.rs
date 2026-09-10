@@ -96,6 +96,9 @@ pub fn run_layer_loop<B: AgentBrain>(
     stop_requested: Option<&AtomicBool>,
     memory: Option<&dyn MemoryBridge>,
     max_recall_rounds: usize,
+     // 実行層の逐次出力先。`Some` のとき exec の Thought／Answer を `decide_stream` で逐次渡す。
+     // 計画層（`run_plan_layer`）は `None` を渡すため流さない。
+    mut stream_sink: Option<&mut dyn FnMut(&str)>,
 ) -> Result<TurnResult, ReActError> {
     let mut trace = TurnTrace::default();
     let mut recall_rounds = 0usize;
@@ -117,7 +120,12 @@ pub fn run_layer_loop<B: AgentBrain>(
         }
         let prompt_ctx = TurnPromptContext::new(blocks, user_input, &trace, session)
             .with_step_budget(steps_used, opts.max_steps);
-        let step = brain.decide(&prompt_ctx);
+        let step = if let Some(sink) = stream_sink.as_deref_mut() {
+             // 実行層のみ逐次出力。生トークンを sink へ回しつつ解析結果を返す。
+            brain.decide_stream(&prompt_ctx, sink)
+          } else {
+            brain.decide(&prompt_ctx)
+          };
         if stop_requested
             .map(|t| t.load(Ordering::Relaxed))
             .unwrap_or(false)
@@ -617,6 +625,7 @@ pub fn run_plan_layer<B: AgentBrain>(
         stop_requested,
         memory,
         max_recall_rounds,
+          None,
     )?;
     let harness = match crate::harness::parse_harness_strict(&turn.answer, user_input) {
         Ok(harness) => harness,

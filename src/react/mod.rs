@@ -89,6 +89,8 @@ pub struct ReActConfig {
     /// 同一依存波内のサブタスクを並列実行する（`two_phase` 時）。
     /// ステップドライバ契約があるタスクはスレッド並列、ReAct タスクは波内で直列。
     pub parallel_subtasks: bool,
+      /// 実行層の Thought・最終 Answer を逐次出力する（`--stream`）。既定 OFF。
+    pub stream_mode: bool,
     /// ターンごとに `monitor/context_monitor.html` を更新する。
     pub monitor_plan_html: bool,
     /// 外部メモリ注入（`memory` セクション）。
@@ -122,6 +124,7 @@ impl Default for ReActConfig {
             show_thinking: false,
             advance: AdvanceConfig::default(),
             parallel_subtasks: false,
+            stream_mode: false,
             monitor_plan_html: false,
             memory: MemoryRuntimeConfig::default(),
         }
@@ -546,6 +549,37 @@ impl<E: AgentBrain> ReActLoop<E> {
         }
     }
 
+
+    /// ストリーミング版のターン実行。実行層の Thought・最終 Answer を `on_token` に逐次渡す。
+    /// 計画層・ツール実行中は対象外。advance / two_phase 経路では流さず単一 exec 経路のみ。
+    /// 戻り値の `TurnResult` はストリームを完了した結果をそのまま返す。
+    pub fn run_turn_stream(
+         &mut self,
+        user_input: &str,
+        on_token: impl FnMut(&str),
+      ) -> Result<TurnResult, ReActError> {
+        self.begin_host_scratch_for_turn();
+        self.emit_turn_started(user_input);
+        let host_recalled = self.blocks.recalled.clone();
+        self.inject_memory_for_turn(user_input);
+        let _ = self.take_pending_reference_info_for_plan();
+        let mut streamer = on_token;
+        let result = self.run_turn_single_with_opts(
+            user_input,
+            true,
+            None,
+            vec![],
+            self.config.max_steps,
+            None,
+            Some(&mut streamer),
+          );
+        restore_base_recalled(&mut self.blocks, &host_recalled);
+        if let Err(ref err) = result {
+            self.finalize_lifecycle_on_error(user_input, err);
+            }
+        result
+      }
+
     fn run_turn_single(
         &mut self,
         user_input: &str,
@@ -560,6 +594,7 @@ impl<E: AgentBrain> ReActLoop<E> {
             subtask_results,
             self.config.max_steps,
             None,
+           None,
         )
     }
 
@@ -571,6 +606,7 @@ impl<E: AgentBrain> ReActLoop<E> {
         subtask_results: Vec<SubtaskExecResult>,
         max_steps: usize,
         sterile_empty_run_cmd_limit: Option<usize>,
+        stream_sink: Option<&mut dyn FnMut(&str)>,
     ) -> Result<TurnResult, ReActError> {
         let opts = LayerLoopOptions::exec(max_steps, self.config.max_thoughts)
             .with_sterile_empty_run_cmd_limit(sterile_empty_run_cmd_limit);
@@ -591,6 +627,7 @@ impl<E: AgentBrain> ReActLoop<E> {
             self.stop_requested.as_deref(),
             None,
             0,
+            stream_sink,
         )?;
         if record_session {
             self.finish_turn(user_input, &result);

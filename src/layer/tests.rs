@@ -55,6 +55,7 @@ fn rejects_second_thought_with_loop_guard_observation() {
         None,
         None,
         0,
+        None,
     )
     .unwrap();
 
@@ -353,6 +354,7 @@ fn exec_loop_finalizes_instead_of_max_steps_error() {
         None,
         None,
         0,
+        None,
     )
     .expect("exec should finalize, not MaxStepsExceeded");
 

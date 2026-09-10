@@ -126,6 +126,9 @@ pub struct ReactSection {
     pub advance: AdvanceSection,
     /// 同一依存波内サブタスクの並列実行（`two_phase` 時。ステップドライバのみ並列）。
     pub parallel_subtasks: Option<bool>,
+    /// 実行層の Thought・最終 Answer を逐次出力する（CLI `--stream` 起動スイッチ）。
+    /// 計画層（Plan JSON）・ツール実行中は対象外。既定 OFF（後方互換）。
+    pub stream_mode: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
