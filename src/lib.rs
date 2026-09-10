@@ -84,10 +84,10 @@ pub use harness::{
 };
 pub use llm::{
     normalize_anthropic_base_url, normalize_gemini_base_url, normalize_lmstudio_base_url,
-    coerce_tool_named_step_json, normalize_ollama_base_url, parse_agent_step, AnthropicConnector,
-    ChatMessage, ConnectorError,
-    CompletionResult, GeminiConnector, LlmBrain, LlmConfig, LlmConnector, LlmConnectorKind,
-    LlmProvider, LmStudioConnector, MockLlmConnector, OpenAiConnector, ParseError,
+    coerce_tool_named_step_json, format_error_chain, normalize_ollama_base_url, parse_agent_step,
+    require_absolute_http_base, AnthropicConnector, ChatMessage, ConnectorError, CompletionResult,
+    GeminiConnector, LlmBrain, LlmConfig, LlmConnector, LlmConnectorKind, LlmProvider,
+    LmStudioConnector, MockLlmConnector, OpenAiConnector, ParseError,
 };
 pub use layer::{run_layer_loop, run_plan_layer, LayerLoopOptions};
 pub use plan::{

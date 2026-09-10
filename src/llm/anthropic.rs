@@ -46,6 +46,7 @@ impl AnthropicConnector {
         let client = Client::builder()
             .timeout(config.timeout)
             .build()?;
+        crate::llm::connector::require_absolute_http_base(&config.base_url)?;
         Ok(Self { client, config })
     }
 

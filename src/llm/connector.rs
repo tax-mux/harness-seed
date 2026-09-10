@@ -250,13 +250,64 @@ impl LlmConfig {
 }
 
 /// OpenAI 互換 API のベース URL に `/v1` を付与する。
+///
+/// - 空文字は空のまま返す（呼び出し側で既定値へフォールバック）
+/// - `127.0.0.1:11434` のようにスキーム無しなら `http://` を付与する
+///   （スキーム無しは相対 URL 扱いになり reqwest `builder error` を誘発する）
+/// - ホストが `0.0.0.0`（リッスン用）なら接続先として `127.0.0.1` に置き換える
 pub fn normalize_openai_compatible_base_url(host: &str) -> String {
     let trimmed = host.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let with_scheme = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        trimmed.to_string()
+    } else {
+        format!("http://{trimmed}")
+    };
+    let rewritten = rewrite_unspecified_listen_host(&with_scheme);
+    let trimmed = rewritten.trim_end_matches('/');
     if trimmed.ends_with("/v1") {
         trimmed.to_string()
     } else {
         format!("{trimmed}/v1")
     }
+}
+
+/// `0.0.0.0` / `[::]` はサーバの bind アドレスであり、クライアント接続先としては使えない。
+fn rewrite_unspecified_listen_host(url: &str) -> String {
+    url.replace("://0.0.0.0", "://127.0.0.1")
+        .replace("://[::]", "://[::1]")
+}
+
+/// `http(s)://` の絶対 URL であることを要求する（相対 URL → reqwest builder error 防止）。
+pub fn require_absolute_http_base(url: &str) -> Result<(), ConnectorError> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err(ConnectorError::Config(
+            "llm.base_url is empty; set an absolute http(s) URL (e.g. http://127.0.0.1:11434)"
+                .into(),
+        ));
+    }
+    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+        return Err(ConnectorError::Config(format!(
+            "llm.base_url must be an absolute http(s) URL (got {trimmed:?}); \
+             relative URLs cause reqwest builder error"
+        )));
+    }
+    Ok(())
+}
+
+/// reqwest 等のエラー連鎖を `a: b: c` 形式で連結する。
+pub fn format_error_chain(err: &dyn std::error::Error) -> String {
+    let mut out = err.to_string();
+    let mut src = err.source();
+    while let Some(s) = src {
+        out.push_str(": ");
+        out.push_str(&s.to_string());
+        src = s.source();
+    }
+    out
 }
 
 /// `OLLAMA_HOST` 等を OpenAI 互換の `/v1` 付き URL に正規化する。
@@ -287,7 +338,7 @@ impl fmt::Display for ConnectorError {
             ),
             Self::Config(msg) => write!(f, "config error: {msg}"),
             Self::Http { status, body } => write!(f, "HTTP {status}: {body}"),
-            Self::Request(e) => write!(f, "request error: {e}"),
+            Self::Request(e) => write!(f, "request error: {}", format_error_chain(e)),
             Self::InvalidResponse(msg) => write!(f, "invalid response: {msg}"),
         }
     }
@@ -328,6 +379,48 @@ mod tests {
         assert_eq!(
             normalize_ollama_base_url("http://localhost:11434/v1/"),
             "http://localhost:11434/v1"
+        );
+    }
+
+    #[test]
+    fn normalize_empty_host_stays_empty() {
+        assert_eq!(normalize_openai_compatible_base_url(""), "");
+        assert_eq!(normalize_openai_compatible_base_url("   "), "");
+    }
+
+    #[test]
+    fn normalize_adds_http_scheme_when_missing() {
+        assert_eq!(
+            normalize_openai_compatible_base_url("127.0.0.1:11434"),
+            "http://127.0.0.1:11434/v1"
+        );
+        assert_eq!(
+            normalize_openai_compatible_base_url("0.0.0.0"),
+            "http://127.0.0.1/v1"
+        );
+        assert_eq!(
+            normalize_openai_compatible_base_url("0.0.0.0:11434"),
+            "http://127.0.0.1:11434/v1"
+        );
+    }
+
+    #[test]
+    fn require_absolute_rejects_relative_and_empty() {
+        assert!(require_absolute_http_base("").is_err());
+        assert!(require_absolute_http_base("/v1").is_err());
+        assert!(require_absolute_http_base("http://127.0.0.1:11434/v1").is_ok());
+    }
+
+    #[test]
+    fn request_error_display_includes_source_chain() {
+        let client = reqwest::blocking::Client::new();
+        let err = client.post("/v1/chat/completions").build().unwrap_err();
+        let wrapped = ConnectorError::from(err);
+        let msg = wrapped.to_string();
+        assert!(msg.contains("builder error"), "{msg}");
+        assert!(
+            msg.contains("relative URL") || msg.contains("without a base"),
+            "expected source detail in: {msg}"
         );
     }
 

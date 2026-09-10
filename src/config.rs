@@ -617,19 +617,22 @@ impl AppConfig {
                 let host = env_string("OLLAMA_HOST")
                     .or_else(|| env_base_url())
                     .or_else(|| env_string("OPENAI_BASE_URL"))
-                    .or(self.llm.base_url.clone())
+                    .or_else(|| nonempty_opt(self.llm.base_url.clone()))
                     .unwrap_or_else(|| "http://127.0.0.1:11434".into());
 
                 let model = env_string("OLLAMA_MODEL")
                     .or_else(|| env_model())
                     .or_else(|| env_string("OPENAI_MODEL"))
-                    .or(self.llm.model.clone())
+                    .or_else(|| nonempty_opt(self.llm.model.clone()))
                     .unwrap_or_else(|| "gemma4".into());
+
+                let base_url = crate::llm::normalize_ollama_base_url(&host);
+                crate::llm::require_absolute_http_base(&base_url)?;
 
                 Ok(LlmConfig {
                     provider: LlmProvider::Ollama,
                     api_key: self.resolved_openai_api_key(),
-                    base_url: crate::llm::normalize_ollama_base_url(&host),
+                    base_url,
                     model,
                     timeout: std::time::Duration::from_secs(timeout_secs),
                     json_mode: false,
@@ -639,12 +642,12 @@ impl AppConfig {
                 let host = env_string("LM_STUDIO_HOST")
                     .or_else(|| env_string("LMSTUDIO_HOST"))
                     .or_else(|| env_base_url())
-                    .or(self.llm.base_url.clone())
+                    .or_else(|| nonempty_opt(self.llm.base_url.clone()))
                     .unwrap_or_else(|| "http://127.0.0.1:1234".into());
 
                 let model = env_string("LM_STUDIO_MODEL")
                     .or_else(|| env_model())
-                    .or(self.llm.model.clone())
+                    .or_else(|| nonempty_opt(self.llm.model.clone()))
                     .unwrap_or_else(|| "google/gemma-4-e2b".into());
 
                 let json_mode = match env_json_mode() {
@@ -653,10 +656,13 @@ impl AppConfig {
                     None => self.llm.json_mode.unwrap_or(false),
                 };
 
+                let base_url = crate::llm::normalize_lmstudio_base_url(&host);
+                crate::llm::require_absolute_http_base(&base_url)?;
+
                 Ok(LlmConfig {
                     provider: LlmProvider::LmStudio,
                     api_key: self.resolved_openai_api_key(),
-                    base_url: crate::llm::normalize_lmstudio_base_url(&host),
+                    base_url,
                     model,
                     timeout: std::time::Duration::from_secs(timeout_secs),
                     json_mode,
@@ -674,7 +680,7 @@ impl AppConfig {
 
                 let model = env_string("GEMINI_MODEL")
                     .or_else(|| env_model())
-                    .or(self.llm.model.clone())
+                    .or_else(|| nonempty_opt(self.llm.model.clone()))
                     .unwrap_or_else(|| "gemini-2.5-flash".into());
 
                 let json_mode = match env_json_mode() {
@@ -682,6 +688,8 @@ impl AppConfig {
                     Some(_) => true,
                     None => self.llm.json_mode.unwrap_or(false),
                 };
+
+                crate::llm::require_absolute_http_base(&base_url)?;
 
                 Ok(LlmConfig {
                     provider: LlmProvider::Gemini,
@@ -699,13 +707,13 @@ impl AppConfig {
 
                 let base_url = env_string("ANTHROPIC_BASE_URL")
                     .or_else(|| env_base_url())
-                    .or(self.llm.base_url.clone())
+                    .or_else(|| nonempty_opt(self.llm.base_url.clone()))
                     .map(|u| crate::llm::normalize_anthropic_base_url(&u))
                     .unwrap_or_else(|| crate::llm::normalize_anthropic_base_url(""));
 
                 let model = env_string("ANTHROPIC_MODEL")
                     .or_else(|| env_model())
-                    .or(self.llm.model.clone())
+                    .or_else(|| nonempty_opt(self.llm.model.clone()))
                     .unwrap_or_else(|| "claude-3-5-sonnet-20241022".into());
 
                 let json_mode = match env_json_mode() {
@@ -713,6 +721,8 @@ impl AppConfig {
                     Some(_) => true,
                     None => self.llm.json_mode.unwrap_or(false),
                 };
+
+                crate::llm::require_absolute_http_base(&base_url)?;
 
                 Ok(LlmConfig {
                     provider: LlmProvider::Anthropic,
@@ -730,12 +740,12 @@ impl AppConfig {
 
                 let base_url = env_string("OPENAI_BASE_URL")
                     .or_else(|| env_base_url())
-                    .or(self.llm.base_url.clone())
+                    .or_else(|| nonempty_opt(self.llm.base_url.clone()))
                     .unwrap_or_else(|| "https://api.openai.com/v1".into());
 
                 let model = env_model()
                     .or_else(|| env_string("OPENAI_MODEL"))
-                    .or(self.llm.model.clone())
+                    .or_else(|| nonempty_opt(self.llm.model.clone()))
                     .unwrap_or_else(|| "gpt-4o-mini".into());
 
                 let json_mode = match env_json_mode() {
@@ -744,10 +754,13 @@ impl AppConfig {
                     None => self.llm.json_mode.unwrap_or(true),
                 };
 
+                let base_url = base_url.trim_end_matches('/').to_string();
+                crate::llm::require_absolute_http_base(&base_url)?;
+
                 Ok(LlmConfig {
                     provider: LlmProvider::OpenAi,
                     api_key: Some(api_key),
-                    base_url: base_url.trim_end_matches('/').to_string(),
+                    base_url,
                     model,
                     timeout: std::time::Duration::from_secs(timeout_secs),
                     json_mode,
@@ -879,6 +892,17 @@ fn env_string(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|s| !s.is_empty())
 }
 
+fn nonempty_opt(value: Option<String>) -> Option<String> {
+    value.and_then(|s| {
+        let t = s.trim();
+        if t.is_empty() {
+            None
+        } else {
+            Some(t.to_string())
+        }
+    })
+}
+
 fn env_u64(name: &str) -> Option<u64> {
     env_string(name).and_then(|s| s.parse().ok())
 }
@@ -925,6 +949,14 @@ mod tests {
         let llm = cfg.build_llm_config().unwrap();
         assert_eq!(llm.provider, LlmProvider::Ollama);
         assert_eq!(llm.base_url, "http://127.0.0.1:11434/v1");
+    }
+
+    #[test]
+    fn nonempty_opt_drops_blank_strings() {
+        assert_eq!(nonempty_opt(Some(String::new())), None);
+        assert_eq!(nonempty_opt(Some("   ".into())), None);
+        assert_eq!(nonempty_opt(Some(" http://x ".into())), Some("http://x".into()));
+        assert_eq!(nonempty_opt(None), None);
     }
 
     #[test]
