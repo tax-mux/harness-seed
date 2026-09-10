@@ -4,8 +4,6 @@ use serde_json::Value;
 use crate::action::AgentStep;
 use crate::llm::{extract_json_objects, salvage_answer_step_content};
 
-use super::parse::parse_plan;
-
 #[derive(Debug, Deserialize)]
 #[serde(tag = "step", rename_all = "snake_case")]
 enum PlanStepJson {
@@ -126,18 +124,30 @@ pub fn parse_plan_agent_step(raw: &str) -> Result<AgentStep, PlanStepParseError>
     )))
 }
 
+/// 計画層ループ終了時の `Answer` 本文（作業指示書）から [`HarnessState`] を得る。
+pub fn harness_state_from_plan_answer(
+    answer: &str,
+    fallback_input: &str,
+) -> crate::harness::HarnessState {
+    let state = match crate::harness::parse_harness(answer, fallback_input) {
+        Ok(state) => state,
+        Err(err) => {
+            eprintln!("[harness] parse error: {err}, falling back to single subtask");
+            crate::harness::HarnessState::new(
+                answer,
+                super::PlanArtifact::single_subtask(fallback_input),
+            )
+        }
+    };
+    state
+}
+
 /// 計画層ループ終了時の `Answer` 本文から [`super::PlanArtifact`] を得る。
 pub fn plan_artifact_from_answer(
     answer: &str,
     fallback_input: &str,
 ) -> super::PlanArtifact {
-    match parse_plan(answer) {
-        Ok(plan) => plan,
-        Err(err) => {
-            eprintln!("[plan] answer parse error: {err}, falling back to single subtask");
-            super::PlanArtifact::single_subtask(fallback_input)
-        }
-    }
+    harness_state_from_plan_answer(answer, fallback_input).plan
 }
 
 fn strip_code_fence(s: &str) -> &str {
@@ -147,44 +157,4 @@ fn strip_code_fence(s: &str) -> &str {
         .unwrap_or(s);
     let s = s.strip_suffix("```").unwrap_or(s);
     s.trim()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_plan_thought_step() {
-        let step = parse_plan_agent_step(r#"{"step":"thought","content":"分解する"}"#).unwrap();
-        assert!(matches!(step, AgentStep::Thought(_)));
-    }
-
-    #[test]
-    fn action_becomes_thought_warning() {
-        let step =
-            parse_plan_agent_step(r#"{"step":"action","tool":"list_dir","args":{}}"#).unwrap();
-        assert!(matches!(step, AgentStep::Thought(t) if t.contains("cannot execute")));
-    }
-
-    #[test]
-    fn picks_answer_over_thought_multiline() {
-        let raw = r#"{"step":"thought","content":"The user wants an apology email."}
-{"step":"answer","content":"{
-  \"summary\": \"Check compose form then draft apology\",
-  \"skip_execution\": false,
-  \"subtasks\": [
-    {\"id\": 1, \"task\": \"get_compose_form\", \"params\": {}, \"goal\": \"read form\", \"done_when\": \"success\"}
-  ]
-}"}"#;
-        let step = parse_plan_agent_step(raw).unwrap();
-        match &step {
-            AgentStep::Answer(body) => {
-                assert!(body.contains("get_compose_form"));
-                let plan = parse_plan(body).expect("plan artifact in answer");
-                assert!(!plan.skip_execution);
-                assert_eq!(plan.subtasks.len(), 1);
-            }
-            other => panic!("expected Answer, got {other:?}"),
-        }
-    }
 }

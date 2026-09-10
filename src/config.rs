@@ -10,7 +10,6 @@ use crate::context_log::default_log_path;
 use crate::llm::{LlmConfig, LlmProvider};
 use crate::brave_search::BraveSearchConfig;
 use crate::advance::AdvanceConfig;
-use crate::scout::ScoutConfig;
 use crate::react::ReActConfig;
 use crate::session::SessionMemory;
 use crate::tool::{default_packs, packs_from_names, ToolPack};
@@ -66,18 +65,6 @@ pub struct ReactSection {
     /// 外側推進ループ（`react.advance`）。
     #[serde(default)]
     pub advance: AdvanceSection,
-    /// 計画前スカウト（`react.scout`）。
-    #[serde(default)]
-    pub scout: ScoutSection,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct ScoutSection {
-    pub enabled: Option<bool>,
-    pub max_steps: Option<usize>,
-    pub skip_trivial: Option<bool>,
-    pub max_note_chars: Option<usize>,
-    pub show_scout: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -188,10 +175,62 @@ pub struct BraveSearchSection {
     pub max_content_chars: Option<usize>,
 }
 
+/// コンテキストログのローテーション（`log.rotation`）。
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct LogRotationSection {
+    /// このサイズ（バイト）を超えたらローテート（既定 10 MiB）。`0` で無効。
+    pub max_bytes: Option<u64>,
+    /// 保持する世代数（現行 + バックアップ）。既定 5。`0` でローテーション無効。
+    pub max_files: Option<u32>,
+}
+
+/// 解決済みローテーション設定。
+#[derive(Debug, Clone, Copy)]
+pub struct LogRotationConfig {
+    pub max_bytes: u64,
+    pub max_files: u32,
+}
+
+impl LogRotationConfig {
+    pub const DEFAULT_MAX_BYTES: u64 = 10 * 1024 * 1024;
+    pub const DEFAULT_MAX_FILES: u32 = 5;
+
+    pub fn disabled() -> Self {
+        Self {
+            max_bytes: 0,
+            max_files: 0,
+        }
+    }
+
+    pub fn enabled(&self) -> bool {
+        self.max_bytes > 0 && self.max_files > 0
+    }
+}
+
+impl LogRotationSection {
+    pub fn resolve(&self) -> LogRotationConfig {
+        LogRotationConfig {
+            max_bytes: self.max_bytes.unwrap_or(LogRotationConfig::DEFAULT_MAX_BYTES),
+            max_files: self.max_files.unwrap_or(LogRotationConfig::DEFAULT_MAX_FILES),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct LogSection {
     /// コンテキスト計測の JSON Lines ログパス（例: `logs/context.jsonl`）。
     pub context_metrics: Option<String>,
+    #[serde(default)]
+    pub rotation: Option<LogRotationSection>,
+}
+
+impl LogSection {
+    pub fn resolved_rotation(&self) -> LogRotationConfig {
+        self.rotation
+            .as_ref()
+            .map(LogRotationSection::resolve)
+            .unwrap_or_else(|| LogRotationSection::default().resolve())
+    }
 }
 
 #[derive(Debug)]
@@ -266,6 +305,7 @@ impl AppConfig {
             verbose: cli_verbose || self.react.verbose.unwrap_or(false),
             show_context_metrics: self.react.show_context_metrics.unwrap_or(true),
             context_log_path: self.resolved_context_log_path(),
+            log_rotation: self.log.resolved_rotation(),
             session_max_turns: self
                 .react
                 .session_max_turns
@@ -293,18 +333,7 @@ impl AppConfig {
                     .clamp(200, 16_000),
                 show_phases: self.react.advance.show_phases.unwrap_or(true),
             },
-            scout: ScoutConfig {
-                enabled: self.react.scout.enabled.unwrap_or(false),
-                max_steps: self.react.scout.max_steps.unwrap_or(6).max(1),
-                skip_trivial: self.react.scout.skip_trivial.unwrap_or(true),
-                max_note_chars: self
-                    .react
-                    .scout
-                    .max_note_chars
-                    .unwrap_or(2000)
-                    .clamp(200, 16_000),
-                show_scout: self.react.scout.show_scout.unwrap_or(true),
-            },
+            monitor_plan_html: false,
         }
     }
 
@@ -716,15 +745,6 @@ mod tests {
         assert_eq!(cfg.react.max_steps, Some(16));
         assert_eq!(cfg.tools.brave_search.max_results, Some(5));
         assert_eq!(cfg.tools.brave_search.fetch_content, Some(false));
-    }
-
-    #[test]
-    fn resolves_scout_config_defaults() {
-        let cfg: AppConfig = serde_json::from_str(r#"{}"#).unwrap();
-        let react = cfg.react_config(false, false);
-        assert!(!react.scout.enabled);
-        assert_eq!(react.scout.max_steps, 6);
-        assert!(react.scout.skip_trivial);
     }
 
     #[test]

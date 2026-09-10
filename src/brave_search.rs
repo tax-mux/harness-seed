@@ -54,7 +54,7 @@ pub fn search_web(cfg: &BraveSearchConfig, query: &str, count: Option<u8>) -> Re
     if q.is_empty() {
         return Err(BraveSearchError::Parse("query must not be empty".into()));
     }
-    let q = if q.len() > 400 { &q[..400] } else { q };
+    let q = q.chars().take(400).collect::<String>();
 
     let count = count
         .map(|c| c.clamp(1, 20))
@@ -73,7 +73,7 @@ pub fn search_web(cfg: &BraveSearchConfig, query: &str, count: Option<u8>) -> Re
         .get(BRAVE_WEB_SEARCH_URL)
         .header("Accept", "application/json")
         .header("X-Subscription-Token", &cfg.api_key)
-        .query(&[("q", q), ("count", count_str.as_str())])
+        .query(&[("q", q.as_str()), ("count", count_str.as_str())])
         .send()
         .map_err(|e| BraveSearchError::Http(e.to_string()))?;
 

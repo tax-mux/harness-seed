@@ -11,7 +11,7 @@ pub struct AdvanceConfig {
     pub enabled: bool,
     /// 1 リクエストあたりの最大フェーズ数（計画サブタスクの上限）。
     pub max_phases: usize,
-    /// 各フェーズの前に `SessionMemory` をクリアする（`Previous turns` を載せない）。
+    /// フェーズ間で `SessionMemory` をクリアする（先頭フェーズは保持）。
     pub clear_session_each_phase: bool,
     /// フェーズ要約を `recalled` に載せる最大文字数（1 フェーズあたり）。
     pub max_note_chars: usize,

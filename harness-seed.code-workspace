@@ -1,0 +1,12 @@
+{
+  "folders": [
+    {
+      "path": ".",
+      "name": "harness-seed"
+    }
+  ],
+  "settings": {
+    "rust-analyzer.linkedProjects": ["./Cargo.toml"],
+    "terminal.integrated.cwd": "${workspaceFolder}"
+  }
+}

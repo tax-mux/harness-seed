@@ -40,6 +40,12 @@ pub fn parse_agent_step(raw: &str, invoke_id: u64) -> Result<AgentStep, ParseErr
     if let Ok(step) = parse_one_json(trimmed, invoke_id) {
         return Ok(step);
     }
+    if let Some(step) = salvage_step_object(trimmed) {
+        return Ok(step);
+    }
+    if let Some(content) = salvage_answer_step_content(trimmed) {
+        return Ok(AgentStep::Answer(content));
+    }
 
     let mut thought = None;
     let mut action = None;
@@ -128,29 +134,215 @@ fn normalize_escaped_json_body(body: &str) -> String {
     }
 }
 
+fn is_answer_step_json(chunk: &str) -> bool {
+    chunk.contains(r#""step":"answer""#)
+        || chunk.contains(r#""step": "answer""#)
+        || chunk.contains(r#""step" : "answer""#)
+}
+
+/// 複数行応答のうち、最後の `{"step":"answer",...}` オブジェクトを切り出す。
+fn extract_last_answer_object<'a>(chunk: &'a str) -> Option<&'a str> {
+    if !is_answer_step_json(chunk) {
+        return None;
+    }
+    let markers = [r#""step":"answer""#, r#""step": "answer""#, r#""step" : "answer""#];
+    let answer_idx = markers.iter().filter_map(|m| chunk.rfind(m)).max()?;
+    let start = chunk[..answer_idx].rfind('{')?;
+    let bytes = chunk.as_bytes();
+    let mut i = start;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_string {
+            if escape {
+                escape = false;
+            } else if c == b'\\' {
+                escape = true;
+            } else if c == b'"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        match c {
+            b'"' => {
+                in_string = true;
+                i += 1;
+            }
+            b'{' => {
+                depth += 1;
+                i += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                i += 1;
+                if depth == 0 {
+                    return std::str::from_utf8(&bytes[start..i]).ok();
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+/// 先頭の `"` から JSON 文字列値を走査で取り出す（改行未エスケープでも可）。
+fn extract_json_string_value(s: &str) -> Option<String> {
+    let s = s.trim_start();
+    if !s.starts_with('"') {
+        return None;
+    }
+    let mut out = String::new();
+    let mut escape = false;
+    for c in s[1..].chars() {
+        if escape {
+            match c {
+                'n' => out.push('\n'),
+                'r' => out.push('\r'),
+                't' => out.push('\t'),
+                '"' => out.push('"'),
+                '\\' => out.push('\\'),
+                other => {
+                    out.push('\\');
+                    out.push(other);
+                }
+            }
+            escape = false;
+            continue;
+        }
+        if c == '\\' {
+            escape = true;
+            continue;
+        }
+        if c == '"' {
+            return Some(out);
+        }
+        out.push(c);
+    }
+    None
+}
+
+/// 先頭の `"` から JSON 文字列値を走査で取り出す（未エスケープの引用符もある程度許容する）。
+fn extract_json_string_value_lenient(s: &str) -> Option<String> {
+    let s = s.trim_start();
+    if !s.starts_with('"') {
+        return None;
+    }
+
+    let mut out = String::new();
+    let mut chars = s[1..].chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(next) = chars.next() {
+                match next {
+                    'n' => out.push('\n'),
+                    'r' => out.push('\r'),
+                    't' => out.push('\t'),
+                    '"' => out.push('"'),
+                    '\\' => out.push('\\'),
+                    other => {
+                        out.push('\\');
+                        out.push(other);
+                    }
+                }
+            } else {
+                out.push('\\');
+            }
+            continue;
+        }
+
+        if c == '"' {
+            let mut lookahead = chars.clone();
+            while let Some(next) = lookahead.peek() {
+                if next.is_whitespace() {
+                    lookahead.next();
+                } else {
+                    break;
+                }
+            }
+            match lookahead.peek().copied() {
+                Some(',') | Some('}') | Some(']') | None => return Some(out),
+                _ => out.push('"'),
+            }
+            continue;
+        }
+
+        out.push(c);
+    }
+
+    None
+}
+
+fn extract_json_string_value_sloppy(s: &str) -> Option<String> {
+    let s = s.trim_start();
+    if !s.starts_with('"') {
+        return None;
+    }
+    let body = &s[1..];
+    let end = body.rfind('"')?;
+    let value = &body[..end];
+    Some(value.replace("\\\"", "\"").replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t"))
+}
+
+fn extract_step_kind(chunk: &str) -> Option<&'static str> {
+    if chunk.contains(r#""step":"thought""#) || chunk.contains(r#""step": "thought""#) {
+        Some("thought")
+    } else if chunk.contains(r#""step":"answer""#) || chunk.contains(r#""step": "answer""#) {
+        Some("answer")
+    } else if chunk.contains(r#""step":"action""#) || chunk.contains(r#""step": "action""#) {
+        Some("action")
+    } else {
+        None
+    }
+}
+
+fn salvage_step_object(chunk: &str) -> Option<AgentStep> {
+    let kind = extract_step_kind(chunk)?;
+    let content = salvage_content_field(chunk)?;
+    Some(match kind {
+        "thought" => AgentStep::Thought(content),
+        "answer" => AgentStep::Answer(content),
+        "action" => AgentStep::Thought(format!(
+            "LLM returned malformed action JSON; ignoring tools and keeping text: {content}"
+        )),
+        _ => return None,
+    })
+}
+
+fn salvage_content_field(chunk: &str) -> Option<String> {
+    const CONTENT_KEY: &str = "\"content\"";
+    let mut search_from = 0usize;
+    while let Some(rel) = chunk[search_from..].find(CONTENT_KEY) {
+        let key_start = search_from + rel;
+        let after_key = chunk[key_start + CONTENT_KEY.len()..].trim_start();
+        if !after_key.starts_with(':') {
+            search_from = key_start + 1;
+            continue;
+        }
+        let after_colon = after_key[1..].trim_start();
+        if let Some(value) = extract_json_string_value_sloppy(after_colon)
+            .or_else(|| extract_json_string_value_lenient(after_colon))
+            .or_else(|| extract_json_string_value(after_colon))
+        {
+            let trimmed = normalize_escaped_json_body(value.trim());
+            if !trimmed.is_empty() {
+                return Some(trimmed);
+            }
+        }
+        search_from = key_start + 1;
+    }
+    None
+}
+
 /// `answer` ステップの `content` が改行入りで JSON パースに失敗したときの救済。
 pub fn salvage_answer_step_content(chunk: &str) -> Option<String> {
-    if !chunk.contains("\"step\":\"answer\"") && !chunk.contains("\"step\": \"answer\"") {
+    let chunk = extract_last_answer_object(chunk).unwrap_or(chunk);
+    if !is_answer_step_json(chunk) {
         return None;
     }
-    let markers = ["\"content\":\"", "\"content\": \""];
-    let start = markers
-        .iter()
-        .find_map(|m| chunk.find(m).map(|i| i + m.len()))?;
-    let rest = chunk[start..].trim_start();
-    if rest.starts_with('"') {
-        let end = rest[1..].find('"')? + 1;
-        return Some(normalize_escaped_json_body(rest[1..end].trim()));
-    }
-    if !rest.starts_with('{') {
-        return None;
-    }
-    let end = rest.rfind("\"}")?;
-    let body = rest[..end].trim();
-    if body.is_empty() {
-        return None;
-    }
-    Some(normalize_escaped_json_body(body))
+    salvage_content_field(chunk)
 }
 
 /// テキスト中のトップレベル JSON オブジェクトを出現順に抽出する（複数行・複数オブジェクト対応）。
@@ -239,6 +431,36 @@ mod tests {
         let raw = "```json\n{\"step\":\"answer\",\"content\":\"ok\"}\n```";
         let step = parse_agent_step(raw, 1).unwrap();
         assert!(matches!(step, AgentStep::Answer(a) if a == "ok"));
+    }
+
+    #[test]
+    fn salvages_answer_with_unescaped_newlines_in_content() {
+        let raw = r#"{"step":"answer","content":"参照メール（UID: 302699）の要点です。
+
+【概要】
+マネックス証券の高配当米国ETF案内です。
+
+手続き案内: 配信解除の案内があります。"}"#;
+        let step = parse_agent_step(raw, 1).unwrap();
+        assert!(matches!(
+            step,
+            AgentStep::Answer(a) if a.contains("手続き案内") && a.contains("302699")
+        ));
+    }
+
+    #[test]
+    fn salvage_extracts_long_markdown_answer() {
+        let raw = r#"{"step":"answer","content":"**【概要】**\n本メールは証券会社からの案内です。\n\n**注意**\n投資は自己責任です。"}"#;
+        let body = salvage_answer_step_content(raw).expect("salvaged");
+        assert!(body.contains("証券会社"));
+        assert!(body.contains("自己責任"));
+    }
+
+    #[test]
+    fn salvages_answer_with_unescaped_quotes_in_content() {
+        let raw = r#"{"step":"thought","content":"The user asked for a self-introduction in Japanese ("自己紹介して"). Since I am an AI agent, I should provide a polite introduction."}"#;
+        let step = parse_agent_step(raw, 1).unwrap();
+        assert!(matches!(step, AgentStep::Thought(a) if a.contains("自己紹介して") && a.contains("AI agent")));
     }
 
     #[test]

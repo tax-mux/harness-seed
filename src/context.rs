@@ -52,6 +52,14 @@ pub struct PromptBlocks {
     pub web_search_enabled: bool,
     /// 登録済みツールの `Tool catalog` ブロック（[`ToolRuntime::catalog`] から設定）。
     pub tool_catalog: String,
+    /// 登録済み実行ツールに合わせた計画層タスクカタログ（未設定なら全タスク）。
+    pub plan_task_catalog: Option<String>,
+    /// このターンの read / write 契約（ホストアプリが設定）。
+    pub plan_data_contract: Option<crate::plan::PlanDataContract>,
+    /// 作業指示書テキスト（Planner 出力。Harness が保持）。
+    pub work_instructions_text: Option<String>,
+    /// 今のステップ（Harness が内部 JSON から生成したテキスト。LLM は JSON を見ない）。
+    pub current_step_text: Option<String>,
 }
 
 impl Default for PromptBlocks {
@@ -65,6 +73,10 @@ impl Default for PromptBlocks {
             tool_catalog: crate::tool::format_tool_catalog(&crate::tool::full_builtin_registry(
                 false,
             )),
+            plan_task_catalog: None,
+            plan_data_contract: None,
+            work_instructions_text: None,
+            current_step_text: None,
         }
     }
 }
@@ -198,6 +210,24 @@ impl<'a> TurnPromptContext<'a> {
                 out.push_str(&format!("\n[recalled {}]\n{chunk}\n", i + 1));
             }
         }
+        if let Some(ref wi) = self.blocks.work_instructions_text {
+            if !wi.trim().is_empty() {
+                out.push_str("\n\nWork instructions (from planner — do not rewrite):\n");
+                out.push_str(wi);
+                if !wi.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+        }
+        if let Some(ref step) = self.blocks.current_step_text {
+            if !step.trim().is_empty() {
+                out.push_str("\n\nCurrent step (harness — execute only this step):\n");
+                out.push_str(step);
+                if !step.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+        }
         if !self.blocks.system_extra.is_empty() {
             out.push_str("\n\n");
             out.push_str(&self.blocks.system_extra);
@@ -242,7 +272,7 @@ pub fn format_plan_rule_prompt_preview(ctx: &TurnPromptContext<'_>) -> String {
     };
     let trace_text = format_trace(ctx.trace);
     format!(
-        "system: <rule plan brain — LLM not used>\nuser: {previous_block}Plan request:\n{}\n\nPlan trace so far:\n{trace_text}\n\nNext plan step JSON:",
+        "system: <rule plan brain — LLM not used>\nuser: {previous_block}ゴール:\n{}\n\nPlan trace so far:\n{trace_text}\n\nNext plan step JSON:",
         ctx.user_input
     )
 }
@@ -295,17 +325,6 @@ mod tests {
     use super::*;
     use crate::action::Observation;
     use std::fs;
-
-    #[test]
-    fn plan_rule_prompt_preview_includes_plan_request() {
-        let blocks = PromptBlocks::default();
-        let trace = TurnTrace::default();
-        let session = SessionMemory::default();
-        let ctx = TurnPromptContext::new(&blocks, "list src", &trace, &session);
-        let body = format_plan_rule_prompt_preview(&ctx);
-        assert!(body.contains("Plan request:"));
-        assert!(body.contains("list src"));
-    }
 
     #[test]
     fn render_includes_previous_turns_and_user_input() {

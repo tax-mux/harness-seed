@@ -1,11 +1,11 @@
 use crate::action::AgentStep;
 use crate::brain::AgentBrain;
-use crate::context::{format_trace, TurnPromptContext};
+use crate::context::TurnPromptContext;
 use crate::context_metrics::ContextUsage;
 use crate::llm::{ChatMessage, LlmBrain, LlmConnector, LlmConnectorKind, MockLlmConnector};
 use crate::tasks::TaskRegistry;
 
-use super::parse_step::{parse_plan_agent_step, plan_artifact_from_answer};
+use super::parse_step::parse_plan_agent_step;
 use super::PlanArtifact;
 
 /// 計画層用 ReAct system（`thought` / `answer` のみ。ツールは不可）。
@@ -13,23 +13,31 @@ pub const PLAN_REACT_SYSTEM_CORE: &str = r#"You are a planning agent in a ReAct-
 
 Schema:
 - {"step":"thought","content":"<reasoning>"}
-- {"step":"answer","content":"<PlanArtifact JSON string — same schema as below>"}
+- {"step":"answer","content":"<作業指示書 — structured plan JSON or numbered text steps>"}
 
-PlanArtifact schema (inside answer content):
+The harness parses your answer into internal JSON (HarnessState). Prefer ONE of:
+- Structured JSON (input / steps / output) as below, OR
+- Numbered work-instruction lines (e.g. "1. ..." / "ステップ1: ...").
+
+Planning schema (inside answer content when using JSON):
 {
-  "summary": "<one-line summary>",
-  "skip_execution": <bool>,
-  "subtasks": [
+  "input": ["<fixed INPUT contract lines copied from prompt>"],
+  "steps": [
     {"id": 1, "task": "<registered task id>", "params": {}, "goal": "", "done_when": ""}
-  ]
+  ],
+  "output": "<fixed OUTPUT contract line copied from prompt>",
+  "skip_execution": <bool>,
 }
 
 Rules:
-- Prefer emitting `answer` with the PlanArtifact JSON when the plan is clear; use `thought` only for brief decomposition if needed.
+- INPUT and OUTPUT boundaries are fixed before you run. Do NOT change read/write sources or storage targets.
+- Instruction contract: "Take data ONLY from INPUT. Write result ONLY to OUTPUT. Think ONLY about the in-between procedure."
+- Your job is the PROCEDURE in between: emit ordered `steps` that transform INPUT into OUTPUT.
+- Prefer emitting `answer` with the work instructions (JSON plan or numbered steps) when clear; use `thought` only for brief decomposition if needed.
 - Do NOT emit action / tools in the plan layer.
-- Prefer registered task ids from the task catalog (with params).
-- Use skip_execution: true only for trivial chat/help with no tool work.
-- When ready to output the final plan, use step answer with the full PlanArtifact JSON in content.
+- Use only task ids from the task catalog that match the data contract.
+- Use skip_execution: true only when the contract says so (trivial chat).
+- When ready, use step answer with the full work instructions (JSON or text) in content.
 "#;
 
 /// 計画層の頭脳（ルール / LLM / テスト用 Mock）。
@@ -144,52 +152,16 @@ impl<C: LlmConnector> PlanLlmBrain<C> {
     }
 
     pub fn build_messages(ctx: &TurnPromptContext<'_>, task_catalog: &str) -> Vec<ChatMessage> {
-        let mut system = String::from(PLAN_REACT_SYSTEM_CORE);
-        if ctx.blocks.web_search_enabled {
-            system.push_str(
-                "\n- Web search is enabled: assign task `web_research` with params {\"query\":\"...\"} for external/current-events questions.\n",
-            );
-        }
-        if !ctx.blocks.rules.is_empty() {
-            system.push_str("\n\nAdditional rules:\n");
-            for (i, rule) in ctx.blocks.rules.iter().enumerate() {
-                system.push_str(&format!("\n[rule {}]\n{rule}\n", i + 1));
-            }
-        }
-        if !ctx.blocks.recalled.is_empty() {
-            system.push_str("\n\nRecalled context:\n");
-            for (i, chunk) in ctx.blocks.recalled.iter().enumerate() {
-                system.push_str(&format!("\n[recalled {}]\n{chunk}\n", i + 1));
-            }
-        }
-        if !task_catalog.is_empty() {
-            system.push_str("\n\n");
-            system.push_str(task_catalog);
-        }
-        system.push_str("\n\nExecution environment:\n");
-        system.push_str(&ctx.blocks.runtime.prompt_hint());
-
-        let previous = ctx.session.format_for_prompt();
-        let previous_block = if previous.is_empty() {
-            String::new()
-        } else {
-            format!("{previous}\n")
-        };
-        let trace_text = format_trace(ctx.trace);
-        let user = format!(
-            "{previous_block}Plan request:\n{}\n\nPlan trace so far:\n{trace_text}\n\nNext plan step JSON:",
-            ctx.user_input
-        );
-
-        vec![ChatMessage::system(system), ChatMessage::user(user)]
+        super::prompt::build_plan_layer_messages_with_catalog(ctx, task_catalog)
     }
 }
 
 impl<C: LlmConnector> AgentBrain for PlanLlmBrain<C> {
     fn decide(&mut self, ctx: &TurnPromptContext<'_>) -> AgentStep {
-        let catalog = self
-            .registry
-            .catalog_for_planner_opts(ctx.blocks.web_search_enabled);
+        let catalog = ctx.blocks.plan_task_catalog.clone().unwrap_or_else(|| {
+            self.registry
+                .catalog_for_planner_opts(ctx.blocks.web_search_enabled)
+        });
         let messages = Self::build_messages(ctx, &catalog);
         match self.inner.connector().complete(&messages) {
             Ok(result) => {
@@ -213,60 +185,5 @@ impl<C: LlmConnector> AgentBrain for PlanLlmBrain<C> {
 
 /// 計画層ループの `TurnResult` から [`PlanArtifact`] を取り出す。
 pub fn artifact_from_plan_turn(answer: &str, user_input: &str) -> PlanArtifact {
-    plan_artifact_from_answer(answer, user_input)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::action::TurnTrace;
-    use crate::context::PromptBlocks;
-    use crate::llm::MockLlmConnector;
-    use crate::session::SessionMemory;
-
-    #[test]
-    fn rule_plan_help_skips_in_one_step() {
-        let mut brain = RulePlanBrain::new();
-        let blocks = PromptBlocks::default();
-        let trace = TurnTrace::default();
-        let session = SessionMemory::default();
-        let ctx = TurnPromptContext::new(&blocks, "help", &trace, &session);
-        let step = brain.decide(&ctx);
-        let answer = match step {
-            AgentStep::Answer(a) => a,
-            _ => panic!("expected answer"),
-        };
-        let plan = plan_artifact_from_answer(&answer, "help");
-        assert!(plan.skip_execution);
-    }
-
-    #[test]
-    fn rule_plan_generic_two_steps() {
-        let mut brain = RulePlanBrain::new();
-        let blocks = PromptBlocks::default();
-        let session = SessionMemory::default();
-        let trace0 = TurnTrace::default();
-        let ctx1 = TurnPromptContext::new(&blocks, "hello", &trace0, &session);
-        assert!(matches!(brain.decide(&ctx1), AgentStep::Thought(_)));
-
-        let mut trace = TurnTrace::default();
-        trace.push_thought("plan".into());
-        let ctx2 = TurnPromptContext::new(&blocks, "hello", &trace, &session);
-        assert!(matches!(brain.decide(&ctx2), AgentStep::Answer(_)));
-    }
-
-    #[test]
-    fn plan_llm_mock_thought_then_answer() {
-        let reg = TaskRegistry::builtin();
-        let mut brain = PlanLlmBrain::new(MockLlmConnector, &reg);
-        let blocks = PromptBlocks::default();
-        let session = SessionMemory::default();
-        let s1 = brain.decide(&TurnPromptContext::new(&blocks, "do x", &TurnTrace::default(), &session));
-        assert!(matches!(s1, AgentStep::Thought(_)));
-
-        let mut trace = TurnTrace::default();
-        trace.push_thought("t".into());
-        let s2 = brain.decide(&TurnPromptContext::new(&blocks, "do x", &trace, &session));
-        assert!(matches!(s2, AgentStep::Answer(_)));
-    }
+    super::parse_step::plan_artifact_from_answer(answer, user_input)
 }

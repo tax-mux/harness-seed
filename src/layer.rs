@@ -7,15 +7,16 @@ use crate::context::{
     TurnPromptContext,
 };
 use crate::context_metrics::TurnContextSummary;
-use crate::plan::artifact_from_plan_turn;
+use crate::harness::HarnessState;
 use crate::plan::PlanArtifact;
 use crate::react::{ReActError, SubtaskExecResult, TurnResult};
 use crate::turn_observer::{emit_llm_step, emit_observation_step, emit_phase_started, TurnObserver};
 use crate::session::SessionMemory;
 use crate::tool::{execute_action, ToolRuntime};
 use crate::tool_display::eprintln_tool_execution;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-/// 1 ループ（計画層・サブタスク実行・スカウト）あたり許容する `thought` の上限。
+/// 1 ループ（計画層・サブタスク実行）あたり許容する `thought` の上限。
 pub const DEFAULT_MAX_THOUGHTS: usize = 1;
 
 const THOUGHT_LIMIT_TOOL: &str = "__thought_limit";
@@ -49,16 +50,6 @@ impl LayerLoopOptions {
             context_label: "step",
         }
     }
-
-    /// 計画前スカウト（ツール可・`ResearchArtifact` を返す）。
-    pub const fn scout(max_steps: usize) -> Self {
-        Self {
-            max_steps,
-            max_thoughts: DEFAULT_MAX_THOUGHTS,
-            tools_enabled: true,
-            context_label: "scout",
-        }
-    }
 }
 
 /// 計画層・実行層共通の ReAct ループ。
@@ -75,20 +66,32 @@ pub fn run_layer_loop<B: AgentBrain>(
     plan: Option<PlanArtifact>,
     subtask_results: Vec<SubtaskExecResult>,
     turn_observer: Option<&TurnObserver>,
+    stop_requested: Option<&AtomicBool>,
 ) -> Result<TurnResult, ReActError> {
     let mut trace = TurnTrace::default();
 
     for steps_used in 1..=opts.max_steps {
+        if stop_requested
+            .map(|t| t.load(Ordering::Relaxed))
+            .unwrap_or(false)
+        {
+            return Err(ReActError::Cancelled);
+        }
         if steps_used == 1 {
             let label = match opts.context_label {
                 "plan" => "計画を開始しています…",
-                "scout" => "事前調査を開始しています…",
                 _ => "推論を開始しています…",
             };
             emit_phase_started(turn_observer, opts.context_label, label);
         }
         let prompt_ctx = TurnPromptContext::new(blocks, user_input, &trace, session);
         let step = brain.decide(&prompt_ctx);
+        if stop_requested
+            .map(|t| t.load(Ordering::Relaxed))
+            .unwrap_or(false)
+        {
+            return Err(ReActError::Cancelled);
+        }
         if let Some(usage) = brain.poll_context_usage() {
             if show_prompt {
                 eprintln_step_prompt(opts.context_label, steps_used, &usage.prompt_body);
@@ -132,7 +135,19 @@ pub fn run_layer_loop<B: AgentBrain>(
             AgentStep::Action(action) => {
                 if opts.tools_enabled {
                     let tool_name = action.tool.clone();
+                    if stop_requested
+                        .map(|t| t.load(Ordering::Relaxed))
+                        .unwrap_or(false)
+                    {
+                        return Err(ReActError::Cancelled);
+                    }
                     let observation = execute_action(tools, &action);
+                    if stop_requested
+                        .map(|t| t.load(Ordering::Relaxed))
+                        .unwrap_or(false)
+                    {
+                        return Err(ReActError::Cancelled);
+                    }
                     emit_observation_step(
                         turn_observer,
                         opts.context_label,
@@ -157,6 +172,12 @@ pub fn run_layer_loop<B: AgentBrain>(
                 }
             }
             AgentStep::Answer(answer) => {
+                if stop_requested
+                    .map(|t| t.load(Ordering::Relaxed))
+                    .unwrap_or(false)
+                {
+                    return Err(ReActError::Cancelled);
+                }
                 let context = TurnContextSummary::from_usages(&trace.context_usages);
                 return Ok(TurnResult {
                     answer,
@@ -164,9 +185,9 @@ pub fn run_layer_loop<B: AgentBrain>(
                     steps_used,
                     context,
                     plan,
+                    harness: None,
                     subtask_results,
                     advance_phases: vec![],
-                    scout: None,
                 });
             }
         }
@@ -177,7 +198,7 @@ pub fn run_layer_loop<B: AgentBrain>(
     })
 }
 
-/// 計画層ループ → [`PlanArtifact`]。
+/// 計画層ループ → Harness パース → [`HarnessState`]。挨拶等（skip_execution）のみ LLM を呼ばない。
 pub fn run_plan_layer<B: AgentBrain>(
     brain: &mut B,
     tools: &mut ToolRuntime,
@@ -188,8 +209,27 @@ pub fn run_plan_layer<B: AgentBrain>(
     verbose: bool,
     show_prompt: bool,
     show_tool_output: bool,
+    echo_harness_parsed: bool,
     turn_observer: Option<&TurnObserver>,
-) -> Result<(PlanArtifact, crate::action::TurnTrace, usize), ReActError> {
+    stop_requested: Option<&AtomicBool>,
+) -> Result<(HarnessState, crate::action::TurnTrace, usize), ReActError> {
+    if let Some(contract) = &blocks.plan_data_contract {
+        if contract.skip_plan_layer() {
+            if verbose {
+                eprintln!("[plan] trivial chat — skip plan LLM");
+            }
+            let plan = PlanArtifact {
+                summary: "direct chat".into(),
+                skip_execution: true,
+                subtasks: vec![],
+            };
+            let harness = HarnessState::new("(trivial chat — plan layer skipped)", plan);
+            if echo_harness_parsed {
+                harness.eprintln_parsed();
+            }
+            return Ok((harness, crate::action::TurnTrace::default(), 0));
+        }
+    }
     let turn = run_layer_loop(
         brain,
         tools,
@@ -203,9 +243,20 @@ pub fn run_plan_layer<B: AgentBrain>(
         None,
         vec![],
         turn_observer,
+        stop_requested,
     )?;
-    let artifact = artifact_from_plan_turn(&turn.answer, user_input);
-    Ok((artifact, turn.trace, turn.steps_used))
+    let harness = match crate::harness::parse_harness_strict(&turn.answer, user_input) {
+        Ok(harness) => harness,
+        Err(err) => {
+            return Err(ReActError::PlanParseFailed {
+                message: err.to_string(),
+            });
+        }
+    };
+    if echo_harness_parsed {
+        harness.eprintln_parsed();
+    }
+    Ok((harness, turn.trace, turn.steps_used))
 }
 
 #[cfg(test)]
@@ -263,6 +314,7 @@ mod tests {
             None,
             vec![],
             None,
+            None,
         )
         .unwrap();
 
@@ -277,5 +329,41 @@ mod tests {
                 .iter()
                 .any(|o| !o.ok && o.output.contains("Only one thought"))
         );
+    }
+
+    #[test]
+    fn plain_text_plan_output_falls_back_generically() {
+        let mut brain = SeqBrain {
+            steps: vec![AgentStep::Answer("自己紹介します。私はハーネスの案内役です。".into())],
+            index: 0,
+        };
+        let mut tools = ToolRuntime::from_registry(
+            crate::runtime::RuntimeEnvironment::detect(),
+            None,
+            crate::tool::full_builtin_registry(false),
+        );
+        let blocks = PromptBlocks::default();
+        let session = SessionMemory::default();
+
+        let (harness, trace, steps_used) = run_plan_layer(
+            &mut brain,
+            &mut tools,
+            &blocks,
+            &session,
+            "自己紹介して",
+            4,
+            false,
+            false,
+            false,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert!(harness.plan.skip_execution);
+        assert_eq!(harness.plan.subtasks.len(), 0);
+        assert_eq!(steps_used, 1);
+        assert!(trace.thoughts.is_empty());
     }
 }
