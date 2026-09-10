@@ -94,7 +94,9 @@ pub use protocol::{
     PlanDto, ProtocolError, RuntimeDto, SubtaskDto, SubtaskResultDto, TraceDto, TurnWireOptions,
     WireErrorBody, WireRequest, WireResponse, WIRE_VERSION,
 };
-pub use lifecycle::{CompositeLifecycle, HostScratch, NoopLifecycle, TurnLifecycle};
+pub use lifecycle::{
+    CompositeLifecycle, HostScratch, HostView, NoopLifecycle, TurnLifecycle, WriteScope,
+};
 pub use react::{
     run_repl, PlanPreviewResult, ReActConfig, ReActError, ReActLoop, SubtaskExecResult, TurnResult,
 };

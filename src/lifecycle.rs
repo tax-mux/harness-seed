@@ -4,24 +4,40 @@
 //! **本筋の ReAct ループを駆動・変更してはならない**（`run_turn` の再入、
 //! キューや trace の直接書き換え、Answer の差し替えは禁止）。
 //!
-//! [`HostScratch`] はターン専用の標識置き場で、**プロンプト／LLM コンテキストには載せない**。
+//! [`HostScratch`] はターン専用の入れ子 JSON 袋で、**プロンプト／LLM コンテキストには載せない**。
+//! - `turn`: ターン／計画レベルの標識（seed・親チケットなど）
+//! - `subtasks.{id}`: 各サブタスク専用（子チケットなど）。キーは **subtask id**（配列ではない）
+//!
+//! hook には [`HostView`] を渡す。**参照は袋全体、書き込みは自ノードのみ**。
 //! エラーは hook 内で処理し、呼び出し元へ伝播させないこと。
 //!
 //! 詳細: `doc/lifecycle.md`。
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 
 use crate::plan::{PlanArtifact, Subtask};
 
 /// ターン専用のホスト状態（LLM コンテキストに出さない）。
 ///
-/// Redmine の project / ticket / 子 ticket id など、コールバック間で共有する標識を置く。
-/// `run_turn` 開始時にクリアされ、任意の seed がマージされたあと `on_turn_started` が呼ばれる。
+/// ```json
+/// {
+///   "turn": { "project_id": 1, "ticket_id": 10, "parent_ticket_id": 42 },
+///   "subtasks": {
+///     "1": { "child_ticket_id": 7 },
+///     "2": { "child_ticket_id": 8 }
+///   }
+/// }
+/// ```
+///
+/// `run_turn` 開始時にクリアされ、任意の seed（`turn` 領域のみ）がマージされたあと
+/// `on_turn_started` が呼ばれる。
 #[derive(Debug, Clone, Default)]
 pub struct HostScratch {
-    values: HashMap<String, Value>,
+    turn: Map<String, Value>,
+    /// subtask id → そのサブタスク専用ノード。
+    subtasks: BTreeMap<u32, Map<String, Value>>,
 }
 
 impl HostScratch {
@@ -30,76 +46,210 @@ impl HostScratch {
     }
 
     pub fn clear(&mut self) {
-        self.values.clear();
+        self.turn.clear();
+        self.subtasks.clear();
     }
 
     pub fn is_empty(&self) -> bool {
-        self.values.is_empty()
+        self.turn.is_empty() && self.subtasks.is_empty()
     }
 
+    /// 袋全体を JSON オブジェクトにする（参照・永続化用）。
+    pub fn to_value(&self) -> Value {
+        let mut subtasks = Map::new();
+        for (id, node) in &self.subtasks {
+            subtasks.insert(id.to_string(), Value::Object(node.clone()));
+        }
+        json!({
+            "turn": Value::Object(self.turn.clone()),
+            "subtasks": Value::Object(subtasks),
+        })
+    }
+
+    pub fn turn(&self) -> &Map<String, Value> {
+        &self.turn
+    }
+
+    pub fn subtask(&self, id: u32) -> Option<&Map<String, Value>> {
+        self.subtasks.get(&id)
+    }
+
+    /// seed 用: `turn` 領域へエントリを書く（UI で選んだ project / ticket など）。
+    pub fn turn_insert(&mut self, key: impl Into<String>, value: impl Into<Value>) {
+        self.turn.insert(key.into(), value.into());
+    }
+
+    pub fn turn_get(&self, key: &str) -> Option<&Value> {
+        self.turn.get(key)
+    }
+
+    pub fn turn_get_i64(&self, key: &str) -> Option<i64> {
+        value_as_i64(self.turn.get(key)?)
+    }
+
+    pub fn turn_get_str(&self, key: &str) -> Option<&str> {
+        self.turn.get(key).and_then(Value::as_str)
+    }
+
+    pub fn subtask_get(&self, id: u32, key: &str) -> Option<&Value> {
+        self.subtasks.get(&id)?.get(key)
+    }
+
+    pub fn subtask_get_i64(&self, id: u32, key: &str) -> Option<i64> {
+        value_as_i64(self.subtask_get(id, key)?)
+    }
+
+    /// 他袋の `turn` を上書きマージする（seed）。`subtasks` はマージしない。
+    pub fn merge_turn_seed(&mut self, other: HostScratch) {
+        self.turn.extend(other.turn);
+    }
+
+    fn ensure_subtask_node(&mut self, id: u32) -> &mut Map<String, Value> {
+        self.subtasks.entry(id).or_default()
+    }
+}
+
+fn value_as_i64(v: &Value) -> Option<i64> {
+    v.as_i64()
+        .or_else(|| v.as_u64().and_then(|u| i64::try_from(u).ok()))
+        .or_else(|| v.as_str()?.parse().ok())
+}
+
+/// hook から見える袋のビュー。参照は全体、書き込みは [`WriteScope`] の自ノードのみ。
+pub struct HostView<'a> {
+    scratch: &'a mut HostScratch,
+    write: WriteScope,
+}
+
+/// 書き込み可能なノード。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteScope {
+    /// `turn` オブジェクト（turn / plan / turn_finished hook）。
+    Turn,
+    /// `subtasks.{id}`（そのサブタスクの start / finished hook）。
+    Subtask(u32),
+}
+
+impl<'a> HostView<'a> {
+    pub fn new(scratch: &'a mut HostScratch, write: WriteScope) -> Self {
+        Self { scratch, write }
+    }
+
+    /// 同じ write scope で再借用する（`CompositeLifecycle` 用）。
+    pub fn reborrow(&mut self) -> HostView<'_> {
+        HostView {
+            scratch: &mut *self.scratch,
+            write: self.write,
+        }
+    }
+
+    pub fn write_scope(&self) -> WriteScope {
+        self.write
+    }
+
+    /// 袋全体の JSON（読み取り専用のスナップショット）。
+    pub fn to_value(&self) -> Value {
+        self.scratch.to_value()
+    }
+
+    pub fn turn(&self) -> &Map<String, Value> {
+        self.scratch.turn()
+    }
+
+    pub fn subtask(&self, id: u32) -> Option<&Map<String, Value>> {
+        self.scratch.subtask(id)
+    }
+
+    pub fn turn_get(&self, key: &str) -> Option<&Value> {
+        self.scratch.turn_get(key)
+    }
+
+    pub fn turn_get_i64(&self, key: &str) -> Option<i64> {
+        self.scratch.turn_get_i64(key)
+    }
+
+    pub fn turn_get_str(&self, key: &str) -> Option<&str> {
+        self.scratch.turn_get_str(key)
+    }
+
+    pub fn subtask_get(&self, id: u32, key: &str) -> Option<&Value> {
+        self.scratch.subtask_get(id, key)
+    }
+
+    pub fn subtask_get_i64(&self, id: u32, key: &str) -> Option<i64> {
+        self.scratch.subtask_get_i64(id, key)
+    }
+
+    /// 自ノードへ書く。
     pub fn insert(&mut self, key: impl Into<String>, value: impl Into<Value>) {
-        self.values.insert(key.into(), value.into());
+        let key = key.into();
+        let value = value.into();
+        match self.write {
+            WriteScope::Turn => {
+                self.scratch.turn.insert(key, value);
+            }
+            WriteScope::Subtask(id) => {
+                self.scratch.ensure_subtask_node(id).insert(key, value);
+            }
+        }
     }
 
+    /// 自ノードから削除する。
+    pub fn remove(&mut self, key: &str) -> Option<Value> {
+        match self.write {
+            WriteScope::Turn => self.scratch.turn.remove(key),
+            WriteScope::Subtask(id) => self.scratch.subtasks.get_mut(&id)?.remove(key),
+        }
+    }
+
+    /// 自ノードにキーがあるか。
+    pub fn contains(&self, key: &str) -> bool {
+        match self.write {
+            WriteScope::Turn => self.scratch.turn.contains_key(key),
+            WriteScope::Subtask(id) => self
+                .scratch
+                .subtasks
+                .get(&id)
+                .is_some_and(|n| n.contains_key(key)),
+        }
+    }
+
+    /// 自ノードから読む。
     pub fn get(&self, key: &str) -> Option<&Value> {
-        self.values.get(key)
+        match self.write {
+            WriteScope::Turn => self.scratch.turn.get(key),
+            WriteScope::Subtask(id) => self.scratch.subtasks.get(&id)?.get(key),
+        }
     }
 
     pub fn get_i64(&self, key: &str) -> Option<i64> {
-        self.get(key).and_then(|v| {
-            v.as_i64()
-                .or_else(|| v.as_u64().and_then(|u| i64::try_from(u).ok()))
-                .or_else(|| v.as_str()?.parse().ok())
-        })
+        value_as_i64(self.get(key)?)
     }
 
     pub fn get_str(&self, key: &str) -> Option<&str> {
         self.get(key).and_then(Value::as_str)
-    }
-
-    pub fn remove(&mut self, key: &str) -> Option<Value> {
-        self.values.remove(key)
-    }
-
-    pub fn contains(&self, key: &str) -> bool {
-        self.values.contains_key(key)
-    }
-
-    /// 他袋のエントリを上書きマージする。
-    pub fn merge(&mut self, other: HostScratch) {
-        self.values.extend(other.values);
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &Value)> {
-        self.values.iter()
     }
 }
 
 /// ホストが登録するライフサイクル観測点。
 ///
 /// すべてのメソッドに既定の空実装がある。必要な点だけオーバーライドする。
-/// `host` はターン袋。次の hook から読めるよう書き込んでよい（本筋コンテキストには出ない）。
+/// `host` は [`HostView`]: 参照は袋全体、書き込みは自ノードのみ。
 pub trait TurnLifecycle: Send + Sync {
-    /// `run_turn` 入口（記憶注入の前）。seed 適用済み。指示文から ID を袋へ書いてよい。
-    fn on_turn_started(&self, _user_input: &str, _host: &mut HostScratch) {}
+    /// `run_turn` 入口（記憶注入の前）。seed 適用済み。指示文から ID を `turn` へ書いてよい。
+    fn on_turn_started(&self, _user_input: &str, _host: HostView<'_>) {}
 
     /// 計画が確定し、`resolve_plan` 適用後（実行開始前。skip も含む）。
-    fn on_plan_finished(
-        &self,
-        _user_input: &str,
-        _plan: &PlanArtifact,
-        _host: &mut HostScratch,
-    ) {
-    }
+    fn on_plan_finished(&self, _user_input: &str, _plan: &PlanArtifact, _host: HostView<'_>) {}
 
-    /// サブタスク実行直前。`index` は 0 始まりの実行順。
+    /// サブタスク実行直前。`index` は 0 始まりの実行順。書き込み先は `subtasks.{subtask.id}`。
     fn on_subtask_started(
         &self,
         _user_input: &str,
         _plan: &PlanArtifact,
         _subtask: &Subtask,
         _index: usize,
-        _host: &mut HostScratch,
+        _host: HostView<'_>,
     ) {
     }
 
@@ -111,18 +261,18 @@ pub trait TurnLifecycle: Send + Sync {
         _subtask: &Subtask,
         _answer: &str,
         _steps_used: usize,
-        _host: &mut HostScratch,
+        _host: HostView<'_>,
     ) {
     }
 
-    /// ターン完了（session / diary 記録と同じタイミング）。
+    /// ターン完了（session / diary 記録と同じタイミング）。書き込み先は `turn`。
     fn on_turn_finished(
         &self,
         _user_input: &str,
         _answer: &str,
         _plan: Option<&PlanArtifact>,
         _steps_used: usize,
-        _host: &mut HostScratch,
+        _host: HostView<'_>,
     ) {
     }
 }
@@ -133,7 +283,7 @@ pub struct NoopLifecycle;
 
 impl TurnLifecycle for NoopLifecycle {}
 
-/// 複数 hook を順に呼ぶ（いずれも本筋には影響しない）。同一 `host` を共有する。
+/// 複数 hook を順に呼ぶ（いずれも本筋には影響しない）。同一袋・同一 write scope を共有する。
 pub struct CompositeLifecycle {
     hooks: Vec<std::sync::Arc<dyn TurnLifecycle>>,
 }
@@ -149,15 +299,15 @@ impl CompositeLifecycle {
 }
 
 impl TurnLifecycle for CompositeLifecycle {
-    fn on_turn_started(&self, user_input: &str, host: &mut HostScratch) {
+    fn on_turn_started(&self, user_input: &str, mut host: HostView<'_>) {
         for h in &self.hooks {
-            h.on_turn_started(user_input, host);
+            h.on_turn_started(user_input, host.reborrow());
         }
     }
 
-    fn on_plan_finished(&self, user_input: &str, plan: &PlanArtifact, host: &mut HostScratch) {
+    fn on_plan_finished(&self, user_input: &str, plan: &PlanArtifact, mut host: HostView<'_>) {
         for h in &self.hooks {
-            h.on_plan_finished(user_input, plan, host);
+            h.on_plan_finished(user_input, plan, host.reborrow());
         }
     }
 
@@ -167,10 +317,10 @@ impl TurnLifecycle for CompositeLifecycle {
         plan: &PlanArtifact,
         subtask: &Subtask,
         index: usize,
-        host: &mut HostScratch,
+        mut host: HostView<'_>,
     ) {
         for h in &self.hooks {
-            h.on_subtask_started(user_input, plan, subtask, index, host);
+            h.on_subtask_started(user_input, plan, subtask, index, host.reborrow());
         }
     }
 
@@ -181,10 +331,10 @@ impl TurnLifecycle for CompositeLifecycle {
         subtask: &Subtask,
         answer: &str,
         steps_used: usize,
-        host: &mut HostScratch,
+        mut host: HostView<'_>,
     ) {
         for h in &self.hooks {
-            h.on_subtask_finished(user_input, plan, subtask, answer, steps_used, host);
+            h.on_subtask_finished(user_input, plan, subtask, answer, steps_used, host.reborrow());
         }
     }
 
@@ -194,10 +344,10 @@ impl TurnLifecycle for CompositeLifecycle {
         answer: &str,
         plan: Option<&PlanArtifact>,
         steps_used: usize,
-        host: &mut HostScratch,
+        mut host: HostView<'_>,
     ) {
         for h in &self.hooks {
-            h.on_turn_finished(user_input, answer, plan, steps_used, host);
+            h.on_turn_finished(user_input, answer, plan, steps_used, host.reborrow());
         }
     }
 }
@@ -214,26 +364,15 @@ mod tests {
     }
 
     impl TurnLifecycle for Recorder {
-        fn on_turn_started(&self, user_input: &str, host: &mut HostScratch) {
-            if let Some(id) = host.get_i64("ticket_id") {
-                self.events
-                    .lock()
-                    .unwrap()
-                    .push(format!("turn_started:{user_input}:ticket={id}"));
-            } else {
-                self.events
-                    .lock()
-                    .unwrap()
-                    .push(format!("turn_started:{user_input}"));
-            }
+        fn on_turn_started(&self, user_input: &str, host: HostView<'_>) {
+            let id = host.turn_get_i64("ticket_id").unwrap_or(-1);
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("turn_started:{user_input}:ticket={id}"));
         }
 
-        fn on_plan_finished(
-            &self,
-            _user_input: &str,
-            plan: &PlanArtifact,
-            host: &mut HostScratch,
-        ) {
+        fn on_plan_finished(&self, _user_input: &str, plan: &PlanArtifact, mut host: HostView<'_>) {
             host.insert("parent_ticket", 99);
             self.events
                 .lock()
@@ -247,10 +386,10 @@ mod tests {
             _plan: &PlanArtifact,
             subtask: &Subtask,
             index: usize,
-            host: &mut HostScratch,
+            mut host: HostView<'_>,
         ) {
-            let parent = host.get_i64("parent_ticket").unwrap_or(-1);
-            host.insert(format!("child:{index}"), subtask.id as i64);
+            let parent = host.turn_get_i64("parent_ticket").unwrap_or(-1);
+            host.insert("child_ticket", subtask.id as i64);
             self.events.lock().unwrap().push(format!(
                 "subtask_started:{index}:{}:parent={parent}",
                 subtask.id
@@ -264,12 +403,13 @@ mod tests {
             subtask: &Subtask,
             answer: &str,
             _steps_used: usize,
-            _host: &mut HostScratch,
+            host: HostView<'_>,
         ) {
-            self.events
-                .lock()
-                .unwrap()
-                .push(format!("subtask_finished:{}:{answer}", subtask.id));
+            let child = host.get_i64("child_ticket").unwrap_or(-1);
+            self.events.lock().unwrap().push(format!(
+                "subtask_finished:{}:{answer}:child={child}",
+                subtask.id
+            ));
         }
 
         fn on_turn_finished(
@@ -278,43 +418,70 @@ mod tests {
             answer: &str,
             _plan: Option<&PlanArtifact>,
             _steps_used: usize,
-            host: &mut HostScratch,
+            host: HostView<'_>,
         ) {
-            let parent = host.get_i64("parent_ticket").unwrap_or(-1);
-            self.events
-                .lock()
-                .unwrap()
-                .push(format!("turn_finished:{answer}:parent={parent}"));
+            let parent = host.turn_get_i64("parent_ticket").unwrap_or(-1);
+            let child1 = host.subtask_get_i64(1, "child_ticket").unwrap_or(-1);
+            self.events.lock().unwrap().push(format!(
+                "turn_finished:{answer}:parent={parent}:child1={child1}"
+            ));
         }
     }
 
     #[test]
-    fn scratch_get_i64_accepts_number_and_string() {
+    fn to_value_is_nested_turn_and_subtasks_map() {
         let mut s = HostScratch::new();
-        s.insert("a", 10);
-        s.insert("b", "20");
-        assert_eq!(s.get_i64("a"), Some(10));
-        assert_eq!(s.get_i64("b"), Some(20));
+        s.turn_insert("ticket_id", 10);
+        s.ensure_subtask_node(2).insert("child_ticket".into(), json!(8));
+        let v = s.to_value();
+        assert_eq!(v["turn"]["ticket_id"], 10);
+        assert_eq!(v["subtasks"]["2"]["child_ticket"], 8);
+        assert!(v["subtasks"].as_object().unwrap().get("0").is_none());
     }
 
     #[test]
-    fn scratch_merge_overwrites() {
+    fn write_scope_turn_does_not_create_subtask_nodes() {
+        let mut s = HostScratch::new();
+        {
+            let mut view = HostView::new(&mut s, WriteScope::Turn);
+            view.insert("parent_ticket", 42);
+        }
+        assert_eq!(s.turn_get_i64("parent_ticket"), Some(42));
+        assert!(s.subtask(1).is_none());
+    }
+
+    #[test]
+    fn write_scope_subtask_only_touches_own_node() {
+        let mut s = HostScratch::new();
+        s.turn_insert("parent_ticket", 99);
+        {
+            let mut view = HostView::new(&mut s, WriteScope::Subtask(1));
+            assert_eq!(view.turn_get_i64("parent_ticket"), Some(99));
+            view.insert("child_ticket", 7);
+        }
+        assert_eq!(s.subtask_get_i64(1, "child_ticket"), Some(7));
+        assert!(s.subtask(2).is_none());
+        assert!(!s.turn().contains_key("child_ticket"));
+    }
+
+    #[test]
+    fn merge_turn_seed_ignores_subtasks() {
         let mut a = HostScratch::new();
-        a.insert("x", 1);
+        a.turn_insert("x", 1);
         let mut b = HostScratch::new();
-        b.insert("x", 2);
-        b.insert("y", json!([1, 2]));
-        a.merge(b);
-        assert_eq!(a.get_i64("x"), Some(2));
-        assert_eq!(a.get("y").and_then(|v| v.as_array()).map(|a| a.len()), Some(2));
+        b.turn_insert("x", 2);
+        b.ensure_subtask_node(1).insert("y".into(), json!(3));
+        a.merge_turn_seed(b);
+        assert_eq!(a.turn_get_i64("x"), Some(2));
+        assert!(a.subtask(1).is_none());
     }
 
     #[test]
-    fn composite_shares_host_scratch() {
+    fn composite_shares_nested_scratch() {
         let a = Arc::new(Recorder::default());
         let composite = CompositeLifecycle::new(vec![a.clone()]);
-        let mut host = HostScratch::new();
-        host.insert("ticket_id", 10);
+        let mut scratch = HostScratch::new();
+        scratch.turn_insert("ticket_id", 10);
         let plan = PlanArtifact {
             summary: "s".into(),
             skip_execution: false,
@@ -327,33 +494,41 @@ mod tests {
             }],
             knowledge_sufficient: None,
         };
-        composite.on_turn_started("hi", &mut host);
-        composite.on_plan_finished("hi", &plan, &mut host);
-        composite.on_subtask_started("hi", &plan, &plan.subtasks[0], 0, &mut host);
-        assert_eq!(host.get_i64("parent_ticket"), Some(99));
-        assert_eq!(host.get_i64("child:0"), Some(1));
+        composite.on_turn_started("hi", HostView::new(&mut scratch, WriteScope::Turn));
+        composite.on_plan_finished("hi", &plan, HostView::new(&mut scratch, WriteScope::Turn));
+        composite.on_subtask_started(
+            "hi",
+            &plan,
+            &plan.subtasks[0],
+            0,
+            HostView::new(&mut scratch, WriteScope::Subtask(1)),
+        );
+        composite.on_subtask_finished(
+            "hi",
+            &plan,
+            &plan.subtasks[0],
+            "done",
+            1,
+            HostView::new(&mut scratch, WriteScope::Subtask(1)),
+        );
+        composite.on_turn_finished(
+            "hi",
+            "final",
+            Some(&plan),
+            1,
+            HostView::new(&mut scratch, WriteScope::Turn),
+        );
+        assert_eq!(scratch.turn_get_i64("parent_ticket"), Some(99));
+        assert_eq!(scratch.subtask_get_i64(1, "child_ticket"), Some(1));
         assert_eq!(
             a.events.lock().unwrap().as_slice(),
             [
                 "turn_started:hi:ticket=10",
                 "plan_finished:s",
                 "subtask_started:0:1:parent=99",
+                "subtask_finished:1:done:child=1",
+                "turn_finished:final:parent=99:child1=1",
             ]
         );
-    }
-
-    #[test]
-    fn noop_does_not_panic() {
-        let n = NoopLifecycle;
-        let mut host = HostScratch::new();
-        let plan = PlanArtifact {
-            summary: "s".into(),
-            skip_execution: true,
-            subtasks: vec![],
-            knowledge_sufficient: Some(true),
-        };
-        n.on_turn_started("x", &mut host);
-        n.on_plan_finished("x", &plan, &mut host);
-        n.on_turn_finished("x", "a", Some(&plan), 0, &mut host);
     }
 }
