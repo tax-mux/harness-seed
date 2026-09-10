@@ -17,7 +17,7 @@ fn outgoing_contract_excludes_compose_and_mail_read() {
 }
 
 #[test]
-fn enforce_outgoing_collapses_to_generic() {
+fn enforce_outgoing_collapses_to_pending_outgoing_save() {
     let c = PlanDataContract {
         read: PlanReadSource::RevisionContext { uid: 9 },
         write: PlanWriteTarget::OutgoingPendingDb { uid: 9 },
@@ -36,7 +36,11 @@ fn enforce_outgoing_collapses_to_generic() {
     };
     c.enforce_plan(&mut plan);
     assert_eq!(plan.subtasks.len(), 1);
-    assert_eq!(plan.subtasks[0].task.as_deref(), Some("generic"));
+    assert_eq!(
+        plan.subtasks[0].task.as_deref(),
+        Some("pending_outgoing_save")
+    );
+    assert_eq!(plan.subtasks[0].params["id"], 9);
     assert!(plan.subtasks[0].goal.contains("スペイン語"));
 }
 
@@ -95,7 +99,7 @@ fn format_for_planner_shows_three_layers() {
     assert!(text.contains("[OUTPUT — fixed, do not change]"));
     assert!(text.contains("outgoing_pending_db"));
     assert!(text.contains("[PROCEDURE — your PlanArtifact subtasks]"));
-    assert!(text.contains("generic only"));
+    assert!(text.contains("pending_outgoing_save"));
 }
 
 #[test]

@@ -227,7 +227,7 @@ impl PlanDataContract {
         }
         match (&self.read, &self.write) {
             (_, PlanWriteTarget::OutgoingPendingDb { .. })
-            | (_, PlanWriteTarget::PendingDraftViaAnswer) => "generic only (no tool calls)",
+            | (_, PlanWriteTarget::PendingDraftViaAnswer) => "pending_outgoing_save (save_pending_outgoing_mail + reload_sendmail_list)",
             (PlanReadSource::ImapEmail { .. }, PlanWriteTarget::ChatOnly) => {
                 "mail_read then generic"
             }
@@ -262,7 +262,7 @@ impl PlanDataContract {
         match (&self.read, &self.write) {
             (_, PlanWriteTarget::OutgoingPendingDb { .. })
             | (_, PlanWriteTarget::PendingDraftViaAnswer) => {
-                collapse_to_generic_draft(plan, self.default_generic_goal());
+                collapse_to_pending_outgoing_save(plan, self.default_pending_outgoing_goal(), self.outgoing_pending_uid());
             }
             (PlanReadSource::ImapServer, PlanWriteTarget::MailDb) => {
                 collapse_to_single_task(
@@ -325,14 +325,14 @@ impl PlanDataContract {
         }
     }
 
-    fn default_generic_goal(&self) -> String {
+    fn default_pending_outgoing_goal(&self) -> String {
         match &self.write {
             PlanWriteTarget::OutgoingPendingDb { .. } => {
-                "【改訂コンテキスト】latest を基準にユーザーの指示どおり改訂し、件名と本文を最終回答で返す"
+                "【改訂コンテキスト】latest を基準に改訂し、save_pending_outgoing_mail で送信待ちキューへ保存する"
                     .into()
             }
             PlanWriteTarget::PendingDraftViaAnswer => {
-                "ユーザーの指示どおり文案を作成し、最終回答で件名と本文を返す".into()
+                "文案を作成し save_pending_outgoing_mail で送信待ちキューへ保存する".into()
             }
             _ => "ユーザーの依頼を満たす".into(),
         }
@@ -364,10 +364,10 @@ impl PlanWriteTarget {
             Self::ChatOnly => "chat_only (final answer in chat)".into(),
             Self::ComposeForm => "compose_form (set_compose_form required)".into(),
             Self::OutgoingPendingDb { uid } => format!(
-                "outgoing_pending_db (UID {uid}; app saves from answer — no set_compose_form)"
+                "outgoing_pending_db (UID {uid}; save_pending_outgoing_mail で上書き保存)"
             ),
             Self::PendingDraftViaAnswer => {
-                "pending_draft_via_answer (app saves from answer — no set_compose_form)".into()
+                "pending_draft_via_answer (save_pending_outgoing_mail で新規保存)".into()
             }
             Self::MailDb => "mail_db (fetch_mails / classify_email / set_email_category)".into(),
         }
@@ -395,7 +395,11 @@ fn collapse_to_single_task(
     }];
 }
 
-fn collapse_to_generic_draft(plan: &mut PlanArtifact, fallback_goal: String) {
+fn collapse_to_pending_outgoing_save(
+    plan: &mut PlanArtifact,
+    fallback_goal: String,
+    update_uid: Option<i64>,
+) {
     const SKIP_GOAL_FROM: &[&str] = &["mail_read", "compose_context", "web_research"];
     let goals: Vec<String> = plan
         .subtasks
@@ -409,12 +413,16 @@ fn collapse_to_generic_draft(plan: &mut PlanArtifact, fallback_goal: String) {
     } else {
         goals.join(" → ")
     };
+    let mut params = serde_json::json!({});
+    if let Some(uid) = update_uid {
+        params["id"] = serde_json::json!(uid);
+    }
     plan.subtasks = vec![Subtask {
         id: 1,
-        task: Some("generic".into()),
-        params: serde_json::json!({}),
+        task: Some("pending_outgoing_save".into()),
+        params,
         goal,
-        done_when: "最終回答に件名と本文を含めた".into(),
+        done_when: "save_pending_outgoing_mail 成功".into(),
     }];
 }
 
