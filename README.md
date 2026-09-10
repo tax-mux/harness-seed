@@ -223,14 +223,17 @@ harness-seed = { path = "../harness-seed" }
 ```
 
 ```rust
-use harness_seed::{AppConfig, BrainMode, ReActLoop};
+use harness_seed::{AppConfig, BrainPair, SeedBuilder};
 
 let app = AppConfig::load_default()?;
-let brain = BrainMode::from_cli(&app, false, false)?;
-let mut react = ReActLoop::new(brain, app.react_config(false, false));
+let builder = SeedBuilder::from_app(&app)?;
+let brains = BrainPair::from_cli_with_registry(&app, false, false, builder.task_registry_ref())?;
+let mut react = builder.build(brains.exec, brains.plan, app.react_config(false, false));
 let result = react.run_turn("hello")?;
 println!("{}", result.answer);
 ```
+
+Host rules, tools, tasks, and lifecycle attach on `SeedBuilder` before `build`. CLI helpers only gather files and call the same API.
 
 ## Development Notes
 

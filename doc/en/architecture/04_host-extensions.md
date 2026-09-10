@@ -5,7 +5,24 @@ Host-facing callbacks at fixed points in a turn—hooks—so external systems (t
 
 Use them for turn-aligned side effects. Changing tool choice or planning itself belongs in core config and task contracts. Ticket IDs live in HostScratch and never go to the LLM. Details follow.
 
-Code: `src/lifecycle.rs` / `tracking.rs`. Register via `set_lifecycle` / `lifecycle_from_tracking` / `seed_host_scratch`. Glossary: [glossary.md](glossary.md) · [JP](../../ja/architecture/04_ホスト拡張.md)
+Code: `src/lifecycle.rs` / `tracking.rs`. **Session bootstrap** goes through [`SeedBuilder`](06_tool-plugins.md) (`lifecycle(...)` → `build`). Mid-session swaps still use `set_lifecycle` / `lifecycle_from_tracking` / `seed_host_scratch`. Glossary: [glossary.md](glossary.md) · [JP](../../ja/architecture/04_ホスト拡張.md)
+
+## 0. Host registration SSoT (`SeedBuilder`)
+
+For embedders, the only bootstrap surface to learn is **`SeedBuilder` → `build()`**. Put rules, tasks, tool plugins, plan contracts, lifecycle, and memory on the builder, then take the finished `ReActLoop`.
+
+CLI and standalone helpers only gather assets and call the same builder (`merge_cli_agent` / `merge_agent_project`). Mid-session updates keep using `ReActLoop` mutators.
+
+```rust
+use harness_seed::{lifecycle_from_tracking, AppConfig, BrainPair, SeedBuilder};
+use std::sync::Arc;
+
+let app = AppConfig::load_default()?;
+let builder = SeedBuilder::from_app(&app)?
+    .lifecycle(lifecycle_from_tracking(Arc::new(PmSync)));
+let brains = BrainPair::from_cli_with_registry(&app, false, false, builder.task_registry_ref())?;
+let mut react = builder.build(brains.exec, brains.plan, app.react_config(false, false));
+```
 
 ## 1. What is a hook?
 

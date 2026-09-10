@@ -103,6 +103,9 @@ pub fn load_agent_assets(
     Ok((report, script_tools))
 }
 
+/// ファイルから rules / tasks / script tools を集める（呼び出し側が登録する旧経路）。
+///
+/// 埋め込みホストは [`crate::seed::SeedBuilder::merge_agent_project`] を使うこと。
 pub fn apply_agent_project(
     config: &AgentProjectConfig,
     base_dir: &Path,

@@ -1,26 +1,25 @@
 //! harness-seed CLI 起動時のエージェント資産（`config.agent.json`）適用。
+//!
+//! ここはヘルパーであり、登録の正本は [`crate::seed::SeedBuilder`] である。
 
 use std::path::Path;
 use std::path::PathBuf;
 
 use crate::agent_assets::{
-    apply_agent_project, apply_workspace_env, resolve_cli_agent_config, AgentLoadReport,
+    apply_workspace_env, resolve_cli_agent_config, AgentLoadError, AgentLoadReport,
 };
-use crate::context::PromptBlocks;
-use crate::tasks::TaskRegistry;
-use crate::tool::Tool;
+use crate::seed::SeedBuilder;
 
 pub struct AgentCliSetup {
     pub config_label: PathBuf,
     pub report: AgentLoadReport,
-    pub script_tools: Vec<Box<dyn Tool>>,
 }
 
 /// ワークスペース環境変数だけ先に適用する（`load_prompt_blocks` より前に呼ぶ）。
 pub fn prepare_cli_agent_workspace(
     args: &[String],
     cwd: &Path,
-) -> Result<Option<PathBuf>, crate::agent_assets::AgentLoadError> {
+) -> Result<Option<PathBuf>, AgentLoadError> {
     let Some(source) = resolve_cli_agent_config(args, cwd) else {
         return Ok(None);
     };
@@ -31,26 +30,31 @@ pub fn prepare_cli_agent_workspace(
     Ok(Some(label))
 }
 
-/// `config.agent.json` / `--agent-dir` / `--config-agent` を解決し、あれば資産を読み込む。
-pub fn setup_cli_agent(
+/// CLI 引数から agent 設定を解決し、あれば [`SeedBuilder`] へマージする。
+pub fn merge_cli_agent(
     args: &[String],
     cwd: &Path,
-    blocks: &mut PromptBlocks,
-    task_registry: &mut TaskRegistry,
-) -> Result<Option<AgentCliSetup>, crate::agent_assets::AgentLoadError> {
+    builder: SeedBuilder,
+) -> Result<(SeedBuilder, Option<AgentCliSetup>), AgentLoadError> {
     let Some(source) = resolve_cli_agent_config(args, cwd) else {
-        return Ok(None);
+        return Ok((builder, None));
     };
 
     let base = source.base_dir(cwd);
     let (config, config_label) = source.load(cwd)?;
-    let (report, script_tools) = apply_agent_project(&config, &base, blocks, task_registry)?;
+    let builder = builder.merge_agent_project(&config, &base)?;
+    let report = builder
+        .agent_report()
+        .cloned()
+        .unwrap_or_default();
 
-    Ok(Some(AgentCliSetup {
-        config_label,
-        report,
-        script_tools,
-    }))
+    Ok((
+        builder,
+        Some(AgentCliSetup {
+            config_label,
+            report,
+        }),
+    ))
 }
 
 pub fn log_agent_setup(setup: &AgentCliSetup) {

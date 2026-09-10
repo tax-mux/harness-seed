@@ -120,15 +120,26 @@ pub struct BrainPair {
 }
 
 impl BrainPair {
+    /// 既定タスクレジストリで頭脳を組む（スキル未マージ時向け）。
     pub fn from_cli(
         app: &crate::config::AppConfig,
         use_llm: bool,
         no_llm: bool,
     ) -> Result<Self, crate::llm::ConnectorError> {
         let registry = crate::tasks::TaskRegistry::load_default();
+        Self::from_cli_with_registry(app, use_llm, no_llm, &registry)
+    }
+
+    /// `SeedBuilder` 完成後のレジストリで計画頭脳を組む。
+    pub fn from_cli_with_registry(
+        app: &crate::config::AppConfig,
+        use_llm: bool,
+        no_llm: bool,
+        registry: &crate::tasks::TaskRegistry,
+    ) -> Result<Self, crate::llm::ConnectorError> {
         Ok(Self {
             exec: BrainMode::from_cli(app, use_llm, no_llm)?,
-            plan: crate::plan::PlanBrainMode::from_cli(app, use_llm, no_llm, &registry)?,
+            plan: crate::plan::PlanBrainMode::from_cli(app, use_llm, no_llm, registry)?,
         })
     }
 
