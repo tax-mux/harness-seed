@@ -61,6 +61,30 @@ pub fn eprintln_thought(label: &str, thought: &str) {
     eprintln!("[{label}] thought: {body}");
 }
 
+/// 計画層の LLM Answer（計画 JSON 等）を stdout へ。`react.show_thinking` 用。
+pub fn println_plan_llm_output(kind: &str, body: &str) {
+    let body = body.trim();
+    if body.is_empty() {
+        return;
+    }
+    const MAX: usize = 6_000;
+    let truncated = body.chars().count() > MAX;
+    let shown: String = if truncated {
+        body.chars().take(MAX).collect()
+    } else {
+        body.to_string()
+    };
+    for line in shown.lines() {
+        println!("[plan] {kind}: {line}");
+    }
+    if truncated {
+        println!(
+            "[plan] {kind}: ... (truncated, {} chars total)",
+            body.chars().count()
+        );
+    }
+}
+
 fn compact_args(action: &Action) -> String {
     let preview = match action.tool.as_str() {
         "run_cmd" => action
@@ -145,5 +169,13 @@ mod tests {
         let action = Action::new(1, "run_cmd", json!({ "command": "node -v" }));
         let obs = Observation::success(1, "v22.20.0\n");
         eprintln_tool_execution(&action, &obs);
+    }
+
+    #[test]
+    fn plan_llm_output_truncates_long_body() {
+        let long = "あ".repeat(6_050);
+        // smoke: must not panic
+        println_plan_llm_output("answer", &long);
+        println_plan_llm_output("thought", "short plan note");
     }
 }

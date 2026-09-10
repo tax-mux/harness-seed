@@ -19,14 +19,28 @@ pub fn count_ok_tool_observations(trace: &TurnTrace) -> usize {
 }
 
 /// 中身のある成功ツール observation 数（`list_dir` 等の浅い列挙は除外）。
+/// `run_cmd` は成功でも stdout が空なら証拠に数えない（空 curl 連打対策）。
 pub fn count_substantive_ok_observations(trace: &TurnTrace) -> usize {
     let mut n = 0usize;
     for (action, obs) in trace.actions.iter().zip(trace.observations.iter()) {
-        if obs.ok && is_substantive_evidence_tool(&action.tool) {
+        if obs.ok && is_substantive_evidence_tool(&action.tool) && observation_has_payload(obs) {
             n += 1;
         }
     }
     n
+}
+
+/// 実質証拠ツールを一度でも呼んだか（成否・空出力は問わない）。
+pub fn count_substantive_tool_attempts(trace: &TurnTrace) -> usize {
+    trace
+        .actions
+        .iter()
+        .filter(|a| is_substantive_evidence_tool(&a.tool))
+        .count()
+}
+
+pub fn observation_has_payload(obs: &crate::action::Observation) -> bool {
+    !obs.output.trim().is_empty()
 }
 
 pub fn is_substantive_evidence_tool(name: &str) -> bool {

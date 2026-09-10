@@ -214,7 +214,7 @@ impl<E: AgentBrain> ReActLoop<E> {
                         subtask.id
                     );
                 }
-                let gained = self.run_injected_advance_phase(
+                let (gained, tool_attempts) = self.run_injected_advance_phase(
                     user_input,
                     &plan,
                     &mut harness,
@@ -232,10 +232,11 @@ impl<E: AgentBrain> ReActLoop<E> {
                     label,
                 )?;
                 if label == "claim-falsification"
-                    && gained == 0
+                    && tool_attempts == 0
                     && !claim_check_retry_used
                     && advance_phases.len() < advance.max_phases
                 {
+                    let _ = gained;
                     claim_check_retry_used = true;
                     let retry = claim_falsification_retry_subtask(boost.id.saturating_add(1));
                     if advance.show_phases || self.config.show_task_execution {
@@ -364,7 +365,7 @@ impl<E: AgentBrain> ReActLoop<E> {
             if advance.clear_session_each_phase && phase_index > 0 {
                 self.session.clear();
             }
-            let gained = self.run_injected_advance_phase(
+            let (gained, tool_attempts) = self.run_injected_advance_phase(
                 user_input,
                 &plan,
                 &mut harness,
@@ -381,7 +382,8 @@ impl<E: AgentBrain> ReActLoop<E> {
                 &boost,
                 "claim-falsification",
             )?;
-            if gained == 0 && !claim_check_retry_used && advance_phases.len() < advance.max_phases {
+            if tool_attempts == 0 && !claim_check_retry_used && advance_phases.len() < advance.max_phases {
+                let _ = gained;
                 let retry = claim_falsification_retry_subtask(boost.id.saturating_add(1));
                 if advance.show_phases || self.config.show_task_execution {
                     eprintln!(

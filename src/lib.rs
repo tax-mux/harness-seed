@@ -38,7 +38,8 @@ pub use action::{Action, AgentStep, Observation, TurnTrace};
 pub use advance::{
     apply_absence_gate, apply_citation_gate, build_phase_note, claim_audit_rules,
     claim_falsification_retry_subtask, claim_falsification_subtask, classify_absence_claims,
-    count_ok_tool_observations, count_substantive_ok_observations, evidence_deepening_subtask,
+    count_ok_tool_observations, count_substantive_ok_observations, count_substantive_tool_attempts,
+    evidence_deepening_subtask,
     evidence_grounding_rules, evidence_paths_from_notes, evidence_paths_from_texts,
     extract_absence_claims, format_recalled_progress, is_substantive_evidence_tool,
     looks_like_absence_claim, prepare_phase_recalled, prior_evidence_is_thin,

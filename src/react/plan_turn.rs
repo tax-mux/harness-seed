@@ -55,9 +55,11 @@ impl<E: AgentBrain> ReActLoop<E> {
             for st in &plan.subtasks {
                 eprintln!("[plan] #{} {}", st.id, st.goal);
             }
+            eprintln!();
         }
         if self.config.show_plan {
             println!("{}", format_plan_for_display(&plan, &self.task_registry));
+            println!();
         }
         if self.config.verbose {
             eprintln!(

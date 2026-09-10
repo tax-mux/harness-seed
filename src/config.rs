@@ -140,6 +140,18 @@ impl AppConfig {
                 min_substantive_obs: self.react.advance.min_substantive_obs.unwrap_or(3).max(1),
                 citation_check: self.react.advance.citation_check.unwrap_or(true),
                 claim_check: self.react.advance.claim_check.unwrap_or(true),
+                claim_check_max_steps: self
+                    .react
+                    .advance
+                    .claim_check_max_steps
+                    .unwrap_or(6)
+                    .clamp(2, 32),
+                claim_check_sterile_run_cmd_limit: self
+                    .react
+                    .advance
+                    .claim_check_sterile_run_cmd_limit
+                    .unwrap_or(2)
+                    .clamp(1, 8),
                 absence_check: self.react.advance.absence_check.unwrap_or(true),
             },
             monitor_plan_html: false,

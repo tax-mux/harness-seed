@@ -1,5 +1,6 @@
 //! 計画層・実行層で共有する ReAct ループ部品。
 
+use crate::advance::CLAIM_AUDIT_STERILE_ABORT_ANSWER;
 use crate::action::{Action, AgentStep, Observation, TurnTrace};
 use crate::brain::AgentBrain;
 use crate::context::{
@@ -13,7 +14,10 @@ use crate::plan::PlanArtifact;
 use crate::react::{ReActError, SubtaskExecResult, TurnResult};
 use crate::session::SessionMemory;
 use crate::tool::{execute_action, ToolRuntime};
-use crate::tool_display::{eprintln_thought, eprintln_tool_error, eprintln_tool_execution, eprintln_tool_summary};
+use crate::tool_display::{
+    eprintln_thought, eprintln_tool_error, eprintln_tool_execution, eprintln_tool_summary,
+    println_plan_llm_output,
+};
 use crate::turn_observer::{
     emit_llm_step, emit_observation_step, emit_phase_started, TurnObserver,
 };
@@ -41,6 +45,8 @@ pub struct LayerLoopOptions {
     pub max_thoughts: usize,
     pub tools_enabled: bool,
     pub context_label: &'static str,
+    /// 空の成功 `run_cmd` がこの回数連続したら監査を打ち切る（`None` で無効）。
+    pub sterile_empty_run_cmd_limit: Option<usize>,
 }
 
 impl LayerLoopOptions {
@@ -50,6 +56,7 @@ impl LayerLoopOptions {
             max_thoughts: DEFAULT_MAX_THOUGHTS,
             tools_enabled: false,
             context_label: "plan",
+            sterile_empty_run_cmd_limit: None,
         }
     }
 
@@ -59,7 +66,13 @@ impl LayerLoopOptions {
             max_thoughts,
             tools_enabled: true,
             context_label: "step",
+            sterile_empty_run_cmd_limit: None,
         }
+    }
+
+    pub const fn with_sterile_empty_run_cmd_limit(mut self, limit: Option<usize>) -> Self {
+        self.sterile_empty_run_cmd_limit = limit;
+        self
     }
 }
 
@@ -86,6 +99,7 @@ pub fn run_layer_loop<B: AgentBrain>(
 ) -> Result<TurnResult, ReActError> {
     let mut trace = TurnTrace::default();
     let mut recall_rounds = 0usize;
+    let mut consecutive_empty_run_cmd = 0usize;
 
     for steps_used in 1..=opts.max_steps {
         if stop_requested
@@ -137,7 +151,11 @@ pub fn run_layer_loop<B: AgentBrain>(
             AgentStep::Thought(thought) => {
                 if trace.thoughts.len() < opts.max_thoughts {
                     if show_thinking {
-                        eprintln_thought(opts.context_label, &thought);
+                        if opts.context_label == "plan" {
+                            println_plan_llm_output("thought", &thought);
+                        } else {
+                            eprintln_thought(opts.context_label, &thought);
+                        }
                     }
                     trace.push_thought(thought);
                 } else {
@@ -199,8 +217,42 @@ pub fn run_layer_loop<B: AgentBrain>(
                     } else if verbose {
                         eprintln!("{observation:?}");
                     }
+                    let sterile_hit = if let Some(limit) = opts.sterile_empty_run_cmd_limit {
+                        if action.tool.eq_ignore_ascii_case("run_cmd")
+                            && observation.ok
+                            && observation.output.trim().is_empty()
+                        {
+                            consecutive_empty_run_cmd =
+                                consecutive_empty_run_cmd.saturating_add(1);
+                            consecutive_empty_run_cmd >= limit
+                        } else {
+                            consecutive_empty_run_cmd = 0;
+                            false
+                        }
+                    } else {
+                        false
+                    };
                     trace.push_action(action);
                     trace.push_observation(observation);
+                    if sterile_hit {
+                        eprintln!(
+                            "[{}] claim-audit abort: {} consecutive empty run_cmd outputs",
+                            opts.context_label,
+                            opts.sterile_empty_run_cmd_limit.unwrap_or(0)
+                        );
+                        eprintln!();
+                        let context = TurnContextSummary::from_usages(&trace.context_usages);
+                        return Ok(TurnResult {
+                            answer: CLAIM_AUDIT_STERILE_ABORT_ANSWER.into(),
+                            trace,
+                            steps_used,
+                            context,
+                            plan,
+                            harness: None,
+                            subtask_results,
+                            advance_phases: vec![],
+                        });
+                    }
                 } else {
                     let id = action.invoke_id;
                     trace.push_action(action);
@@ -217,6 +269,12 @@ pub fn run_layer_loop<B: AgentBrain>(
                 {
                     return Err(ReActError::Cancelled);
                 }
+                // 計画層は Thought より Answer（計画 JSON）が本体。react 最終答は stdout に別途出るので二重表示しない。
+                if show_thinking && opts.context_label == "plan" {
+                    println_plan_llm_output("answer", &answer);
+                }
+                // ステップ切れ目（次の phase / 最終答との境界）
+                eprintln!();
                 let context = TurnContextSummary::from_usages(&trace.context_usages);
                 return Ok(TurnResult {
                     answer,
@@ -233,45 +291,42 @@ pub fn run_layer_loop<B: AgentBrain>(
                 let query = query.trim().to_string();
                 if query.is_empty() {
                     trace.push_thought("recall ignored: empty query".into());
-                    continue;
-                }
-                if max_recall_rounds == 0 || memory.is_none() {
+                } else if max_recall_rounds == 0 || memory.is_none() {
                     trace.push_thought(format!(
                         "recall not available (query={query}); continue without memory search"
                     ));
-                    continue;
-                }
-                if recall_rounds >= max_recall_rounds {
+                } else if recall_rounds >= max_recall_rounds {
                     trace.push_thought(format!(
                         "recall limit reached ({max_recall_rounds}); plan with current Recalled context"
                     ));
-                    continue;
-                }
-                let Some(mem) = memory else { continue };
-                // 計画層 recall は知識チャネルのみ（作業ログ分岐は通さない）
-                let hits = crate::memory::recall_knowledge(mem, 5, &query);
-                recall_rounds += 1;
-                if hits.is_empty() {
-                    trace.push_thought(format!(
-                        "recall[{recall_rounds}/{max_recall_rounds}] query={query} hits=0"
-                    ));
-                } else {
-                    let block = format_recalled_block("plan recall", &hits, 3200);
-                    blocks.push_recalled(block);
-                    trace.push_thought(format!(
-                        "recall[{recall_rounds}/{max_recall_rounds}] query={query} hits={}",
-                        hits.len()
-                    ));
-                    if show_thinking || verbose {
-                        eprintln!(
-                            "[{}] recall query={query:?} hits={}",
-                            opts.context_label,
+                } else if let Some(mem) = memory {
+                    // 計画層 recall は知識チャネルのみ（作業ログ分岐は通さない）
+                    let hits = crate::memory::recall_knowledge(mem, 5, &query);
+                    recall_rounds += 1;
+                    if hits.is_empty() {
+                        trace.push_thought(format!(
+                            "recall[{recall_rounds}/{max_recall_rounds}] query={query} hits=0"
+                        ));
+                    } else {
+                        let block = format_recalled_block("plan recall", &hits, 3200);
+                        blocks.push_recalled(block);
+                        trace.push_thought(format!(
+                            "recall[{recall_rounds}/{max_recall_rounds}] query={query} hits={}",
                             hits.len()
-                        );
+                        ));
+                        if show_thinking || verbose {
+                            eprintln!(
+                                "[{}] recall query={query:?} hits={}",
+                                opts.context_label,
+                                hits.len()
+                            );
+                        }
                     }
                 }
             }
         }
+        // Thought / Action / Recall 後のステップ切れ目
+        eprintln!();
     }
 
     // 計画層: 長く探索する場所ではない。answer 未達なら「課題解決に妥当な計画」を一度だけ強制する。
@@ -287,6 +342,7 @@ pub fn run_layer_loop<B: AgentBrain>(
             subtask_results,
             turn_observer,
             show_prompt,
+            show_thinking,
             verbose,
         );
     }
@@ -413,6 +469,7 @@ fn finalize_plan_without_answer<B: AgentBrain>(
     subtask_results: Vec<SubtaskExecResult>,
     turn_observer: Option<&TurnObserver>,
     show_prompt: bool,
+    show_thinking: bool,
     verbose: bool,
 ) -> Result<TurnResult, ReActError> {
     let steps_used = max_steps.saturating_add(1);
@@ -435,6 +492,9 @@ fn finalize_plan_without_answer<B: AgentBrain>(
     let answer = match step {
         AgentStep::Answer(answer) => {
             eprintln!("[plan] finalized via mandatory answer after step limit");
+            if show_thinking {
+                println_plan_llm_output("answer", &answer);
+            }
             answer
         }
         other => {
@@ -444,6 +504,13 @@ fn finalize_plan_without_answer<B: AgentBrain>(
                 AgentStep::Recall(_) => "recall",
                 AgentStep::Answer(_) => "answer",
             };
+            if show_thinking {
+                match &other {
+                    AgentStep::Thought(t) => println_plan_llm_output("thought", t),
+                    AgentStep::Answer(t) => println_plan_llm_output("answer", t),
+                    _ => {}
+                }
+            }
             trace.push_thought(format!(
                 "mandatory answer not produced (got {kind}); freeform exec for user request"
             ));

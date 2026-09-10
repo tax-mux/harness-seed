@@ -137,8 +137,9 @@ fn prior_evidence_thinness_threshold() {
     assert!(boost.done_when.contains("concrete evidence"));
     assert!(boost.goal.contains("list_dir"));
     let audit = claim_falsification_subtask(42);
-    assert!(audit.goal.contains("contradictory"));
-    assert!(audit.goal.contains("falsified"));
+    assert!(audit.goal.contains("contradictory") || audit.goal.contains("unverified"));
+    assert!(audit.done_when.contains("falsified"));
+    assert!(audit.goal.contains("empty") || audit.goal.contains("curl"));
     assert!(claim_audit_rules().contains("falsified"));
 }
 
@@ -188,6 +189,21 @@ fn count_substantive_ok_observations_skips_list_dir() {
         count_substantive_ok_observations(&trace),
         MIN_SUBSTANTIVE_OK_OBSERVATIONS_BEFORE_JUDGMENT
     ));
+}
+
+#[test]
+fn count_substantive_ok_observations_skips_empty_run_cmd() {
+    use crate::action::{Action, Observation, TurnTrace};
+    use serde_json::json;
+    let mut trace = TurnTrace::default();
+    trace.push_action(Action::new(1, "run_cmd", json!({ "command": "curl x" })));
+    trace.push_observation(Observation::success(1, ""));
+    trace.push_action(Action::new(2, "run_cmd", json!({ "command": "curl y" })));
+    trace.push_observation(Observation::success(2, "   \n"));
+    trace.push_action(Action::new(3, "run_cmd", json!({ "command": "echo hi" })));
+    trace.push_observation(Observation::success(3, "hi\n"));
+    assert_eq!(count_substantive_ok_observations(&trace), 1);
+    assert_eq!(count_substantive_tool_attempts(&trace), 3);
 }
 
 #[test]

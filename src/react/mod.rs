@@ -553,13 +553,34 @@ impl<E: AgentBrain> ReActLoop<E> {
         plan: Option<PlanArtifact>,
         subtask_results: Vec<SubtaskExecResult>,
     ) -> Result<TurnResult, ReActError> {
+        self.run_turn_single_with_opts(
+            user_input,
+            record_session,
+            plan,
+            subtask_results,
+            self.config.max_steps,
+            None,
+        )
+    }
+
+    fn run_turn_single_with_opts(
+        &mut self,
+        user_input: &str,
+        record_session: bool,
+        plan: Option<PlanArtifact>,
+        subtask_results: Vec<SubtaskExecResult>,
+        max_steps: usize,
+        sterile_empty_run_cmd_limit: Option<usize>,
+    ) -> Result<TurnResult, ReActError> {
+        let opts = LayerLoopOptions::exec(max_steps, self.config.max_thoughts)
+            .with_sterile_empty_run_cmd_limit(sterile_empty_run_cmd_limit);
         let result = run_layer_loop(
             &mut self.exec_brain,
             &mut self.tools,
             &mut self.blocks,
             &self.session,
             user_input,
-            LayerLoopOptions::exec(self.config.max_steps, self.config.max_thoughts),
+            opts,
             self.config.verbose,
             self.config.show_prompt,
             self.config.show_tool_output,

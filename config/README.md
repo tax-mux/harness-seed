@@ -231,6 +231,7 @@ ReAct の `web_search` ツールが有効になるのは API キーが解決で�
 起動時に OS / シェルは自動検出され、stderr に `runtime: ...` と LLM プロンプトの `Execution environment` に反映されます（`src/runtime.rs`）。
 
 | `show_plan` | `two_phase` 時に計画を stdout に表示（既定 `true`） |
+| `show_thinking` | Thought / ツール一行要約に加え、計画層の LLM Answer（計画 JSON）も stdout に表示（既定 `true`） |
 | `show_task_execution` | サブタスクごとの契約ツール列・実行後の実ツール列（既定 `true`） |
 | `show_tool_output` | 各ツールのコマンド・結果を stderr に表示（`run_cmd` は `$ command` 形式、既定 `true`） |
 | `advance.mode` | 推進ループの入り方: `off` / `always` / `from_plan`。`from_plan` は計画後に `PlanArtifact` の形で昇格。CLI サンプルの既定 | `off` |
@@ -242,6 +243,8 @@ ReAct の `web_search` ツールが有効になるのは API キーが解決で�
 | `advance.min_substantive_obs` | 判定前に必要な実質証拠（read/grep 等）成功 observation 数。浅い `list_dir` は数えない | `3` |
 | `advance.citation_check` | 最終合成後にパス引用を先行 Paths と照合し、無いものを未検証注記 | `true` |
 | `advance.claim_check` | 結論・合成前に先行 Claims の否定証拠を一度探す | `true` |
+| `advance.claim_check_max_steps` | 主張監査フェーズの ReAct 上限（空 curl 連打抑止） | `6` |
+| `advance.claim_check_sterile_run_cmd_limit` | 監査中に空の成功 `run_cmd` が連続したら打ち切り | `2` |
 | `advance.absence_check` | 最終回答の不在主張を trace と照合し、未検証・矛盾を注記 | `true` |
 | `show_context_metrics` | ターン終了時に `[context turn]` を stderr に出す | `true` |
 | `arg_audit_mode` | タスク契約の引数監査: `off` / `soft`（既定・警告のみ）/ `hard`（不一致で失敗） | `soft` |

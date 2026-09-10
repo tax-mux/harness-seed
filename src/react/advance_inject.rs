@@ -1,8 +1,8 @@
 //! advance の挿入フェーズ（証拠深化・主張監査・replan）。
 use crate::action::TurnTrace;
 use crate::advance::{
-    build_phase_note, count_substantive_ok_observations, prepare_phase_recalled, AdvanceConfig,
-    AdvancePhaseSummary, AdvanceProgress,
+    build_phase_note, count_substantive_ok_observations, count_substantive_tool_attempts,
+    prepare_phase_recalled, AdvanceConfig, AdvancePhaseSummary, AdvanceProgress,
 };
 use crate::brain::AgentBrain;
 use crate::harness::HarnessState;
@@ -31,7 +31,7 @@ impl<E: AgentBrain> ReActLoop<E> {
         substantive_ok_obs: &mut usize,
         boost: &Subtask,
         label: &str,
-    ) -> Result<usize, ReActError> {
+    ) -> Result<(usize, usize), ReActError> {
         prepare_phase_recalled(
             &mut self.blocks,
             base_recalled,
@@ -54,11 +54,28 @@ impl<E: AgentBrain> ReActLoop<E> {
             );
         }
         self.prepare_harness_for_subtask(harness, boost);
-        let (boost_exec, boost_driver) =
-            self.run_subtask_exec_audited(user_input, plan, boost, plan_progress)?;
+        let is_claim_audit = label.starts_with("claim-falsification");
+        let (boost_exec, boost_driver) = if is_claim_audit {
+            let max_steps = advance
+                .claim_check_max_steps
+                .min(self.config.max_steps)
+                .max(2);
+            let sterile = Some(advance.claim_check_sterile_run_cmd_limit);
+            self.run_subtask_exec_with_opts(
+                user_input,
+                plan,
+                boost,
+                plan_progress,
+                max_steps,
+                sterile,
+            )?
+        } else {
+            self.run_subtask_exec_audited(user_input, plan, boost, plan_progress)?
+        };
         harness.advance_after_subtask(boost.id);
         self.sync_harness_step_to_blocks(harness);
         let gained = count_substantive_ok_observations(&boost_exec.trace);
+        let tool_attempts = count_substantive_tool_attempts(&boost_exec.trace);
         *substantive_ok_obs += gained;
         if self.config.show_task_execution {
             let mode = if boost_driver { "step-driver" } else { "ReAct" };
@@ -97,7 +114,9 @@ impl<E: AgentBrain> ReActLoop<E> {
         *total_steps += boost_exec.steps_used;
         append_trace(combined_trace, &boost_exec.trace);
         *phase_index += 1;
-        Ok(gained)
+        // 返り値は「中身のある証拠」数。再試行判定は呼び出し側で tool_attempts も見る。
+        let _ = tool_attempts;
+        Ok((gained, tool_attempts))
     }
 
     /// `task: "replan"` — 計画層を再実行し、新しい subtask 列を返す（ネスト replan は落とす）。

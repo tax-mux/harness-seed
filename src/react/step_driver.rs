@@ -346,6 +346,26 @@ impl<E: AgentBrain> ReActLoop<E> {
         subtask: &Subtask,
         progress: &PlanProgress,
     ) -> Result<(TurnResult, bool), ReActError> {
+        self.run_subtask_exec_with_opts(
+            user_input,
+            plan,
+            subtask,
+            progress,
+            self.config.max_steps,
+            None,
+        )
+    }
+
+    /// サブタスク実行（max_steps / sterile 打ち切りの上書き可）。
+    pub(super) fn run_subtask_exec_with_opts(
+        &mut self,
+        user_input: &str,
+        plan: &PlanArtifact,
+        subtask: &Subtask,
+        progress: &PlanProgress,
+        max_steps: usize,
+        sterile_empty_run_cmd_limit: Option<usize>,
+    ) -> Result<(TurnResult, bool), ReActError> {
         if self.config.use_step_driver && self.task_registry.use_step_driver(subtask) {
             match self.task_registry.run_subtask_driver(
                 subtask,
@@ -431,7 +451,14 @@ impl<E: AgentBrain> ReActLoop<E> {
         } else {
             self.tools.set_exec_policy(None);
         }
-        let exec_result = self.run_turn_single(&mission, false, None, vec![]);
+        let exec_result = self.run_turn_single_with_opts(
+            &mission,
+            false,
+            None,
+            vec![],
+            max_steps,
+            sterile_empty_run_cmd_limit,
+        );
         self.blocks.tool_catalog = saved_catalog;
         self.tools.set_exec_policy(None);
         let exec = exec_result?;

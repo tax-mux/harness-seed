@@ -9,11 +9,13 @@ pub mod phase;
 
 pub use audit::{
     claim_audit_rules, claim_falsification_retry_subtask, claim_falsification_subtask,
+    CLAIM_AUDIT_STERILE_ABORT_ANSWER,
 };
 pub use escalate::{should_escalate_from_plan, ESCALATE_MIN_SUBTASKS};
 pub use evidence::{
-    count_ok_tool_observations, count_substantive_ok_observations, evidence_deepening_subtask,
-    is_substantive_evidence_tool, prior_evidence_is_thin, MIN_OK_TOOL_OBSERVATIONS_BEFORE_JUDGMENT,
+    count_ok_tool_observations, count_substantive_ok_observations, count_substantive_tool_attempts,
+    evidence_deepening_subtask, is_substantive_evidence_tool, observation_has_payload,
+    prior_evidence_is_thin, MIN_OK_TOOL_OBSERVATIONS_BEFORE_JUDGMENT,
     MIN_SUBSTANTIVE_OK_OBSERVATIONS_BEFORE_JUDGMENT, SUBSTANTIVE_EVIDENCE_TOOLS,
 };
 pub use mode::AdvanceMode;
@@ -50,6 +52,10 @@ pub struct AdvanceConfig {
     pub citation_check: bool,
     /// 結論・合成の前に、先行 Claims の否定証拠を一度探す。
     pub claim_check: bool,
+    /// 主張監査（claim-falsification）フェーズの ReAct 上限ステップ。
+    pub claim_check_max_steps: usize,
+    /// 監査中に空の `run_cmd` 成功がこの回数連続したら打ち切る。
+    pub claim_check_sterile_run_cmd_limit: usize,
     /// 最終回答の不在主張を trace と照合し、未検証・矛盾を注記する。
     pub absence_check: bool,
 }
@@ -72,6 +78,8 @@ impl Default for AdvanceConfig {
             min_substantive_obs: MIN_SUBSTANTIVE_OK_OBSERVATIONS_BEFORE_JUDGMENT,
             citation_check: true,
             claim_check: true,
+            claim_check_max_steps: 6,
+            claim_check_sterile_run_cmd_limit: 2,
             absence_check: true,
         }
     }

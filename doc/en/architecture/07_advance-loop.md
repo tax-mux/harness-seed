@@ -20,6 +20,8 @@ Glossary: [glossary.md](glossary.md) · [JP](../../ja/architecture/07_推進ル�
     "min_substantive_obs": 3,
     "citation_check": true,
     "claim_check": true,
+    "claim_check_max_steps": 6,
+    "claim_check_sterile_run_cmd_limit": 2,
     "absence_check": true
   }
 }

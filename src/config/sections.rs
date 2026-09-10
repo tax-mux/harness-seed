@@ -141,6 +141,10 @@ pub struct AdvanceSection {
     pub citation_check: Option<bool>,
     /// 結論前に先行 Claims の否定証拠を一度探す。
     pub claim_check: Option<bool>,
+    /// 主張監査フェーズの ReAct 上限ステップ（既定 6）。
+    pub claim_check_max_steps: Option<usize>,
+    /// 監査中の空 `run_cmd` 連続打ち切り回数（既定 2）。
+    pub claim_check_sterile_run_cmd_limit: Option<usize>,
     /// 最終回答の不在主張を trace と照合する。
     pub absence_check: Option<bool>,
 }
