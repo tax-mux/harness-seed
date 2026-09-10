@@ -21,10 +21,10 @@ harness-seed/
 │   ├── config.json       # Active configuration (edit/overwrite this)
 │   ├── samples/          # Connector templates (config.*.json)
 │   └── README.md
-├── doc/             # Documentation (current specs + ideas/)
-│   ├── architecture/    # Two-layer model (planning / execution) — JA
-│   ├── architecture-en/ # Same — EN
-│   └── ideas/       # Unimplemented design notes
+├── doc/             # Documentation
+│   ├── README.md    # Language index
+│   ├── ja/          # Japanese (architecture, tools, ideas, principles)
+│   └── en/          # English (architecture, principles; tools/ideas indexes)
 ├── src/
 │   ├── main.rs      # CLI entry point
 │   └── lib.rs       # Library core and public API
@@ -34,20 +34,17 @@ harness-seed/
 
 ### Documentation
 
+Index: [doc/README.md](doc/README.md)
+
 | File | Content |
 |------|------|
-| [doc/development-principles.md](doc/development-principles.md) | **Development principles** — prefer general solutions; case-only logic has low value |
-| [doc/memory.md](doc/memory.md) | **Memory layer** — Memory RAG, MemoryBridge, diary / search (local + mempalace) |
-| [doc/lifecycle.md](doc/lifecycle.md) | **Lifecycle hooks** — `TurnLifecycle`, `HostScratch` (host side effects; not in LLM context) |
-| [doc/architecture/README.md](doc/architecture/README.md) | **Architecture index (JA)** — planning layer, execution layer, tool selection |
-| [doc/architecture-en/README.md](doc/architecture-en/README.md) | **Architecture index (EN)** |
-| [doc/agent-minimum-action-unit.md](doc/agent-minimum-action-unit.md) | Minimum action unit of the AI agent (diagram) |
-| [doc/react-implementation.md](doc/react-implementation.md) | Current ReAct implementation structure, flow, and limitations |
-| [doc/advance-loop.md](doc/advance-loop.md) | Outer advance loop (long context chunking) |
-| [doc/wire-protocol.md](doc/wire-protocol.md) | JSON Lines wire protocol (`--json`) |
-| [doc/builtin_tools/README.md](doc/builtin_tools/README.md) | Built-in tools specification (one file per tool) |
-| [doc/context-memory-mapping.md](doc/context-memory-mapping.md) | Mapping contexts for different purposes (diagram) |
-| [doc/ideas/README.md](doc/ideas/README.md) | List of unimplemented design notes (concrete ideas reside only in the ideas/ directory) |
+| [doc/README.md](doc/README.md) | Language index (ja / en) |
+| [doc/ja/README.md](doc/ja/README.md) | Japanese docs home |
+| [doc/en/README.md](doc/en/README.md) | English docs home |
+| [doc/ja/development-principles.md](doc/ja/development-principles.md) | Development principles (JA) |
+| [doc/en/development-principles.md](doc/en/development-principles.md) | Development principles (EN) |
+| [doc/ja/architecture/README.md](doc/ja/architecture/README.md) | Architecture (JA) |
+| [doc/en/architecture/README.md](doc/en/architecture/README.md) | Architecture (EN) |
 
 ## Usage
 
@@ -71,7 +68,7 @@ Interactive ReAct REPL:
 cargo run
 # Example: help / echo hello / time / any text (Thought -> echo -> Answer)
 # Verbose logs: cargo run -- -v
-# JSON Lines REPL: cargo run -- --json  (doc/wire-protocol.md)
+# JSON Lines REPL: cargo run -- --json  (doc/ja/architecture/11_ワイヤプロトコル.md)
 
 # First-time setup (config/config.json is gitignored)
 cp config/config.json.sample config/config.json

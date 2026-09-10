@@ -141,7 +141,7 @@ cargo run --release -- --config-agent ./config.agent.json
 
 環境変数: `HARNESS_SEED_MEMPALACE_COMMAND` / `MEMPALACE_COMMAND`、`HARNESS_SEED_MEMPALACE_AGENT`。
 
-実装の正本: [doc/memory.md](../doc/memory.md)。
+実装の正本: [doc/ja/architecture/03_記憶層.md](../doc/ja/architecture/03_記憶層.md)。
 
 例 — local のみ:
 
@@ -210,8 +210,9 @@ ReAct の `web_search` ツールが有効になるのは API キーが解決で�
 | `advance.clear_session_each_phase` | 各フェーズ前に REPL 短期記憶をクリア | `true` |
 | `advance.max_note_chars` | 完了フェーズ要約の `recalled` 上限文字数 | `1500` |
 | `show_context_metrics` | ターン終了時に `[context turn]` を stderr に出す | `true` |
+| `arg_audit_mode` | タスク契約の引数監査: `off` / `soft`（既定・警告のみ）/ `hard`（不一致で失敗） | `soft` |
 
-推進ループ: [doc/advance-loop.md](../doc/advance-loop.md)
+推進ループ: [doc/ja/architecture/07_推進ループ.md](../doc/ja/architecture/07_推進ループ.md)
 
 例:
 

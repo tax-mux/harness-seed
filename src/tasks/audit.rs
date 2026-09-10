@@ -9,12 +9,13 @@ use super::spec::{apply_template_value, TaskDefinition};
 /// ステップ引数の照合モード。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ArgAuditMode {
-    /// ツール名の順序のみ（従来）。
-    #[default]
+    /// ツール名の順序のみ（引数は見ない）。
     Off,
     /// 引数不一致をメッセージに含めるが `complete` は順序のみで判定。
+    /// 既定。契約の可視性を保ちつつ、ReAct の引数ゆらぎで再試行を起こさない。
+    #[default]
     Soft,
-    /// 引数不一致も失敗とする。
+    /// 引数不一致も失敗とする（厳密契約・ステップドライバ向け）。
     Hard,
 }
 
@@ -56,7 +57,7 @@ impl TaskExecutionAudit {
 
 /// 成功した Observation に対応するツール呼び出し列を、定義順と照合する。
 pub fn audit_trace(def: &TaskDefinition, params: &Value, trace: &TurnTrace) -> TaskExecutionAudit {
-    audit_trace_with_mode(def, params, trace, ArgAuditMode::Off)
+    audit_trace_with_mode(def, params, trace, ArgAuditMode::Soft)
 }
 
 /// [`ArgAuditMode`] 付き監査。
@@ -123,7 +124,9 @@ pub fn audit_trace_with_mode(
         while let Some(next) = action_iter.peek() {
             if next.tool == expected_method {
                 let action = action_iter.next().expect("peeked");
-                if arg_mode != ArgAuditMode::Off && action.args != expected_args_val {
+                if arg_mode != ArgAuditMode::Off
+                    && !args_satisfy_contract(&expected_args_val, &action.args)
+                {
                     arg_ok = false;
                     arg_notes.push(format!(
                         "{}:{} args mismatch (got {}, expected {})",
@@ -177,6 +180,57 @@ pub fn expected_args(def: &TaskDefinition, params: &Value) -> Vec<(u32, String, 
         .into_iter()
         .map(|s| (s.order, s.method.clone(), apply_template_value(&s.args, params)))
         .collect()
+}
+
+/// 契約引数が実引数を満たすか。
+///
+/// - オブジェクトは **期待キー ⊆ 実キー**（余分な実キーは許容）
+/// - 未展開の `{placeholder}` 葉はワイルドカード（照合スキップ）
+/// - 数値と数字文字列は等価とみなす
+pub fn args_satisfy_contract(expected: &Value, actual: &Value) -> bool {
+    match (expected, actual) {
+        (Value::Object(exp), Value::Object(act)) => {
+            for (k, ev) in exp {
+                if value_has_unresolved_placeholder(ev) {
+                    continue;
+                }
+                let Some(av) = act.get(k) else {
+                    return false;
+                };
+                if !args_satisfy_contract(ev, av) {
+                    return false;
+                }
+            }
+            true
+        }
+        (Value::Array(exp), Value::Array(act)) => {
+            if exp.len() != act.len() {
+                return false;
+            }
+            exp.iter()
+                .zip(act.iter())
+                .all(|(e, a)| args_satisfy_contract(e, a))
+        }
+        (Value::String(e), _) if string_has_unresolved_placeholder(e) => true,
+        (Value::String(e), Value::String(a)) => e == a,
+        (Value::Number(n), Value::String(s)) => s == &n.to_string(),
+        (Value::String(s), Value::Number(n)) => s == &n.to_string(),
+        (Value::Null, Value::Null) => true,
+        (e, a) => e == a,
+    }
+}
+
+fn string_has_unresolved_placeholder(s: &str) -> bool {
+    s.contains('{') && s.contains('}')
+}
+
+fn value_has_unresolved_placeholder(v: &Value) -> bool {
+    match v {
+        Value::String(s) => string_has_unresolved_placeholder(s),
+        Value::Array(arr) => arr.iter().any(value_has_unresolved_placeholder),
+        Value::Object(map) => map.values().any(value_has_unresolved_placeholder),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -258,5 +312,43 @@ mod tests {
         assert!(soft.message.contains("arg warnings"));
         let hard = audit_trace_with_mode(&def, &json!({}), &trace, ArgAuditMode::Hard);
         assert!(!hard.complete);
+    }
+
+    #[test]
+    fn soft_allows_extra_actual_keys() {
+        let def = list_dir_task();
+        let mut trace = TurnTrace::default();
+        trace.push_action(Action::new(
+            1,
+            "list_dir",
+            json!({"path": ".", "extra": true}),
+        ));
+        trace.push_observation(Observation::success(1, "ok"));
+        let soft = audit_trace_with_mode(&def, &json!({}), &trace, ArgAuditMode::Soft);
+        assert!(soft.complete, "{}", soft.message);
+        assert!(!soft.message.contains("arg warnings"));
+        let hard = audit_trace_with_mode(&def, &json!({}), &trace, ArgAuditMode::Hard);
+        assert!(hard.complete, "{}", hard.message);
+    }
+
+    #[test]
+    fn args_satisfy_skips_unresolved_placeholders() {
+        assert!(args_satisfy_contract(
+            &json!({"path": "{path}"}),
+            &json!({"path": "src"})
+        ));
+        assert!(args_satisfy_contract(
+            &json!({"path": "."}),
+            &json!({"path": "."})
+        ));
+        assert!(!args_satisfy_contract(
+            &json!({"path": "."}),
+            &json!({"path": "src"})
+        ));
+    }
+
+    #[test]
+    fn default_arg_mode_is_soft() {
+        assert_eq!(ArgAuditMode::default(), ArgAuditMode::Soft);
     }
 }

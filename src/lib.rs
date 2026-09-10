@@ -118,7 +118,8 @@ pub use runtime::{OsFamily, RuntimeEnvironment, ShellKind};
 pub use session::{PastTurn, SessionMemory, SessionPromptPolicy};
 pub use tasks::{
     apply_template, apply_template_value, audit_trace, audit_trace_with_mode, expected_args,
-    ArgAuditMode, ContextManifestSpec, ExecStep, MissionRenderContext, StepAudit, SubtaskToolPolicy,
+    args_satisfy_contract, ArgAuditMode, ContextManifestSpec, ExecStep, MissionRenderContext,
+    StepAudit, SubtaskToolPolicy,
     TaskDefinition, TaskError, TaskExecutionAudit, TaskLoadError, TaskRegistry, ToolPolicySpec,
 };
 pub use tool::{

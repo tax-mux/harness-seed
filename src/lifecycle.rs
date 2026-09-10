@@ -12,7 +12,7 @@
 //! ホストはエラーを hook 内で処理するのが望ましい。パニックした場合もエンジンが
 //! [`invoke_lifecycle`] で捕捉し、本筋の `run_turn` は継続する。
 //!
-//! 詳細: `doc/lifecycle.md`。
+//! 詳細: `doc/ja/architecture/04_ホスト拡張.md`。
 
 use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
