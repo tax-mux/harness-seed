@@ -8,3 +8,8 @@
 
 # ローカル実行設定（秘密情報を含むことがある。ひな形は config.json.sample）
 /config/config.json
+
+# ローカル固有ファイル（機密・マシン特定。共有除外）
+/.cursor/
+/AGENTS.md
+/test_ollama.sh
