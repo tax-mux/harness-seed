@@ -12,8 +12,8 @@ impl LlmConnector for MockLlmConnector {
             .iter()
             .rev()
             .find(|m| m.role == "user")
-            .map(|m| m.content.as_str())
-            .unwrap_or("");
+            .map(|m| m.content.as_text())
+            .unwrap_or_default();
 
         let plan_answer = r#"{"step":"answer","content":"{\"summary\":\"mock plan\",\"skip_execution\":false,\"subtasks\":[{\"id\":1,\"goal\":\"first step\",\"done_when\":\"done\"},{\"id\":2,\"goal\":\"second step\",\"done_when\":\"done\"}]}"}"#;
         let plan_list_dir = r#"{"step":"answer","content":"{\"summary\":\"list\",\"skip_execution\":false,\"subtasks\":[{\"id\":1,\"task\":\"list_dir\",\"params\":{\"path\":\"src\"},\"goal\":\"\",\"done_when\":\"\"}]}"}"#;

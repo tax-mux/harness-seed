@@ -105,9 +105,13 @@ pub fn analyze_messages(messages: &[ChatMessage]) -> Vec<ContextSection> {
     let mut out = Vec::new();
     for msg in messages {
         match msg.role.as_str() {
-            "system" => out.extend(analyze_system_content(&msg.content)),
-            "user" => out.extend(analyze_user_content(&msg.content)),
-            _ => push_section(&mut out, ContextSectionKind::Other, msg.content.chars().count()),
+            "system" => out.extend(analyze_system_content(&msg.content.as_text())),
+            "user" => out.extend(analyze_user_content(&msg.content.as_text())),
+            _ => push_section(
+                &mut out,
+                ContextSectionKind::Other,
+                msg.content.as_text().chars().count(),
+            ),
         }
     }
     merge_adjacent(out)

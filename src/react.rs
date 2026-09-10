@@ -51,6 +51,8 @@ pub struct ReActConfig {
     pub two_phase: bool,
     /// 計画層 ReAct ループの最大ステップ。
     pub max_steps_plan: usize,
+    /// 実行層 ReAct ループあたりの `thought` 上限。
+    pub max_thoughts: usize,
     /// `tasks/*.json` の `steps[]` 契約があるサブタスクを LLM なしで順次実行する。
     pub use_step_driver: bool,
     /// 各 ReAct ステップの LLM プロンプト全文を stderr に出す。
@@ -81,6 +83,7 @@ impl Default for ReActConfig {
             session_max_turns: SessionMemory::DEFAULT_MAX_TURNS,
             two_phase: false,
             max_steps_plan: 4,
+            max_thoughts: 1,
             use_step_driver: true,
             show_prompt: false,
             show_plan: true,
@@ -325,7 +328,7 @@ impl<E: AgentBrain> ReActLoop<E> {
         let (mut harness, trace, steps_used) = run_plan_layer(
             &mut self.plan_brain,
             &mut self.tools,
-            &self.blocks,
+            &mut self.blocks,
             &self.session,
             user_input,
             self.config.max_steps_plan,
@@ -424,7 +427,7 @@ impl<E: AgentBrain> ReActLoop<E> {
         let (mut harness, plan_trace, plan_steps) = run_plan_layer(
             &mut self.plan_brain,
             &mut self.tools,
-            &self.blocks,
+            &mut self.blocks,
             &self.session,
             user_input,
             self.config.max_steps_plan,
@@ -558,7 +561,7 @@ impl<E: AgentBrain> ReActLoop<E> {
         let (mut harness, plan_trace, plan_steps) = run_plan_layer(
             &mut self.plan_brain,
             &mut self.tools,
-            &self.blocks,
+            &mut self.blocks,
             &self.session,
             user_input,
             self.config.max_steps_plan,
@@ -762,7 +765,36 @@ impl<E: AgentBrain> ReActLoop<E> {
                 }
             }
         }
-        let mission = format_mission(&self.task_registry, user_input, plan, subtask, progress);
+        let mut mission = format_mission(&self.task_registry, user_input, plan, subtask, progress);
+        if let Some(task_id) = &subtask.task {
+            if let Some(def) = self.task_registry.get(task_id) {
+                if let Some(spec) = &def.context_manifest {
+                    if let Some(manifest_path) = self.blocks.context_manifest_path.clone() {
+                        if let Some(params) = self.task_registry.merged_subtask_params(subtask) {
+                            match crate::context_manifest::apply_scoped_entry(
+                                &manifest_path,
+                                spec,
+                                &params,
+                                &mut self.blocks,
+                            ) {
+                                Ok(n) if self.config.verbose && n > 0 => {
+                                    eprintln!(
+                                        "[context-manifest] task {task_id}: {n} image(s) + recalled file(s)"
+                                    );
+                                }
+                                Err(e) => {
+                                    eprintln!("[context-manifest] task {task_id}: {e}");
+                                    mission.push_str(&crate::context_manifest::format_apply_error_hint(
+                                        &e, spec,
+                                    ));
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let saved_catalog = self.blocks.tool_catalog.clone();
         let policy = self.task_registry.tool_policy_for_subtask(subtask);
         if let Some(ref p) = policy {
@@ -775,6 +807,7 @@ impl<E: AgentBrain> ReActLoop<E> {
         self.blocks.tool_catalog = saved_catalog;
         self.tools.set_exec_policy(None);
         let exec = exec_result?;
+        self.blocks.clear_vision_attachments();
         Ok((exec, false))
     }
 
@@ -788,10 +821,10 @@ impl<E: AgentBrain> ReActLoop<E> {
         let result = run_layer_loop(
             &mut self.exec_brain,
             &mut self.tools,
-            &self.blocks,
+            &mut self.blocks,
             &self.session,
             user_input,
-            LayerLoopOptions::exec(self.config.max_steps),
+            LayerLoopOptions::exec(self.config.max_steps, self.config.max_thoughts),
             self.config.verbose,
             self.config.show_prompt,
             self.config.show_tool_output,
@@ -986,7 +1019,7 @@ mod tests {
             .into_iter()
             .find(|m| m.role == "system")
             .expect("system");
-        assert!(system.content.contains("note from host"));
+        assert!(system.content.as_text().contains("note from host"));
     }
 
     #[test]

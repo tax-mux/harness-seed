@@ -127,9 +127,9 @@ mod tests {
             .iter()
             .find(|m| m.role == "user")
             .expect("user message");
-        assert!(user.content.contains("Previous turns:"));
-        assert!(user.content.contains("User: first"));
-        assert!(user.content.contains("Assistant: one"));
-        assert!(user.content.contains("User input:\nsecond"));
+        assert!(user.content.as_text().contains("Previous turns:"));
+        assert!(user.content.as_text().contains("User: first"));
+        assert!(user.content.as_text().contains("Assistant: one"));
+        assert!(user.content.as_text().contains("User input:\nsecond"));
     }
 }

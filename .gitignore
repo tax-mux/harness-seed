@@ -3,6 +3,10 @@
 /logs/
 /tmp/
 
+# ローカル実行設定（秘密情報を含むことがある。ひな形は config.json.sample）
+/config/config.json
+
+
 # 論文・資料などローカル参照用（README のみリポジトリに残す）
 /doc/knowledge/*
 !/doc/knowledge/README.md

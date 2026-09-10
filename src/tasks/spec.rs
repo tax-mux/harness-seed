@@ -49,6 +49,17 @@ pub struct TaskDefinition {
     /// true のときのみ、ユーザ依頼全文を mission に載せる（参照メールなど）。
     #[serde(default)]
     pub include_user_reference: bool,
+    /// サブタスク開始時に JSON マニフェストからスコープ付きコンテキストを注入する。
+    #[serde(default)]
+    pub context_manifest: Option<ContextManifestSpec>,
+}
+
+/// タスク実行時のコンテキストマニフェスト注入設定（パスは `config.agent.json`）。
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+pub struct ContextManifestSpec {
+    /// マニフェスト entry の `scope` と照合する param キー名。
+    #[serde(default)]
+    pub scope_params: Vec<String>,
 }
 
 impl TaskDefinition {
@@ -87,7 +98,16 @@ impl TaskDefinition {
     pub fn format_required_execution(&self, params: &Value) -> String {
         let required = self.ordered_required_steps();
         if required.is_empty() {
-            return "Required execution: (none — ReAct may choose tools freely)\n".into();
+            let mut out = String::from(
+                "Required execution: (none — ReAct may choose tools freely)\n",
+            );
+            if !self.done_when.is_empty() {
+                out.push_str(&format!(
+                    "\nDone when: {}\n",
+                    apply_template(&self.done_when, params)
+                ));
+            }
+            return out;
         }
         let mut out = String::from(
             "Required execution order (complete methods in this order; do not skip):\n",
@@ -108,9 +128,13 @@ impl TaskDefinition {
         out
     }
 
-    /// 固定契約があるか（`generic` など steps 空は false）。
+    /// `steps[]` 契約があるか（`generic` など steps 空は false）。
     pub fn has_execution_contract(&self) -> bool {
         !self.ordered_required_steps().is_empty()
+    }
+
+    pub fn uses_context_manifest(&self) -> bool {
+        self.context_manifest.is_some()
     }
 }
 

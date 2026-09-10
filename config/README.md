@@ -4,15 +4,23 @@
 
 | パス | 役割 |
 |------|------|
-| `config/config.json` | **実行時に読む正本**（ここを編集・上書きする） |
+| `config/config.json.sample` | **既定のひな形**（リポジトリに固定。秘密情報なし） |
+| `config/config.json` | **実行時に読む正本**（gitignore。ローカルで編集する） |
 | `config/samples/config.*.json` | コネクタ別のひな形（リポジトリに固定） |
+
+初回セットアップ:
+
+```bash
+cp config/config.json.sample config/config.json
+# 必要なら llm.model / api_key などを編集
+```
 
 ## プロバイダの切り替え
 
 使いたいサンプルを `config.json` にコピーして上書きします。
 
 ```bash
-# Ollama（既定と同じ内容）
+# Ollama
 cp config/samples/config.ollama.json config/config.json
 
 # LM Studio
@@ -37,6 +45,37 @@ cargo run -- --config config/samples/config.lmstudio.json
 ```
 
 環境変数 `HARNESS_SEED_CONFIG`（旧 `MYHARNESS_CONFIG`）でもパスを指定できます。
+
+## プロジェクト資産（CLI: `config.agent.json`）
+
+CLI 起動時、**実行時 cwd** に `config.agent.json` があれば自動読み込みします。
+
+```bash
+# プロジェクトルートで（config.agent.json を自動検出）
+cargo run --release
+
+# 明示指定
+cargo run --release -- --agent-dir .agent
+cargo run --release -- --config-agent ./config.agent.json
+```
+
+`config.agent.json` 例:
+
+```json
+{
+  "workspace": ".",
+  "agent_dir": ".agent"
+}
+```
+
+| `agent_dir` 配下 | 内容 |
+|------------------|------|
+| `rules/**/*.md` | 追加ルール（再帰） |
+| `skills/<id>/task.json` | 計画層タスク（スキル） |
+| `skills/<id>/SKILL.md` | スキル説明（ルールへ注入） |
+| `tools/*.json` | 宣言的シェルツール |
+
+`workspace` は `HARNESS_WORKSPACE` に設定され、`list_dir` / `run_cmd` 等の基準になります。
 
 ## `tools` セクション（組み込みツール）
 

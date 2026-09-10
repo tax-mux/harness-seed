@@ -2,8 +2,10 @@
 
 pub mod action;
 pub mod advance;
+pub mod agent_assets;
 pub mod brain;
 pub mod brave_search;
+pub mod cli_agent;
 pub mod config;
 pub mod context;
 pub mod context_log;
@@ -22,8 +24,14 @@ pub mod tasks;
 pub mod tool;
 pub mod tool_display;
 pub mod turn_observer;
+pub mod context_manifest;
 
 pub use action::{Action, AgentStep, Observation, TurnTrace};
+pub use agent_assets::{
+    apply_agent_project, load_agent_project_file, resolve_cli_agent_config, AgentConfigError,
+    AgentLoadError, AgentLoadReport, AgentProjectConfig, CliAgentSource, ScriptTool,
+    ScriptToolDefinition, DEFAULT_FILENAME,
+};
 pub use advance::{
     format_recalled_progress, prepare_phase_recalled, restore_base_recalled, AdvanceConfig,
     AdvancePhaseNote, AdvancePhaseSummary, AdvanceProgress,
@@ -82,12 +90,16 @@ pub use turn_observer::{
     TurnObserver,
     TurnStepEvent,
 };
+pub use context_manifest::{
+    apply_scoped_entry, format_apply_error_hint, note_manifest_available, ContextManifestError,
+    VisionAttachment, SCOPED_RECALL_PREFIX,
+};
 pub use runtime::{OsFamily, RuntimeEnvironment, ShellKind};
 pub use session::{PastTurn, SessionMemory};
 pub use tasks::{
-    apply_template, apply_template_value, audit_trace, ExecStep, MissionRenderContext,
-    extract_reference_uid, StepAudit, SubtaskToolPolicy, TaskDefinition, TaskError,
-    TaskExecutionAudit, TaskLoadError, TaskRegistry, ToolPolicySpec,
+    apply_template, apply_template_value, audit_trace, ContextManifestSpec, ExecStep,
+    MissionRenderContext, extract_reference_uid, StepAudit, SubtaskToolPolicy, TaskDefinition,
+    TaskError, TaskExecutionAudit, TaskLoadError, TaskRegistry, ToolPolicySpec,
 };
 pub use tool::{
     apply_packs, default_packs, execute_action, format_tool_catalog, full_builtin_registry,

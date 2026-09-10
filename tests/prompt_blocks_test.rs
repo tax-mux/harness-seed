@@ -30,6 +30,6 @@ fn turn_prompt_context_render_matches_core() {
         .iter()
         .find(|m| m.role == "system")
         .expect("system");
-    assert!(system.content.starts_with(REACT_SYSTEM_CORE));
-    assert!(system.content.contains("Tool catalog:"));
+    assert!(system.content.as_text().starts_with(REACT_SYSTEM_CORE));
+    assert!(system.content.as_text().contains("Tool catalog:"));
 }

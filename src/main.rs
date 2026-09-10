@@ -4,7 +4,13 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use harness_seed::{run_json_repl, run_repl, AppConfig, BrainPair, ReActLoop, SimpleRuleBrain, TaskRegistry, VERSION};
+use harness_seed::{
+    cli_agent::{
+        cli_flag_takes_value, is_cli_global_flag, log_agent_setup, prepare_cli_agent_workspace,
+        setup_cli_agent,
+    },
+    run_json_repl, run_repl, AppConfig, BrainPair, ReActLoop, SimpleRuleBrain, TaskRegistry, VERSION,
+};
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -17,6 +23,8 @@ fn main() -> ExitCode {
     let use_llm = args.iter().any(|a| a == "--llm");
     let no_llm = args.iter().any(|a| a == "--no-llm");
     let config_path = parse_config_path(&args);
+
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print_usage();
@@ -40,7 +48,13 @@ fn main() -> ExitCode {
             no_llm,
             verbose,
             &args,
+            &cwd,
         );
+    }
+
+    if let Err(err) = prepare_cli_agent_workspace(&args, &cwd) {
+        eprintln!("failed to prepare agent workspace: {err}");
+        return ExitCode::from(1);
     }
 
     let brains = match BrainPair::from_cli(&app, use_llm, no_llm) {
@@ -73,6 +87,11 @@ fn main() -> ExitCode {
         eprintln!("context log: {}", path.display());
     }
 
+    if let Err(err) = prepare_cli_agent_workspace(&args, &cwd) {
+        eprintln!("failed to prepare agent workspace: {err}");
+        return ExitCode::from(1);
+    }
+
     let blocks = match app.load_prompt_blocks() {
         Ok(b) => b,
         Err(err) => {
@@ -80,6 +99,18 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    let mut blocks = blocks;
+    let mut task_registry = TaskRegistry::load_default();
+    let agent_setup = match setup_cli_agent(&args, &cwd, &mut blocks, &mut task_registry) {
+        Ok(setup) => setup,
+        Err(err) => {
+            eprintln!("failed to load agent project: {err}");
+            return ExitCode::from(1);
+        }
+    };
+    if let Some(ref setup) = agent_setup {
+        log_agent_setup(setup);
+    }
     if !blocks.rules.is_empty() {
         eprintln!("prompt: loaded {} rule block(s)", blocks.rules.len());
     }
@@ -102,10 +133,16 @@ fn main() -> ExitCode {
         brains.plan,
         react_config,
         blocks,
-        harness_seed::TaskRegistry::load_default(),
+        task_registry,
         brave_search,
         &tool_packs,
     );
+    if let Some(setup) = agent_setup {
+        for tool in setup.script_tools {
+            react.register_plugin(tool);
+        }
+        react.refresh_tool_catalog();
+    }
     eprintln!("runtime: {}", react.blocks.runtime.summary_line());
 
     let repl_result = if json_repl {
@@ -130,6 +167,7 @@ fn run_plan_zone_mode(
     no_llm: bool,
     verbose: bool,
     args: &[String],
+    cwd: &std::path::Path,
 ) -> ExitCode {
     let user_input = match parse_plan_zone_input(args) {
         Some(s) => s,
@@ -139,6 +177,11 @@ fn run_plan_zone_mode(
         }
     };
 
+    if let Err(err) = prepare_cli_agent_workspace(args, cwd) {
+        eprintln!("failed to prepare agent workspace: {err}");
+        return ExitCode::from(1);
+    }
+
     let blocks = match app.load_prompt_blocks() {
         Ok(b) => b,
         Err(err) => {
@@ -146,6 +189,18 @@ fn run_plan_zone_mode(
             return ExitCode::from(1);
         }
     };
+    let mut blocks = blocks;
+    let mut task_registry = TaskRegistry::load_default();
+    let agent_setup = match setup_cli_agent(args, cwd, &mut blocks, &mut task_registry) {
+        Ok(setup) => setup,
+        Err(err) => {
+            eprintln!("failed to load agent project: {err}");
+            return ExitCode::from(1);
+        }
+    };
+    if let Some(ref setup) = agent_setup {
+        log_agent_setup(setup);
+    }
     let mut react_config = app.react_config(verbose, false);
     react_config.show_plan = false;
     react_config.show_context_metrics = false;
@@ -166,10 +221,16 @@ fn run_plan_zone_mode(
         brains.plan,
         react_config,
         blocks,
-        TaskRegistry::load_default(),
+        task_registry,
         app.resolved_brave_search(),
         &tool_packs,
     );
+    if let Some(setup) = agent_setup {
+        for tool in setup.script_tools {
+            react.register_plugin(tool);
+        }
+        react.refresh_tool_catalog();
+    }
 
     if full {
         if !no_monitor {
@@ -277,7 +338,7 @@ fn parse_plan_zone_input(args: &[String]) -> Option<String> {
             after_flag = true;
             continue;
         }
-        if after_flag && !is_plan_zone_global_flag(arg) {
+        if after_flag && !is_cli_global_flag(arg) {
             parts.push(arg.as_str());
         }
     }
@@ -298,21 +359,8 @@ fn parse_plan_zone_input(args: &[String]) -> Option<String> {
     None
 }
 
-fn is_plan_zone_global_flag(arg: &str) -> bool {
-    matches!(
-        arg,
-        "--no-llm"
-            | "--llm"
-            | "-v"
-            | "--verbose"
-            | "--show-prompt"
-            | "--json"
-            | "--no-monitor"
-    )
-}
-
 fn plan_zone_flag_takes_value(arg: &str) -> bool {
-    arg == "--config"
+    cli_flag_takes_value(arg)
 }
 
 fn parse_config_path(args: &[String]) -> PathBuf {
@@ -343,13 +391,25 @@ Options:
   --plan-zone [TEXT]      固定ゾーン表示 → Planner 実行 → 作業指示書を stdout に出力
   --plan-zone-full [TEXT] 計画層 1 ステップ目のプロンプト全文のみ（LLM 未使用）
   --json                  JSON Lines REPL（stdin/stdout は 1 行 1 JSON、ログは stderr）
-  --config <PATH>         設定ファイル（既定: config/config.json）
+  --config <PATH>         harness-seed 設定（既定: config/config.json）
+  --config-agent <PATH>   プロジェクトの config.agent.json（既定: ./config.agent.json）
+  --agent-dir <PATH>      エージェント資産ディレクトリ（workspace は実行時 cwd）
   --llm                   設定に関わらず LLM 頭脳を強制
   --no-llm                ルール頭脳を強制（設定の llm を無視）
 
+config.agent.json（実行時パス直下。省略時は自動検出）:
+  workspace               ファイルツールのルート（既定: .）
+  agent_dir               rules / skills / tools を含むディレクトリ（既定: .agent）
+
+agent_dir レイアウト:
+  rules/**/*.md           追加ルール（再帰）
+  skills/<id>/task.json   計画層タスク（スキル）
+  skills/<id>/SKILL.md    スキル説明（ルールへ注入）
+  tools/*.json            宣言的シェルツール
+
 プロバイダ切替（推奨）:
-  cp config/samples/config.lmstudio.json config/config.json
-  # ひな形: config/samples/config.ollama.json など
+  cp config/config.json.sample config/config.json
+  # プロバイダ別: config/samples/config.lmstudio.json など
   # 詳細: config/README.md
 
 設定ファイル:
@@ -370,6 +430,7 @@ Options:
   log.context_metrics     コンテキスト計測ログ（JSON Lines）
 
 環境変数（設定より優先）:
+  HARNESS_WORKSPACE       ファイルツールのワークスペース（config.agent.json でも設定可）
   HARNESS_SEED_CONFIG / MYHARNESS_CONFIG   設定ファイルパス
   HARNESS_SEED_LLM_PROVIDER / MYHARNESS_LLM_PROVIDER  プロバイダ上書き
   OPENAI_API_KEY / GEMINI_API_KEY / ANTHROPIC_API_KEY / HARNESS_SEED_API_KEY / OLLAMA_* / LM_STUDIO_* など

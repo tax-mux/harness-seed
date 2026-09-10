@@ -36,25 +36,184 @@ impl LlmProvider {
     }
 }
 
+/// チャットメッセージ本文（テキストまたは OpenAI 互換マルチモーダル parts）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum MessageContent {
+    Text(String),
+    Parts(Vec<ContentPart>),
+}
+
+impl MessageContent {
+    pub fn text(value: impl Into<String>) -> Self {
+        Self::Text(value.into())
+    }
+
+    pub fn as_text(&self) -> String {
+        match self {
+            Self::Text(s) => s.clone(),
+            Self::Parts(parts) => parts
+                .iter()
+                .filter_map(|p| match p {
+                    ContentPart::Text { text } => Some(text.as_str()),
+                    ContentPart::ImageUrl { .. } => None,
+                })
+                .collect::<Vec<_>>()
+                .join(""),
+        }
+    }
+
+    pub fn image_count(&self) -> usize {
+        match self {
+            Self::Text(_) => 0,
+            Self::Parts(parts) => parts
+                .iter()
+                .filter(|p| matches!(p, ContentPart::ImageUrl { .. }))
+                .count(),
+        }
+    }
+
+    /// Gemini `generateContent` の `parts` 配列へ変換する。
+    pub fn gemini_parts(&self) -> Vec<serde_json::Value> {
+        use serde_json::json;
+        match self {
+            Self::Text(s) => vec![json!({ "text": s })],
+            Self::Parts(parts) => parts
+                .iter()
+                .map(|part| match part {
+                    ContentPart::Text { text } => json!({ "text": text }),
+                    ContentPart::ImageUrl { image_url } => {
+                        if let Some((mime, data)) = parse_data_url(&image_url.url) {
+                            json!({
+                                "inline_data": {
+                                    "mime_type": mime,
+                                    "data": data
+                                }
+                            })
+                        } else {
+                            json!({ "text": image_url.url.clone() })
+                        }
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    /// Anthropic Messages API の `content` フィールドへ変換する。
+    pub fn anthropic_content(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            Self::Text(s) => json!(s),
+            Self::Parts(parts) => {
+                let blocks: Vec<serde_json::Value> = parts
+                    .iter()
+                    .map(|part| match part {
+                        ContentPart::Text { text } => json!({
+                            "type": "text",
+                            "text": text
+                        }),
+                        ContentPart::ImageUrl { image_url } => {
+                            if let Some((mime, data)) = parse_data_url(&image_url.url) {
+                                json!({
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": mime,
+                                        "data": data
+                                    }
+                                })
+                            } else {
+                                json!({
+                                    "type": "text",
+                                    "text": image_url.url.clone()
+                                })
+                            }
+                        }
+                    })
+                    .collect();
+                json!(blocks)
+            }
+        }
+    }
+}
+
+fn parse_data_url(url: &str) -> Option<(String, String)> {
+    let rest = url.strip_prefix("data:")?;
+    let (mime, data) = rest.split_once(";base64,")?;
+    Some((mime.to_string(), data.to_string()))
+}
+
+/// OpenAI Chat Completions 互換の content part。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContentPart {
+    Text { text: String },
+    ImageUrl { image_url: ImageUrlDetail },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageUrlDetail {
+    pub url: String,
+}
+
 /// チャットメッセージ（OpenAI / Ollama 互換）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChatMessage {
     pub role: String,
-    pub content: String,
+    pub content: MessageContent,
 }
 
 impl ChatMessage {
     pub fn system(content: impl Into<String>) -> Self {
         Self {
             role: "system".into(),
-            content: content.into(),
+            content: MessageContent::text(content),
         }
     }
 
     pub fn user(content: impl Into<String>) -> Self {
         Self {
             role: "user".into(),
-            content: content.into(),
+            content: MessageContent::text(content),
+        }
+    }
+
+    pub fn user_with_vision(
+        text: impl Into<String>,
+        images: &[crate::context_manifest::VisionAttachment],
+    ) -> Self {
+        Self::user_with_reference_vision("## Reference attachments", images, text)
+    }
+
+    /// 固定ゾーン参照（画像）+ 実行層 user 本文。画像は参照情報として先頭に載せる。
+    pub fn user_with_reference_vision(
+        reference_header: impl Into<String>,
+        images: &[crate::context_manifest::VisionAttachment],
+        operational: impl Into<String>,
+    ) -> Self {
+        let mut parts = vec![ContentPart::Text {
+            text: reference_header.into(),
+        }];
+        for image in images {
+            parts.push(ContentPart::Text {
+                text: format!(
+                    "\n[reference image] entry={} path={}",
+                    image.entry_id,
+                    image.path.display()
+                ),
+            });
+            parts.push(ContentPart::ImageUrl {
+                image_url: ImageUrlDetail {
+                    url: format!("data:{};base64,{}", image.mime, image.base64),
+                },
+            });
+        }
+        parts.push(ContentPart::Text {
+            text: format!("\n\n---\n\n{}", operational.into()),
+        });
+        Self {
+            role: "user".into(),
+            content: MessageContent::Parts(parts),
         }
     }
 }

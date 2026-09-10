@@ -11,6 +11,6 @@ pub use driver::{StepDriverError, StepDriverResult};
 pub use policy::{SubtaskToolPolicy, ToolPolicySpec};
 pub use registry::{extract_reference_uid, TaskLoadError, TaskRegistry};
 pub use spec::{
-    apply_template, apply_template_value, ExecStep, MissionRenderContext, TaskDefinition,
-    TaskError,
+    apply_template, apply_template_value, ContextManifestSpec, ExecStep, MissionRenderContext,
+    TaskDefinition, TaskError,
 };
