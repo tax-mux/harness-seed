@@ -1,0 +1,7 @@
+{
+  "id": "generic",
+  "summary": "固定の実行順なし（ReAct がツールを選択）",
+  "default_params": {},
+  "done_when": "user request satisfied",
+  "steps": []
+}

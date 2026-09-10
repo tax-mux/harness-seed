@@ -1,0 +1,16 @@
+{
+  "id": "web_research",
+  "summary": "Brave Web 検索で外部情報を収集する（要 tools.brave_search.api_key）",
+  "default_params": {
+    "query": ""
+  },
+  "done_when": "web_search の observation に検索結果があり、ユーザー質問に答えられる",
+  "steps": [
+    {
+      "order": 1,
+      "method": "web_search",
+      "args": { "query": "{query}" },
+      "required": true
+    }
+  ]
+}

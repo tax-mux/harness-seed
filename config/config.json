@@ -1,0 +1,31 @@
+{
+  "llm": {
+    "provider": "lmstudio",
+    "api_key": null,
+    "base_url": "http://127.0.0.1:1234",
+    "model": "google/gemma-4-e4b",
+    "timeout_secs": 120,
+    "json_mode": false
+  },
+  "react": {
+    "max_steps": 16,
+    "verbose": false,
+    "show_context_metrics": true,
+    "show_task_execution": true,
+    "show_tool_output": true,
+    "session_max_turns": 8,
+    "two_phase": true,
+    "max_steps_plan": 4
+  },
+  "log": {
+    "context_metrics": "logs/context.jsonl"
+  },
+  "tools": {
+    "brave_search": {
+      "api_key": "BSAyKx-g3rTSPtPC_tgjSpvko8HrM6P",
+      "max_results": 5,
+      "fetch_content": false,
+      "max_content_chars": 2048
+    }
+  }
+}
