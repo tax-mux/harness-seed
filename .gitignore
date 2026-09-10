@@ -3,5 +3,8 @@
 /logs/
 /tmp/
 
+# 実行副産物（各ターンに自動再生成される events ビューア。追跡しない。#711）
+/monitor/context_monitor.html
+
 # ローカル実行設定（秘密情報を含むことがある。ひな形は config.json.sample）
 /config/config.json
