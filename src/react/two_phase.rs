@@ -17,6 +17,7 @@ use super::synthesis::{
 use super::{
     append_trace, ReActError, ReActLoop, SubtaskExecResult, TurnResult, SUBTASK_AUDIT_MAX_ATTEMPTS,
 };
+use crate::lifecycle::SubtaskOutcome;
 
 impl<E: AgentBrain> ReActLoop<E> {
     /// 計画層 ReAct → 実行層 ReAct（直列）。
@@ -448,8 +449,7 @@ Prefer {{\"step\":\"answer\",\"content\":\"...\"}} with no tools if evidence is 
             user_input,
             plan,
             subtask,
-            &exec.answer,
-            exec.steps_used,
+            &SubtaskOutcome::completed(&exec.answer, exec.steps_used),
         );
         *total_steps += exec.steps_used;
         progress.push(subtask.id, exec.answer.clone());

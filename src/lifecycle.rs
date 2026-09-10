@@ -12,7 +12,17 @@
 //! ホストはエラーを hook 内で処理するのが望ましい。パニックした場合もエンジンが
 //! [`invoke_lifecycle`] で捕捉し、本筋の `run_turn` は継続する。
 //!
+//! タスクマネージメント向けには [`TaskTracking`]（開始／完了の業務 API）を実装し、
+//! [`lifecycle_from_tracking`] で [`TurnLifecycle`] に載せるのが推奨。
+//!
 //! 詳細: `doc/ja/architecture/04_ホスト拡張.md`。
+
+mod tracking;
+
+pub use tracking::{
+    lifecycle_from_tracking, TaskTracking, TaskTrackingLifecycle, TurnFinishedEvent,
+    WorkFinishedEvent, WorkStartedEvent,
+};
 
 use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -20,6 +30,90 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use serde_json::{json, Map, Value};
 
 use crate::plan::{PlanArtifact, Subtask};
+
+/// サブタスク／ターン完了の機械的ステータス（ドメイン非依存）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RunStatus {
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+impl RunStatus {
+    pub fn is_ok(self) -> bool {
+        matches!(self, Self::Completed)
+    }
+}
+
+/// サブタスク終了時の構造化結果（hook / [`TaskTracking`] の共通ペイロード）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubtaskOutcome {
+    pub status: RunStatus,
+    /// 成功時は回答本文。失敗・取消時は理由テキスト。
+    pub message: String,
+    pub steps_used: usize,
+}
+
+impl SubtaskOutcome {
+    pub fn completed(message: impl Into<String>, steps_used: usize) -> Self {
+        Self {
+            status: RunStatus::Completed,
+            message: message.into(),
+            steps_used,
+        }
+    }
+
+    pub fn failed(message: impl Into<String>, steps_used: usize) -> Self {
+        Self {
+            status: RunStatus::Failed,
+            message: message.into(),
+            steps_used,
+        }
+    }
+
+    pub fn cancelled(message: impl Into<String>, steps_used: usize) -> Self {
+        Self {
+            status: RunStatus::Cancelled,
+            message: message.into(),
+            steps_used,
+        }
+    }
+}
+
+/// ターン終了時の構造化結果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnOutcome {
+    pub status: RunStatus,
+    /// 成功時は最終回答。失敗・取消時は理由テキスト。
+    pub answer: String,
+    pub steps_used: usize,
+}
+
+impl TurnOutcome {
+    pub fn completed(answer: impl Into<String>, steps_used: usize) -> Self {
+        Self {
+            status: RunStatus::Completed,
+            answer: answer.into(),
+            steps_used,
+        }
+    }
+
+    pub fn failed(answer: impl Into<String>, steps_used: usize) -> Self {
+        Self {
+            status: RunStatus::Failed,
+            answer: answer.into(),
+            steps_used,
+        }
+    }
+
+    pub fn cancelled(answer: impl Into<String>, steps_used: usize) -> Self {
+        Self {
+            status: RunStatus::Cancelled,
+            answer: answer.into(),
+            steps_used,
+        }
+    }
+}
 
 /// hook 本体を実行し、パニックを本筋に伝播させない。
 ///
@@ -281,25 +375,25 @@ pub trait TurnLifecycle: Send + Sync {
     ) {
     }
 
-    /// サブタスク実行直後（そのサブタスクが完了したとき。ターン全体のエラー時は呼ばれない）。
+    /// サブタスク終了（成功・失敗・取消）。`outcome.status` を見ること。
+    /// 開始済みのままターンが中断した場合も Failed / Cancelled で呼ばれる。
     fn on_subtask_finished(
         &self,
         _user_input: &str,
         _plan: &PlanArtifact,
         _subtask: &Subtask,
-        _answer: &str,
-        _steps_used: usize,
+        _outcome: &SubtaskOutcome,
         _host: HostView<'_>,
     ) {
     }
 
-    /// ターン完了（session / diary 記録と同じタイミング）。書き込み先は `turn`。
+    /// ターン終了（成功時は session / diary と同じタイミング。失敗・取消時も呼ばれる）。
+    /// 書き込み先は `turn`。
     fn on_turn_finished(
         &self,
         _user_input: &str,
-        _answer: &str,
         _plan: Option<&PlanArtifact>,
-        _steps_used: usize,
+        _outcome: &TurnOutcome,
         _host: HostView<'_>,
     ) {
     }
@@ -363,13 +457,12 @@ impl TurnLifecycle for CompositeLifecycle {
         user_input: &str,
         plan: &PlanArtifact,
         subtask: &Subtask,
-        answer: &str,
-        steps_used: usize,
+        outcome: &SubtaskOutcome,
         mut host: HostView<'_>,
     ) {
         for (i, h) in self.hooks.iter().enumerate() {
             invoke_lifecycle(&format!("composite[{i}].on_subtask_finished"), || {
-                h.on_subtask_finished(user_input, plan, subtask, answer, steps_used, host.reborrow());
+                h.on_subtask_finished(user_input, plan, subtask, outcome, host.reborrow());
             });
         }
     }
@@ -377,14 +470,13 @@ impl TurnLifecycle for CompositeLifecycle {
     fn on_turn_finished(
         &self,
         user_input: &str,
-        answer: &str,
         plan: Option<&PlanArtifact>,
-        steps_used: usize,
+        outcome: &TurnOutcome,
         mut host: HostView<'_>,
     ) {
         for (i, h) in self.hooks.iter().enumerate() {
             invoke_lifecycle(&format!("composite[{i}].on_turn_finished"), || {
-                h.on_turn_finished(user_input, answer, plan, steps_used, host.reborrow());
+                h.on_turn_finished(user_input, plan, outcome, host.reborrow());
             });
         }
     }
@@ -439,29 +531,28 @@ mod tests {
             _user_input: &str,
             _plan: &PlanArtifact,
             subtask: &Subtask,
-            answer: &str,
-            _steps_used: usize,
+            outcome: &SubtaskOutcome,
             host: HostView<'_>,
         ) {
             let child = host.get_i64("child_ticket").unwrap_or(-1);
             self.events.lock().unwrap().push(format!(
-                "subtask_finished:{}:{answer}:child={child}",
-                subtask.id
+                "subtask_finished:{}:{}:child={child}",
+                subtask.id, outcome.message
             ));
         }
 
         fn on_turn_finished(
             &self,
             _user_input: &str,
-            answer: &str,
             _plan: Option<&PlanArtifact>,
-            _steps_used: usize,
+            outcome: &TurnOutcome,
             host: HostView<'_>,
         ) {
             let parent = host.turn_get_i64("parent_ticket").unwrap_or(-1);
             let child1 = host.subtask_get_i64(1, "child_ticket").unwrap_or(-1);
             self.events.lock().unwrap().push(format!(
-                "turn_finished:{answer}:parent={parent}:child1={child1}"
+                "turn_finished:{}:parent={parent}:child1={child1}",
+                outcome.answer
             ));
         }
     }
@@ -547,15 +638,13 @@ mod tests {
             "hi",
             &plan,
             &plan.subtasks[0],
-            "done",
-            1,
+            &SubtaskOutcome::completed("done", 1),
             HostView::new(&mut scratch, WriteScope::Subtask(1)),
         );
         composite.on_turn_finished(
             "hi",
-            "final",
             Some(&plan),
-            1,
+            &TurnOutcome::completed("final", 1),
             HostView::new(&mut scratch, WriteScope::Turn),
         );
         assert_eq!(scratch.turn_get_i64("parent_ticket"), Some(99));

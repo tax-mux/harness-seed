@@ -23,7 +23,10 @@ use crate::context_map::{
 use crate::context_metrics::TurnContextSummary;
 use crate::harness::{HarnessReference, HarnessState};
 use crate::layer::{run_layer_loop, run_plan_layer, LayerLoopOptions};
-use crate::lifecycle::{invoke_lifecycle, HostScratch, HostView, TurnLifecycle, WriteScope};
+use crate::lifecycle::{
+    invoke_lifecycle, HostScratch, HostView, RunStatus, SubtaskOutcome, TurnLifecycle,
+    TurnOutcome, WriteScope,
+};
 use crate::memory::{
     build_memory_rag, inject_memory_recalled, DiaryEntry, DiaryPhase, MemoryBridge, MemoryRag,
     MemoryRuntimeConfig, NoopBridge,
@@ -211,6 +214,10 @@ pub struct ReActLoop<E: AgentBrain> {
     host_scratch: HostScratch,
     /// 次の `run_turn` 開始時に `host_scratch` へマージする seed。
     pending_host_seed: Option<HostScratch>,
+    /// ライフサイクル用: 直近の計画（中断時の finished 通知に使う）。
+    lifecycle_plan: Option<PlanArtifact>,
+    /// `on_subtask_started` 済みで未 `finished` のサブタスク。
+    lifecycle_open_subtasks: Vec<(Subtask, usize)>,
     stop_requested: Option<Arc<AtomicBool>>,
     /// 次の `run_turn` / `run_plan_preview` で Harness に載せる参照情報。
     pending_reference_info: Vec<HarnessReference>,
@@ -276,6 +283,8 @@ impl<E: AgentBrain> ReActLoop<E> {
             lifecycle: None,
             host_scratch: HostScratch::new(),
             pending_host_seed: None,
+            lifecycle_plan: None,
+            lifecycle_open_subtasks: Vec::new(),
             stop_requested: None,
             pending_reference_info: Vec::new(),
             memory,
@@ -304,6 +313,8 @@ impl<E: AgentBrain> ReActLoop<E> {
 
     fn begin_host_scratch_for_turn(&mut self) {
         self.host_scratch.clear();
+        self.lifecycle_plan = None;
+        self.lifecycle_open_subtasks.clear();
         if let Some(seed) = self.pending_host_seed.take() {
             self.host_scratch.merge_turn_seed(seed);
         }
@@ -503,6 +514,7 @@ impl<E: AgentBrain> ReActLoop<E> {
     }
 
     fn emit_plan_finished(&mut self, user_input: &str, plan: &PlanArtifact) {
+        self.lifecycle_plan = Some(plan.clone());
         let Some(h) = self.lifecycle.clone() else {
             return;
         };
@@ -522,6 +534,8 @@ impl<E: AgentBrain> ReActLoop<E> {
         subtask: &Subtask,
         index: usize,
     ) {
+        self.lifecycle_open_subtasks
+            .push((subtask.clone(), index));
         let Some(h) = self.lifecycle.clone() else {
             return;
         };
@@ -542,9 +556,10 @@ impl<E: AgentBrain> ReActLoop<E> {
         user_input: &str,
         plan: &PlanArtifact,
         subtask: &Subtask,
-        answer: &str,
-        steps_used: usize,
+        outcome: &SubtaskOutcome,
     ) {
+        self.lifecycle_open_subtasks
+            .retain(|(s, _)| s.id != subtask.id);
         let Some(h) = self.lifecycle.clone() else {
             return;
         };
@@ -554,26 +569,53 @@ impl<E: AgentBrain> ReActLoop<E> {
                 user_input,
                 plan,
                 subtask,
-                answer,
-                steps_used,
+                outcome,
                 HostView::new(&mut self.host_scratch, WriteScope::Subtask(id)),
             );
         });
     }
 
-    fn emit_turn_finished(&mut self, user_input: &str, result: &TurnResult) {
+    fn emit_turn_finished(&mut self, user_input: &str, plan: Option<&PlanArtifact>, outcome: &TurnOutcome) {
+        self.lifecycle_open_subtasks.clear();
         let Some(h) = self.lifecycle.clone() else {
             return;
         };
         invoke_lifecycle("on_turn_finished", || {
             h.on_turn_finished(
                 user_input,
-                &result.answer,
-                result.plan.as_ref(),
-                result.steps_used,
+                plan,
+                outcome,
                 HostView::new(&mut self.host_scratch, WriteScope::Turn),
             );
         });
+    }
+
+    /// 開始済み未完了のサブタスクとターンを Failed / Cancelled で閉じる。
+    fn finalize_lifecycle_on_error(&mut self, user_input: &str, err: &ReActError) {
+        let status = match err {
+            ReActError::Cancelled => RunStatus::Cancelled,
+            _ => RunStatus::Failed,
+        };
+        let message = err.to_string();
+        let plan = self.lifecycle_plan.clone();
+        let open: Vec<(Subtask, usize)> = self.lifecycle_open_subtasks.drain(..).collect();
+        if let Some(ref plan) = plan {
+            let outcome = SubtaskOutcome {
+                status,
+                message: message.clone(),
+                steps_used: 0,
+            };
+            for (subtask, _) in open {
+                // retain 済みのため emit の retain は no-op
+                self.emit_subtask_finished(user_input, plan, &subtask, &outcome);
+            }
+        }
+        let turn = TurnOutcome {
+            status,
+            answer: message,
+            steps_used: 0,
+        };
+        self.emit_turn_finished(user_input, plan.as_ref(), &turn);
     }
 
     /// 計画フェーズの Harness パース結果をプロンプト固定ゾーンへ反映する。
@@ -622,6 +664,9 @@ impl<E: AgentBrain> ReActLoop<E> {
             self.run_turn_single(user_input, true, None, vec![])
         };
         restore_base_recalled(&mut self.blocks, &host_recalled);
+        if let Err(ref err) = result {
+            self.finalize_lifecycle_on_error(user_input, err);
+        }
         result
     }
 
@@ -708,7 +753,8 @@ impl<E: AgentBrain> ReActLoop<E> {
         }
         self.write_context_log(user_input, result);
         self.write_monitor_html(user_input, result);
-        self.emit_turn_finished(user_input, result);
+        let outcome = TurnOutcome::completed(&result.answer, result.steps_used);
+        self.emit_turn_finished(user_input, result.plan.as_ref(), &outcome);
     }
 
     fn record_diary(&mut self, user_input: &str, result: &TurnResult) {
@@ -1025,22 +1071,20 @@ mod tests {
                 _: &str,
                 _: &PlanArtifact,
                 subtask: &Subtask,
-                _: &str,
-                _: usize,
+                outcome: &crate::lifecycle::SubtaskOutcome,
                 host: HostView<'_>,
             ) {
                 let child = host.get_i64("child_ticket").unwrap_or(-1);
                 self.events.lock().unwrap().push(format!(
-                    "subtask_finished:{}:{child}",
-                    subtask.id
+                    "subtask_finished:{}:{child}:{:?}",
+                    subtask.id, outcome.status
                 ));
             }
             fn on_turn_finished(
                 &self,
                 _: &str,
-                _: &str,
                 _: Option<&PlanArtifact>,
-                _: usize,
+                outcome: &crate::lifecycle::TurnOutcome,
                 host: HostView<'_>,
             ) {
                 let parent = host.turn_get_i64("parent_ticket").unwrap_or(-1);
@@ -1048,7 +1092,7 @@ mod tests {
                 self.events
                     .lock()
                     .unwrap()
-                    .push(format!("turn_finished:{parent}:{child}"));
+                    .push(format!("turn_finished:{parent}:{child}:{:?}", outcome.status));
             }
         }
 
@@ -1068,8 +1112,8 @@ mod tests {
                 "turn_started:10",
                 "plan_finished",
                 "subtask_started:1:42",
-                "subtask_finished:1:7",
-                "turn_finished:42:7",
+                "subtask_finished:1:7:Completed",
+                "turn_finished:42:7:Completed",
             ]
         );
         assert_eq!(react.host_scratch().turn_get_i64("ticket_id"), Some(10));
@@ -1081,6 +1125,55 @@ mod tests {
         let json = react.host_scratch().to_value();
         assert_eq!(json["turn"]["parent_ticket"], 42);
         assert_eq!(json["subtasks"]["1"]["child_ticket"], 7);
+    }
+
+    #[test]
+    fn lifecycle_emits_cancelled_turn_on_abort() {
+        use crate::lifecycle::{HostView, TurnLifecycle};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Mutex;
+
+        struct Rec {
+            events: Mutex<Vec<String>>,
+            stop: Arc<AtomicBool>,
+        }
+        impl TurnLifecycle for Rec {
+            fn on_plan_finished(&self, _: &str, _: &PlanArtifact, _: HostView<'_>) {
+                self.events.lock().unwrap().push("plan_finished".into());
+                self.stop.store(true, Ordering::Relaxed);
+            }
+            fn on_turn_finished(
+                &self,
+                _: &str,
+                _: Option<&PlanArtifact>,
+                outcome: &crate::lifecycle::TurnOutcome,
+                _: HostView<'_>,
+            ) {
+                self.events
+                    .lock()
+                    .unwrap()
+                    .push(format!("turn_finished:{:?}", outcome.status));
+            }
+        }
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let rec = Arc::new(Rec {
+            events: Mutex::new(Vec::new()),
+            stop: stop.clone(),
+        });
+        let mut config = ReActConfig::default();
+        config.two_phase = true;
+        config.show_plan = false;
+        config.show_task_execution = false;
+        let mut react = ReActLoop::new(SimpleRuleBrain::new(), PlanBrainMode::rule(), config);
+        react.set_lifecycle(Some(rec.clone()));
+        react.set_stop_requested(Some(stop));
+        let err = react.run_turn("hello world").unwrap_err();
+        assert_eq!(err, ReActError::Cancelled);
+        assert_eq!(
+            rec.events.lock().unwrap().as_slice(),
+            ["plan_finished", "turn_finished:Cancelled"]
+        );
     }
 
     #[test]
