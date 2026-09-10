@@ -50,6 +50,19 @@ cargo run -- --config config/samples/config.lmstudio.json
 
 環境変数 `HARNESS_SEED_CONFIG`（旧 `MYHARNESS_CONFIG`）でもパスを指定できます。
 
+## `llm` セクション
+
+| キー | 意味 | 既定 |
+|------|------|------|
+| `provider` | `openai` / `ollama` / `lmstudio` / `gemini` / `anthropic` | （解決順あり） |
+| `base_url` | API ベース URL | プロバイダ別 |
+| `model` | モデル名 | プロバイダ別 |
+| `timeout_secs` | 呼び出しタイムアウト | `120` |
+| `max_tokens` | 生成上限（Chat Completions の `max_tokens`、Anthropic 同名、Gemini `maxOutputTokens`）。計画 JSON の途中切れ防止 | `16384`（256–65536 にクランプ） |
+| `json_mode` | OpenAI JSON モード | Ollama は `false` |
+
+環境変数 `HARNESS_SEED_LLM_MAX_TOKENS`（旧 `MYHARNESS_LLM_MAX_TOKENS`）が設定より優先する。
+
 ## ライブラリ組み込み時のパス指定
 
 他システムにクレートとして載せる場合、**ホストが設定ファイルの場所を決める**。CLI の `--config` はバイナリ専用なので、ライブラリからは次のいずれかを使う。

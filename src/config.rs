@@ -314,6 +314,10 @@ impl AppConfig {
         )
         .or(self.llm.timeout_secs)
         .unwrap_or(120);
+        let max_tokens = env_u64_seed("HARNESS_SEED_LLM_MAX_TOKENS", "MYHARNESS_LLM_MAX_TOKENS")
+            .or(self.llm.max_tokens)
+            .unwrap_or(16_384)
+            .clamp(256, 65_536) as u32;
 
         match provider {
             LlmProvider::Ollama => {
@@ -338,6 +342,7 @@ impl AppConfig {
                     base_url,
                     model,
                     timeout: std::time::Duration::from_secs(timeout_secs),
+                    max_tokens,
                     json_mode: false,
                 })
             }
@@ -368,6 +373,7 @@ impl AppConfig {
                     base_url,
                     model,
                     timeout: std::time::Duration::from_secs(timeout_secs),
+                    max_tokens,
                     json_mode,
                 })
             }
@@ -400,6 +406,7 @@ impl AppConfig {
                     base_url,
                     model,
                     timeout: std::time::Duration::from_secs(timeout_secs),
+                    max_tokens,
                     json_mode,
                 })
             }
@@ -433,6 +440,7 @@ impl AppConfig {
                     base_url,
                     model,
                     timeout: std::time::Duration::from_secs(timeout_secs),
+                    max_tokens,
                     json_mode,
                 })
             }
@@ -466,6 +474,7 @@ impl AppConfig {
                     base_url,
                     model,
                     timeout: std::time::Duration::from_secs(timeout_secs),
+                    max_tokens,
                     json_mode,
                 })
             }

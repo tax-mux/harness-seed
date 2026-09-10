@@ -5,6 +5,7 @@
     "base_url": "http://127.0.0.1:11436",
       "model": "gemma-4-26b:latest",
     "timeout_secs": 120,
+    "max_tokens": 16384,
     "json_mode": false
   },
   "react": {

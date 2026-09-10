@@ -12,6 +12,7 @@ fn ollama_config_uses_local_defaults() {
         base_url: normalize_ollama_base_url("http://127.0.0.1:11434"),
         model: "gemma4".into(),
         timeout: Duration::from_secs(120),
+        max_tokens: 16384,
         json_mode: false,
     };
     assert_eq!(config.provider, LlmProvider::Ollama);
@@ -27,6 +28,7 @@ fn ollama_connector_reports_provider() {
         base_url: "http://127.0.0.1:11434/v1".into(),
         model: "gemma4".into(),
         timeout: Duration::from_secs(120),
+        max_tokens: 16384,
         json_mode: false,
     };
     let connector = OpenAiConnector::new(config).unwrap();

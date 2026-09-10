@@ -5,6 +5,7 @@
     "base_url": "http://127.0.0.1:1234",
     "model": "qwen/qwen3.5-9b",
     "timeout_secs": 120,
+    "max_tokens": 16384,
     "json_mode": false
   },
   "react": {

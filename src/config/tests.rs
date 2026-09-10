@@ -139,6 +139,46 @@ fn builds_ollama_llm_from_sample() {
     assert_eq!(llm.base_url, "http://127.0.0.1:11434/v1");
 }
 
+fn without_llm_max_tokens_env<F: FnOnce()>(f: F) {
+    let prev = std::env::var_os("HARNESS_SEED_LLM_MAX_TOKENS");
+    let prev_legacy = std::env::var_os("MYHARNESS_LLM_MAX_TOKENS");
+    unsafe {
+        std::env::remove_var("HARNESS_SEED_LLM_MAX_TOKENS");
+        std::env::remove_var("MYHARNESS_LLM_MAX_TOKENS");
+    }
+    f();
+    match prev {
+        Some(v) => unsafe { std::env::set_var("HARNESS_SEED_LLM_MAX_TOKENS", v) },
+        None => unsafe { std::env::remove_var("HARNESS_SEED_LLM_MAX_TOKENS") },
+    }
+    match prev_legacy {
+        Some(v) => unsafe { std::env::set_var("MYHARNESS_LLM_MAX_TOKENS", v) },
+        None => unsafe { std::env::remove_var("MYHARNESS_LLM_MAX_TOKENS") },
+    }
+}
+
+#[test]
+fn llm_max_tokens_from_json() {
+    let cfg: AppConfig = serde_json::from_str(r#"{"llm":{"max_tokens":4096}}"#).unwrap();
+    assert_eq!(cfg.llm.max_tokens, Some(4096));
+}
+
+#[test]
+fn llm_max_tokens_defaults_and_clamps() {
+    without_llm_max_tokens_env(|| {
+        let cfg: AppConfig = serde_json::from_str(r#"{"llm":{"provider":"ollama"}}"#).unwrap();
+        assert_eq!(cfg.build_llm_config().unwrap().max_tokens, 16384);
+
+        let cfg: AppConfig =
+            serde_json::from_str(r#"{"llm":{"provider":"ollama","max_tokens":1}}"#).unwrap();
+        assert_eq!(cfg.build_llm_config().unwrap().max_tokens, 256);
+
+        let cfg: AppConfig =
+            serde_json::from_str(r#"{"llm":{"provider":"ollama","max_tokens":100000}}"#).unwrap();
+        assert_eq!(cfg.build_llm_config().unwrap().max_tokens, 65536);
+    });
+}
+
 #[test]
 fn nonempty_opt_drops_blank_strings() {
     assert_eq!(nonempty_opt(Some(String::new())), None);

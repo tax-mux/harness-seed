@@ -5,6 +5,7 @@
     "base_url": "https://generativelanguage.googleapis.com/v1beta",
     "model": "gemini-2.5-flash",
     "timeout_secs": 120,
+    "max_tokens": 16384,
     "json_mode": false
   },
   "react": {

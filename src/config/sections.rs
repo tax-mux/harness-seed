@@ -81,6 +81,8 @@ pub struct LlmSection {
     pub base_url: Option<String>,
     pub model: Option<String>,
     pub timeout_secs: Option<u64>,
+    /// 生成上限（Chat Completions の `max_tokens` / 相当）。未指定時 16384。
+    pub max_tokens: Option<u64>,
     pub json_mode: Option<bool>,
 }
 

@@ -226,6 +226,8 @@ pub struct LlmConfig {
     pub base_url: String,
     pub model: String,
     pub timeout: Duration,
+    /// 生成上限（OpenAI 互換 `max_tokens`、Anthropic 同名、Gemini `maxOutputTokens`）。
+    pub max_tokens: u32,
     /// `response_format: json_object` を付与するか（Ollama では通常 false）。
     pub json_mode: bool,
 }

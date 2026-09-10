@@ -446,6 +446,7 @@ agent_dir レイアウト:
   llm.base_url            API ベース URL
   llm.model               モデル名
   llm.timeout_secs        タイムアウト秒
+  llm.max_tokens          生成上限（Chat Completions / Anthropic / Gemini。既定 16384）
   llm.json_mode           OpenAI JSON モード（Ollama / LM Studio では通常 false）
   react.max_steps         1ターンの最大ステップ
   react.session_max_turns REPL 短期記憶（Previous turns）の保持数
@@ -463,6 +464,7 @@ agent_dir レイアウト:
   HARNESS_SEED_CONFIG / MYHARNESS_CONFIG   設定ファイルパス
   HARNESS_SEED_LLM_PROVIDER / MYHARNESS_LLM_PROVIDER  プロバイダ上書き
   OPENAI_API_KEY / GEMINI_API_KEY / ANTHROPIC_API_KEY / HARNESS_SEED_API_KEY / OLLAMA_* / LM_STUDIO_* など
+  HARNESS_SEED_LLM_MAX_TOKENS / MYHARNESS_LLM_MAX_TOKENS  生成上限（設定より優先）
 "
     );
 }

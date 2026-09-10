@@ -10,8 +10,6 @@ use crate::context_metrics::{format_messages_body, ContextUsage};
 const DEFAULT_ANTHROPIC_BASE: &str = "https://api.anthropic.com";
 /// Messages API の `anthropic-version`（[Anthropic API](https://docs.anthropic.com)）。
 const ANTHROPIC_VERSION: &str = "2023-06-01";
-const DEFAULT_MAX_TOKENS: u32 = 8192;
-
 /// Anthropic API のルート URL（`/v1/messages` はコネクタ側で付与）。
 pub fn normalize_anthropic_base_url(host: &str) -> String {
     let trimmed = host.trim().trim_end_matches('/');
@@ -149,7 +147,7 @@ impl LlmConnector for AnthropicConnector {
 
         let mut body = json!({
             "model": self.config.model,
-            "max_tokens": DEFAULT_MAX_TOKENS,
+            "max_tokens": self.config.max_tokens,
             "temperature": 0.2,
             "messages": api_messages
         });

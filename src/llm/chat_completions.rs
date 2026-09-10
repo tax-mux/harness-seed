@@ -39,6 +39,7 @@ struct ChatRequest<'a> {
     model: &'a str,
     messages: &'a [ChatMessage],
     temperature: f32,
+    max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     response_format: Option<ResponseFormat>,
 }
@@ -98,6 +99,7 @@ impl LlmConnector for ChatCompletionsConnector {
             model: &self.config.model,
             messages,
             temperature: 0.2,
+            max_tokens: self.config.max_tokens,
             response_format,
         };
 
@@ -135,3 +137,24 @@ impl LlmConnector for ChatCompletionsConnector {
         Ok(CompletionResult { content, usage })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chat_request_serializes_max_tokens() {
+        let messages = [ChatMessage::user("hi")];
+        let body = ChatRequest {
+            model: "ornith-1.5:35b",
+            messages: &messages,
+            temperature: 0.2,
+            max_tokens: 16384,
+            response_format: None,
+        };
+        let json = serde_json::to_value(&body).unwrap();
+        assert_eq!(json["max_tokens"], 16384);
+        assert_eq!(json["model"], "ornith-1.5:35b");
+    }
+}
+

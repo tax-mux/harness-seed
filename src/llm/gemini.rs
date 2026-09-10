@@ -164,7 +164,8 @@ impl LlmConnector for GeminiConnector {
         let mut body = json!({
             "contents": contents,
             "generationConfig": {
-                "temperature": 0.2
+                "temperature": 0.2,
+                "maxOutputTokens": self.config.max_tokens
             }
         });
 
